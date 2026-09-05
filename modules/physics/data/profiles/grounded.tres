@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="PhysProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/physics/scripts/phys_profile.gd" id="1_6g88l"]
+
+[resource]
+script = ExtResource("1_6g88l")

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="PhysProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/physics/scripts/phys_profile.gd" id="1_8m6q7"]
+
+[resource]
+script = ExtResource("1_8m6q7")
+restitution_ship = 0.75
+restitution_rock = 0.6
+restitution_planet = 0.55
+knock_transfer = 1.4
+impulse_to_spin = 0.85
+friction = 0.15
+position_correction = 0.3
+spin_damp_induced = 2.5
