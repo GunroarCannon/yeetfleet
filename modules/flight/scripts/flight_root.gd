@@ -163,7 +163,7 @@ func _enter_tree() -> void:
 	_load_design()
 
 	# A scene restart reloads this node; land back in the location we were in.
-	location = _persist_location
+	location = Session.flight_location
 	_build_location()
 	_build_gravity()
 	_build_drift_field()
@@ -231,8 +231,8 @@ func _ready() -> void:
 	_hud = %Hud as FlightHud
 	# Re-apply persisted trail toggles after a scene restart: the preference flags
 	# survive in static state, but the trail nodes themselves were rebuilt.
-	set_trail_player(_trail_player)
-	set_trail_ships(_trail_ships)
+	set_trail_player(Session.trail_player)
+	set_trail_ships(Session.trail_ships)
 	_coach = %Coach as CoachOverlay
 	_coach.steps = FLIGHT_STEPS
 	_coach.walkthrough_id = "flight_walkthrough"
@@ -251,7 +251,7 @@ func _ready() -> void:
 	# High-res renders the 3D scene at a higher internal resolution and
 	# downscales to the viewport — same FOV, just sharper. The window size is
 	# left alone (resizing it zoomed the stretch-scaled canvas).
-	get_viewport().scaling_3d_scale = 1.5 if _high_res_on else 1.0
+	get_viewport().scaling_3d_scale = 1.5 if Session.high_res else 1.0
 
 
 # --- Construction -----------------------------------------------------------
@@ -302,7 +302,7 @@ func _build_gravity() -> void:
 	# Gravity weakens with distance — ships barely notice beyond 6000m.
 	# Mass scales with radius² so a bigger planet pulls proportionally (surface
 	# gravity stays comparable) and the moon's orbit stays stable when scaled.
-	var mass_scale := _planet_scale * _planet_scale
+	var mass_scale := Session.planet_scale * Session.planet_scale
 	gravity.register_body(
 		space.planet_centre, _gravity_mass("tarn_iv", 10000000.0) * mass_scale, space.planet_radius,
 		"Tarn IV", true
@@ -900,7 +900,7 @@ func respawn() -> void:
 
 
 func return_to_hangar() -> void:
-	get_tree().change_scene_to_file("res://modules/ship_builder/ship_builder.tscn")
+	get_tree().change_scene_to_file(ModuleRegistry.scene_path("ship_builder"))
 
 
 ## Restart the flight test scene completely — reload everything from scratch.
@@ -909,21 +909,10 @@ func restart_scene() -> void:
 	get_tree().reload_current_scene()
 
 
-## Persists across a scene reload so the flag survives [method restart_scene].
-static var _high_res_on := false
-
-func high_res_on() -> bool:
-	return _high_res_on
-
-## Render settings, persisted across a scene reload the same way [member _high_res_on]
-## is. Driven by the HUD's Settings panel sliders.
+## Render settings, persisted across a scene reload. Driven by the HUD's Settings
+## panel sliders.
 static var _far_clip := 30000.0
 static var _far_view_max := 400.0
-## Planet scale settings, applied when the scene builds. Size scales radii (and
-## gravity mass to match); spacing scales the gaps between worlds and the moon's
-## orbit. A restart is required to take effect (they're read at scene build).
-static var _planet_scale := 1.0
-static var _planet_spacing := 1.0
 
 func far_clip() -> float:
 	return _far_clip
@@ -933,27 +922,29 @@ func far_view_max() -> float:
 	return _far_view_max
 
 
+## High-res rendering now lives in [Session] (see [member Session.high_res]); this
+## accessor and the planet scale/spacing accessors below survive for the HUD,
+## which still talks to this root rather than to Session directly.
+func high_res_on() -> bool:
+	return Session.high_res
+
+
 func planet_scale() -> float:
-	return _planet_scale
+	return Session.planet_scale
 
 
 func planet_spacing() -> float:
-	return _planet_spacing
+	return Session.planet_spacing
 
 
 ## Apply a new planet size scale. Callers are expected to restart the scene after.
 func set_planet_scale(value: float) -> void:
-	_planet_scale = clampf(value, 0.5, 10.0)
+	Session.planet_scale = clampf(value, 0.5, 10.0)
 
 
 ## Apply a new planet spacing scale. Callers are expected to restart after.
 func set_planet_spacing(value: float) -> void:
-	_planet_spacing = clampf(value, 0.5, 5.0)
-
-
-## The location to rebuild on a scene restart, so restarting (F5) lands back in
-## the same place instead of always Space.
-static var _persist_location := Location.SPACE
+	Session.planet_spacing = clampf(value, 0.5, 5.0)
 
 
 # --- Take control + weapons lock -------------------------------------------------
@@ -1138,8 +1129,8 @@ func set_far_view_max(value: float) -> void:
 ## procedural geometry — planets, nebula, rocks, sky — at higher segment counts
 ## so everything is genuinely less low-poly. Restarts the scene to rebuild.
 func toggle_high_res() -> void:
-	_high_res_on = not _high_res_on
-	_hud.show_hint("High res: %s — rebuilding scene…" % ("ON" if _high_res_on else "OFF"))
+	Session.high_res = not Session.high_res
+	_hud.show_hint("High res: %s — rebuilding scene…" % ("ON" if Session.high_res else "OFF"))
 	restart_scene()
 
 
@@ -1287,10 +1278,9 @@ func drift_field_on() -> bool:
 
 # --- Trails ------------------------------------------------------------------
 
-## Persist across a scene reload like [member _high_res_on], so the player's
-## trail choices survive a restart.
-static var _trail_player := false
-static var _trail_ships := false
+## Trail *choices* live in [Session] (see [member Session.trail_player] /
+## [member Session.trail_ships]) so they survive a scene restart; the per-node
+## state below — the trail nodes themselves — still belongs to this scene.
 ## The player's own trail node, lazily created.
 var _player_trail: Trail3D = null
 ## One trail per live AI ship: AiShip -> Trail3D. Kept in sync with the spawner's
@@ -1299,11 +1289,11 @@ var _ship_trails: Dictionary = {}
 
 
 func trail_player_on() -> bool:
-	return _trail_player
+	return Session.trail_player
 
 
 func set_trail_player(on: bool) -> void:
-	_trail_player = on
+	Session.trail_player = on
 	if on:
 		if _player_trail == null:
 			_player_trail = Trail3D.new()
@@ -1317,11 +1307,11 @@ func set_trail_player(on: bool) -> void:
 
 
 func trail_ships_on() -> bool:
-	return _trail_ships
+	return Session.trail_ships
 
 
 func set_trail_ships(on: bool) -> void:
-	_trail_ships = on
+	Session.trail_ships = on
 	if not on:
 		for trail in _ship_trails.values():
 			if is_instance_valid(trail):
@@ -1333,7 +1323,7 @@ func set_trail_ships(on: bool) -> void:
 ## (or enable the existing), disable and free trails for ships that despawned.
 func _update_ship_trails() -> void:
 	var keep: Dictionary = {}
-	if _ai_spawner != null and _trail_ships:
+	if _ai_spawner != null and Session.trail_ships:
 		for ship in _ai_spawner._ships:
 			if not is_instance_valid(ship) or not ship._alive:
 				continue
@@ -1358,7 +1348,7 @@ func _update_ship_trails() -> void:
 
 
 func _update_player_trail() -> void:
-	if _trail_player and _player_trail != null:
+	if Session.trail_player and _player_trail != null:
 		# The player's own trail follows the player's ship only while it is the
 		# ship being flown; while piloting an AI ship the player's hull is parked.
 		if controlled_ai == null and model != null:
@@ -1562,7 +1552,7 @@ func toggle_location() -> void:
 	match location:
 		Location.SPACE: location = Location.TEST_VOLUME
 		Location.TEST_VOLUME: location = Location.SPACE
-	_persist_location = location
+	Session.flight_location = location
 	# Release any ship the player was piloting before the spawner is torn down.
 	if controlled_ai != null:
 		leave_control()
@@ -1596,7 +1586,7 @@ func toggle_location() -> void:
 
 ## Jump to the standalone AI test arena module scene.
 func go_arena() -> void:
-	get_tree().change_scene_to_file("res://modules/arena/arena.tscn")
+	get_tree().change_scene_to_file(ModuleRegistry.scene_path("arena"))
 
 
 # --- Input ------------------------------------------------------------------

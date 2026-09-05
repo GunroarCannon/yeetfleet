@@ -56,7 +56,7 @@ func _measure(high_res: bool) -> Dictionary:
 	# One extra beat so the previous root is gone before the next builds.
 	# FRAMES_PER_STEP covers it; the settle frames are spent across the step.
 	var packed := load(SCENE_PATH) as PackedScene
-	FlightRoot._high_res_on = high_res
+	Session.high_res = high_res
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)
 	_root.get_node("Ui/Coach").visible = false

@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Project Nebula"
 config/description="Modular, web/mobile-first Elite-like. Module 1: Ship Builder."
-run/main_scene="res://modules/ship_builder/ship_builder.tscn"
+run/main_scene="res://modules/core/core.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"
 

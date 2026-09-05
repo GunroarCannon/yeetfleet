@@ -45,7 +45,7 @@ const PLANET3_RADIUS := 220.0
 const SUN_DIR := Vector3(0.42, 0.28, 0.86)
 
 ## Scaled world layout. The constants above are the design values; these are
-## multiplied by FlightRoot's planet-size and spacing settings when the scene
+## multiplied by [Session]'s planet-size and spacing settings when the scene
 ## builds, and everything here — body placement, moon orbit, gravity, the spawn —
 ## reads these instead of the constants. Computed in _enter_tree so FlightRoot
 ## can register gravity with the scaled values before this scene is readied.
@@ -59,8 +59,8 @@ var planet3_radius := PLANET3_RADIUS
 
 
 func _enter_tree() -> void:
-	var size_scale := FlightRoot._planet_scale
-	var spacing := FlightRoot._planet_spacing
+	var size_scale := Session.planet_scale
+	var spacing := Session.planet_spacing
 	planet_radius = PLANET_RADIUS * size_scale
 	planet_centre = PLANET_CENTRE * spacing
 	# The moon's orbit gap scales with the system spacing (bigger gaps, further
@@ -93,11 +93,11 @@ var _moon_velocity := Vector3.ZERO
 var _gravity_ref: GravitySystem = null
 
 
-## 1 = normal, 2 = high detail. Reads FlightRoot's toggle so that turning high-res
+## 1 = normal, 2 = high detail. Reads [Session]'s toggle so that turning high-res
 ## on rebuilds the whole scene (it restarts) with denser, less low-poly geometry
 ## instead of just resizing the window.
 func _detail() -> int:
-	return 2 if FlightRoot._high_res_on else 1
+	return 2 if Session.high_res else 1
 
 
 func _ready() -> void:
@@ -152,7 +152,7 @@ func _setup_moon_orbit() -> void:
 	# (mass ∝ radius², keeping surface gravity roughly constant) so the moon's
 	# orbit stays stable when planets are scaled up.
 	var G := GravitySystem.GAME_G
-	var size_scale := FlightRoot._planet_scale
+	var size_scale := Session.planet_scale
 	var planet_mass := 10000000.0 * size_scale * size_scale
 	var v_orbit := sqrt(G * planet_mass / moon_orbit_radius)
 	var radial := (pos - planet_centre).normalized()

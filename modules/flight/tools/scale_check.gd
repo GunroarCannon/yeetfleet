@@ -14,8 +14,8 @@ var _failures: Array[String] = []
 
 func _initialize() -> void:
 	# Set a dramatic scale BEFORE the scene builds.
-	FlightRoot._planet_scale = 3.0
-	FlightRoot._planet_spacing = 2.0
+	Session.planet_scale = 3.0
+	Session.planet_spacing = 2.0
 	var packed := load(SCENE_PATH) as PackedScene
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)

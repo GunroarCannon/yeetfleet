@@ -9,9 +9,6 @@
 class_name ArenaRoot
 extends Node3D
 
-const FLIGHT_SCENE := "res://modules/flight/flight_test.tscn"
-const HANGAR_SCENE := "res://modules/ship_builder/ship_builder.tscn"
-
 ## How fast the keyboard throttle keys move the lever, per second.
 const THROTTLE_KEY_RATE := 0.8
 
@@ -255,11 +252,11 @@ func restart_big() -> void:
 
 
 func back_to_flight() -> void:
-	get_tree().change_scene_to_file(FLIGHT_SCENE)
+	get_tree().change_scene_to_file(ModuleRegistry.scene_path("flight"))
 
 
 func back_to_hangar() -> void:
-	get_tree().change_scene_to_file(HANGAR_SCENE)
+	get_tree().change_scene_to_file(ModuleRegistry.scene_path("ship_builder"))
 
 
 # --- Input ------------------------------------------------------------------

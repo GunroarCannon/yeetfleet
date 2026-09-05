@@ -26,7 +26,6 @@ signal notice(text: String, kind: String)
 signal preview_changed(preview: ShipStats, label: String)
 
 const AUTOSAVE_PATH := "user://ship_builder_autosave.json"
-const FLIGHT_SCENE := "res://modules/flight/flight_test.tscn"
 const DESIGN_DIR := "user://designs"
 
 ## Below this width the side panels become overlay drawers instead of columns, so
@@ -902,7 +901,7 @@ func set_camera_view(view_name: String) -> void:
 ## launched cold as well, and one loading path is one loading path to get wrong.
 func launch_test_flight() -> void:
 	_save_autosave()
-	var err := get_tree().change_scene_to_file(FLIGHT_SCENE)
+	var err := get_tree().change_scene_to_file(ModuleRegistry.scene_path("flight"))
 	if err != OK:
 		notice.emit("Could not open the flight test scene", "error")
 
