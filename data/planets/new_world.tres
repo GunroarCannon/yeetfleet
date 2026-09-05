@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="PlanetData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/common/planets/planet_data.gd" id="1_dljm5"]
+
+[resource]
+script = ExtResource("1_dljm5")
+planet_name = "New World"
+seed_value = 20250824
+primary_color = Color(0.52, 0.44, 0.3, 1)
+secondary_color = Color(1, 0, 0.84375, 1)
+water_color = Color(0.18167894, 0.36078432, 0.07058824, 1)
+ring_enabled = true
+ring_inner_radius = 0.86
+ring_outer_radius = 3.1
+ring_dust_density = 0.8
+atmosphere_density = 0.04
+detail_strength = 0.18
+rotation_speed = 0.01
+terrain_height = 0.055
+continent_scale = 1.65
+mountain_scale = 10.5
+ridge_strength = 0.95
+sea_level = 0.47
+sphere_resolution = 100
+planet_radius = 34.5

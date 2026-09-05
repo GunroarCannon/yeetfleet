@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="FacePalette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/face_palette.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "synth_alloy"
+is_emissive_palette = true
+skin_base = Color(0.549, 0.580, 0.612, 1)
+skin_shade = Color(0.384, 0.416, 0.447, 1)
+skin_light = Color(0.706, 0.737, 0.769, 1)
+skin_deep = Color(0.212, 0.235, 0.259, 1)
+eye_sclera = Color(0.102, 0.118, 0.133, 1)
+eye_iris = Color(1, 0.604, 0.180, 1)
+eye_pupil = Color(1, 0.816, 0.541, 1)
+eye_glow = Color(1, 0.604, 0.180, 1)
+mouth_inner = Color(0.102, 0.118, 0.133, 1)
+tooth = Color(0.431, 0.463, 0.494, 1)
+marking_a = Color(1, 0.604, 0.180, 1)
+marking_b = Color(0.243, 0.275, 0.306, 1)
+crest = Color(0.353, 0.384, 0.416, 1)
+garment = Color(0.165, 0.188, 0.220, 1)
+garment_trim = Color(1, 0.604, 0.180, 1)
+background = Color(0.086, 0.098, 0.114, 1)
+outline = Color(1, 0.604, 0.180, 1)

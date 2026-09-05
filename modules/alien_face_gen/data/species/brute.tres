@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "BRUTE"
+display_name = "Brute"
+ranges = {"cranium_width": Vector2(0.8, 1.0), "jaw_width": Vector2(0.85, 1.0), "jaw_length": Vector2(0.6, 0.8), "brow_ridge": Vector2(0.8, 1.0), "eye_size": Vector2(0.2, 0.35)}
+presence = {}
+enum_weights = {"nose_type": {7: 0.5, 0: 0.5}, "mouth_type": {8: 0.5, 4: 0.5}, "crest_type": {4: 0.5, 0: 0.5}, "skin_texture": {4: 1.0}, "marking_type": {5: 1.0}}
+allowed_palettes = ["plated_brute", "desert_scale"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "BRUTE"

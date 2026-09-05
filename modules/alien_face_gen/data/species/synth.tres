@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "SYNTH"
+display_name = "Synth"
+ranges = {"jaw_width": Vector2(0.5, 0.7), "plate_seams": Vector2(0.8, 1.0), "skull_asymmetry": Vector2(0.49, 0.51)}
+presence = {}
+enum_weights = {"eye_shape": {5: 1.0}, "pupil_shape": {7: 1.0}, "nose_type": {7: 1.0}, "mouth_type": {5: 1.0}, "crest_type": {0: 1.0}, "skin_texture": {4: 1.0}, "marking_type": {4: 1.0}}
+allowed_palettes = ["synth_alloy", "void_grey"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "SYNTH"

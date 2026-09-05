@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="FacePalette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/face_palette.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "desert_scale"
+is_emissive_palette = false
+skin_base = Color(0.659, 0.541, 0.306, 1)
+skin_shade = Color(0.494, 0.400, 0.227, 1)
+skin_light = Color(0.784, 0.675, 0.447, 1)
+skin_deep = Color(0.306, 0.243, 0.133, 1)
+eye_sclera = Color(0.910, 0.851, 0.659, 1)
+eye_iris = Color(0.769, 0.408, 0.165, 1)
+eye_pupil = Color(0.086, 0.071, 0.047, 1)
+eye_glow = Color(0, 0, 0, 1)
+mouth_inner = Color(0.431, 0.180, 0.165, 1)
+tooth = Color(0.910, 0.863, 0.753, 1)
+marking_a = Color(0.431, 0.353, 0.180, 1)
+marking_b = Color(0.243, 0.322, 0.220, 1)
+crest = Color(0.369, 0.290, 0.149, 1)
+garment = Color(0.243, 0.290, 0.227, 1)
+garment_trim = Color(0.541, 0.455, 0.251, 1)
+background = Color(0.431, 0.361, 0.227, 1)
+outline = Color(0.173, 0.141, 0.086, 1)

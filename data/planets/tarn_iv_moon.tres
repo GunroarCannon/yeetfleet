@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlanetData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/common/planets/planet_data.gd" id="1_74qib"]
+
+[resource]
+script = ExtResource("1_74qib")
+planet_name = "Tarn IV Moon"
+seed_value = 4471
+primary_color = Color(0.58, 0.56, 0.60, 1)
+secondary_color = Color(0.40, 0.38, 0.42, 1)
+water_color = Color(0.2, 0.2, 0.22, 1)
+ice_amount = 0.15
+atmosphere_density = 0.0
+detail_strength = 0.04
+rotation_speed = 0.003
+terrain_height = 0.10
+continent_scale = 1.2
+mountain_scale = 5.0
+ridge_strength = 0.7
+sea_level = 0.0
+sphere_resolution = 16
+planet_radius = 2.6

@@ -1,0 +1,727 @@
+{
+  "_comment": "Plates are built flat on the XY plane and grow inward along +Z, so their -Z face is the exposed one. Every armour socket in the catalogue is rotated so that -Z points away from the hull, which means a plate never has to know where it is being fitted. Heavy plates expose their own armour sockets, so layering is just recursion again.",
+  "parts": [
+    {
+      "id": "plate_light_s",
+      "name": "Light Plating (S)",
+      "desc": "Thin composite over a honeycomb core. Barely counts as armour but it costs almost nothing in mass, which on a fighter is the whole argument.",
+      "category": "armor",
+      "size": "fighter",
+      "cost": 2400,
+      "tags": [
+        "civilian",
+        "light",
+        "starter"
+      ],
+      "stats": {
+        "mass": 0.6,
+        "hull_hp": 55.0
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 1.1,
+        "h": 0.8,
+        "t": 0.1,
+        "bevel": 0.16,
+        "rivets": 1
+      },
+      "func": {
+        "armor": 55.0
+      },
+      "sockets": []
+    },
+    {
+      "id": "plate_heavy_s",
+      "name": "Heavy Plating (S)",
+      "desc": "Rolled ceramic slab with a spall liner. Four times the protection of light plate at five times the mass, and your turn rate will tell you about it.",
+      "category": "armor",
+      "size": "fighter",
+      "cost": 7600,
+      "tags": [
+        "military",
+        "heavy"
+      ],
+      "stats": {
+        "mass": 3.0,
+        "hull_hp": 230.0,
+        "agility_pool": -0.7
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 1.25,
+        "h": 0.9,
+        "t": 0.22,
+        "bevel": 0.14,
+        "rivets": 1
+      },
+      "func": {
+        "armor": 230.0
+      },
+      "sockets": [
+        {
+          "id": "layer",
+          "name": "Applique Layer",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -0.23
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.5,
+              0.95
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "plate_reactive_s",
+      "name": "Reactive Plating (S)",
+      "desc": "Explosive tiles that fire outward to break up an incoming round. Superb once, adequate twice, decoration after that.",
+      "category": "armor",
+      "size": "fighter",
+      "cost": 16500,
+      "tags": [
+        "military",
+        "reactive"
+      ],
+      "stats": {
+        "mass": 1.8,
+        "hull_hp": 150.0,
+        "shield_hp": 40.0,
+        "agility_pool": -0.3
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 1.15,
+        "h": 0.85,
+        "t": 0.26,
+        "bevel": 0.1,
+        "rivets": 1
+      },
+      "func": {
+        "armor": 150.0,
+        "reactive": 0.35,
+        "charges": 2
+      },
+      "sockets": []
+    },
+    {
+      "id": "radiator_fin_s",
+      "name": "Radiator Panel (S)",
+      "desc": "Not armour at all, but it bolts to the same mounts. Sheds heat instead of stopping shots, which is what a hot-running fighter actually needs.",
+      "category": "armor",
+      "size": "fighter",
+      "cost": 5400,
+      "tags": [
+        "civilian",
+        "cooling"
+      ],
+      "stats": {
+        "mass": 0.8,
+        "hull_hp": 12.0,
+        "heat_dissipation": 22.0
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 1.4,
+        "h": 0.55,
+        "t": 0.06,
+        "bevel": 0.08,
+        "rivets": 0
+      },
+      "func": {
+        "radiator": true
+      },
+      "sockets": []
+    },
+    {
+      "id": "plate_heavy_m",
+      "name": "Heavy Plating (M)",
+      "desc": "Warship belt armour in a single casting. This is what the word corvette is doing in the specification sheet.",
+      "category": "armor",
+      "size": "corvette",
+      "cost": 34000,
+      "tags": [
+        "military",
+        "heavy"
+      ],
+      "stats": {
+        "mass": 12.0,
+        "hull_hp": 900.0,
+        "agility_pool": -1.6
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 2.6,
+        "h": 1.7,
+        "t": 0.4,
+        "bevel": 0.22,
+        "rivets": 1
+      },
+      "func": {
+        "armor": 900.0
+      },
+      "sockets": [
+        {
+          "id": "layer",
+          "name": "Applique Layer",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -0.41
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.5,
+              0.95
+            ]
+          }
+        },
+        {
+          "id": "greeble",
+          "name": "Surface Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.6,
+            -0.42
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -30,
+              30
+            ],
+            "pitch": [
+              -30,
+              30
+            ],
+            "scale": [
+              0.4,
+              1.2
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "plate_ablative_m",
+      "name": "Ablative Shroud (M)",
+      "desc": "Sacrificial foam over a thin backing. Cheap, light, and it boils away exactly once - popular with people who expect to be shot at only on the way in.",
+      "category": "armor",
+      "size": "corvette",
+      "cost": 21000,
+      "tags": [
+        "civilian",
+        "ablative"
+      ],
+      "stats": {
+        "mass": 5.0,
+        "hull_hp": 480.0,
+        "heat_dissipation": 14.0,
+        "agility_pool": -0.6
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 2.8,
+        "h": 1.5,
+        "t": 0.5,
+        "bevel": 0.34,
+        "rivets": 0
+      },
+      "func": {
+        "armor": 480.0,
+        "ablative": true
+      },
+      "sockets": []
+    },
+    {
+      "id": "radiator_bank_m",
+      "name": "Radiator Bank (M)",
+      "desc": "Three stacked panels on a common manifold. Fitted to anything with a torch drive, or anything whose captain reads the heat gauge.",
+      "category": "armor",
+      "size": "corvette",
+      "cost": 26000,
+      "tags": [
+        "civilian",
+        "cooling",
+        "industrial"
+      ],
+      "stats": {
+        "mass": 3.4,
+        "hull_hp": 40.0,
+        "heat_dissipation": 62.0,
+        "power_draw": 0.6
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 3.0,
+        "h": 1.2,
+        "t": 0.16,
+        "bevel": 0.1,
+        "rivets": 0
+      },
+      "func": {
+        "radiator": true
+      },
+      "sockets": [
+        {
+          "id": "greeble",
+          "name": "Manifold Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -0.18
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -40,
+              40
+            ],
+            "scale": [
+              0.4,
+              1.4
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "plate_belt_l",
+      "name": "Belt Armour (L)",
+      "desc": "A hauler-scale slab you fit to the side that faces the trouble. Nobody armours a freighter all the way round; nobody can afford to.",
+      "category": "armor",
+      "size": "hauler",
+      "cost": 118000,
+      "tags": [
+        "military",
+        "heavy"
+      ],
+      "stats": {
+        "mass": 40.0,
+        "hull_hp": 3200.0,
+        "agility_pool": -2.6
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 5.0,
+        "h": 2.6,
+        "t": 0.7,
+        "bevel": 0.3,
+        "rivets": 1
+      },
+      "func": {
+        "armor": 3200.0
+      },
+      "sockets": [
+        {
+          "id": "layer",
+          "name": "Applique Layer",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -0.71
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.5,
+              0.95
+            ]
+          }
+        },
+        {
+          "id": "hardpoint",
+          "name": "Belt Hardpoint",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            -0.9,
+            -0.72
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -60,
+              60
+            ],
+            "pitch": [
+              -30,
+              30
+            ],
+            "slide_axis": [
+              1,
+              0,
+              0
+            ],
+            "slide": [
+              -1.8,
+              1.8
+            ],
+            "scale": [
+              0.7,
+              1.2
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "radiator_bank_l",
+      "name": "Radiator Bank (L)",
+      "desc": "Folded fins that shed a fusion plant's output. Fragile, draggy, and the difference between a sustained fight and a cooked capacitor.",
+      "category": "armor",
+      "size": "hauler",
+      "cost": 74000,
+      "tags": [
+        "industrial",
+        "cooling"
+      ],
+      "stats": {
+        "mass": 9.0,
+        "heat_dissipation": 135.0,
+        "power_draw": 1.4,
+        "agility_pool": -0.6,
+        "hull_hp": 40.0
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 3.4,
+        "h": 2.2,
+        "t": 0.16,
+        "bevel": 0.12,
+        "rivets": 8
+      },
+      "func": {
+        "radiator": true
+      },
+      "sockets": [
+        {
+          "id": "greeble",
+          "name": "Fin Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -0.1
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "slide_axis": [
+              1,
+              0,
+              0
+            ],
+            "slide": [
+              -1.5,
+              1.5
+            ],
+            "scale": [
+              0.5,
+              1.6
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "plate_capital_xl",
+      "name": "Capital Belt (XL)",
+      "desc": "Metre-thick laminate with an active spall net behind it. Rated to shrug off a corvette's main gun and to make its captain reconsider.",
+      "category": "armor",
+      "size": "capital",
+      "cost": 620000,
+      "tags": [
+        "capital",
+        "military",
+        "heavy"
+      ],
+      "stats": {
+        "mass": 180.0,
+        "hull_hp": 14000.0,
+        "agility_pool": -3.6
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 8.0,
+        "h": 4.2,
+        "t": 1.1,
+        "bevel": 0.5,
+        "rivets": 1
+      },
+      "func": {
+        "armor": 14000.0
+      },
+      "sockets": [
+        {
+          "id": "hardpoint_l",
+          "name": "Port Casemate",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -2.4,
+            -1.2,
+            -1.12
+          ],
+          "group": "casemates",
+          "joint": {
+            "yaw": [
+              -70,
+              70
+            ],
+            "pitch": [
+              -25,
+              40
+            ],
+            "scale": [
+              0.7,
+              1.2
+            ]
+          }
+        },
+        {
+          "id": "hardpoint_r",
+          "name": "Starboard Casemate",
+          "mirror_of": "hardpoint_l",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "casemates"
+        },
+        {
+          "id": "greeble",
+          "name": "Belt Surface Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.4,
+            -1.13
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -40,
+              40
+            ],
+            "pitch": [
+              -40,
+              40
+            ],
+            "scale": [
+              0.6,
+              2.4
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "radiator_capital_xl",
+      "name": "Radiator Array (XL)",
+      "desc": "Acres of black panel along a capital flank. Every gunner aboard would rather have armour there, and every engineer will explain why they cannot.",
+      "category": "armor",
+      "size": "capital",
+      "cost": 260000,
+      "tags": [
+        "industrial",
+        "cooling",
+        "capital"
+      ],
+      "stats": {
+        "mass": 42.0,
+        "heat_dissipation": 400.0,
+        "power_draw": 4.0,
+        "agility_pool": -1.4,
+        "hull_hp": 120.0
+      },
+      "mesh": {
+        "kind": "plate",
+        "w": 7.2,
+        "h": 4.4,
+        "t": 0.24,
+        "bevel": 0.2,
+        "rivets": 14
+      },
+      "func": {
+        "radiator": true
+      },
+      "sockets": [
+        {
+          "id": "layer",
+          "name": "Panel Extension",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            0.26
+          ],
+          "rot": [
+            0,
+            180,
+            0
+          ],
+          "joint": {
+            "slide_axis": [
+              1,
+              0,
+              0
+            ],
+            "slide": [
+              -3.0,
+              3.0
+            ],
+            "scale": [
+              0.6,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "greeble",
+          "name": "Manifold",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.8,
+            -0.14
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.6,
+              2.0
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

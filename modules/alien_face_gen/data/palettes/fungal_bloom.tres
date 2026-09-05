@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="FacePalette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/face_palette.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "fungal_bloom"
+is_emissive_palette = false
+skin_base = Color(0.847, 0.784, 0.659, 1)
+skin_shade = Color(0.682, 0.612, 0.486, 1)
+skin_light = Color(0.933, 0.886, 0.784, 1)
+skin_deep = Color(0.478, 0.416, 0.314, 1)
+eye_sclera = Color(0.957, 0.929, 0.863, 1)
+eye_iris = Color(0.557, 0.306, 0.478, 1)
+eye_pupil = Color(0.165, 0.102, 0.141, 1)
+eye_glow = Color(0.784, 0.435, 0.847, 1)
+mouth_inner = Color(0.416, 0.227, 0.337, 1)
+tooth = Color(0.957, 0.929, 0.863, 1)
+marking_a = Color(0.784, 0.435, 0.847, 1)
+marking_b = Color(0.659, 0.369, 0.227, 1)
+crest = Color(0.722, 0.345, 0.180, 1)
+garment = Color(0.353, 0.322, 0.251, 1)
+garment_trim = Color(0.604, 0.541, 0.400, 1)
+background = Color(0.290, 0.267, 0.212, 1)
+outline = Color(0.200, 0.161, 0.122, 1)

@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="PlanetData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/common/planets/planet_data.gd" id="1_j5o4s"]
+
+[resource]
+script = ExtResource("1_j5o4s")
+planet_name = "Tarn IV"
+seed_value = 19870506
+primary_color = Color(0.42, 0.58, 0.32, 1)
+secondary_color = Color(0.68, 0.55, 0.35, 1)
+water_color = Color(0.15, 0.35, 0.65, 1)
+ice_amount = 0.35
+atmosphere_density = 0.4
+atmosphere_color = Color(0.45, 0.72, 1.0, 1)
+detail_strength = 0.06
+rotation_speed = 0.006
+terrain_height = 0.12
+continent_scale = 0.7
+mountain_scale = 3.0
+ridge_strength = 0.6
+sea_level = 0.45
+sphere_resolution = 24
+planet_radius = 12.0

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "MANTID"
+display_name = "Mantid"
+ranges = {"cranium_width": Vector2(0.3, 0.5), "chin_point": Vector2(0.8, 1.0), "temple_pinch": Vector2(0.1, 0.3), "eye_size": Vector2(0.8, 1.0), "eye_glow": Vector2(0.3, 0.6), "mandible_count": Vector2(2, 4), "crest_count": Vector2(1, 4)}
+presence = {"nose": -1.0, "mandible": 2.0}
+enum_weights = {"eye_shape": {4: 1.0}, "pupil_shape": {7: 1.0}, "nose_type": {0: 1.0}, "mouth_type": {4: 1.0}, "crest_type": {3: 1.0}, "skin_texture": {2: 1.0}}
+allowed_palettes = ["chitin_cold", "deep_bio"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "MANTID"

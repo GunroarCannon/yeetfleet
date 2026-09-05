@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://bvwpy1w0debmu"]
+
+[ext_resource type="Script" uid="uid://ddba0evhqdmv5" path="res://modules/alien_face_gen/demo/demo_3d.gd" id="1"]
+
+[node name="Demo3D" type="Node3D"]
+script = ExtResource("1")

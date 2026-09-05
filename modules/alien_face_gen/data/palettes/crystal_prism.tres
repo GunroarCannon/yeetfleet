@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="FacePalette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/face_palette.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "crystal_prism"
+is_emissive_palette = true
+skin_base = Color(0.557, 0.659, 0.910, 1)
+skin_shade = Color(0.369, 0.463, 0.722, 1)
+skin_light = Color(0.769, 0.839, 1, 1)
+skin_deep = Color(0.212, 0.251, 0.431, 1)
+eye_sclera = Color(1, 1, 1, 1)
+eye_iris = Color(0.784, 0.435, 0.941, 1)
+eye_pupil = Color(1, 1, 1, 1)
+eye_glow = Color(0.784, 0.435, 0.941, 1)
+mouth_inner = Color(0.165, 0.180, 0.322, 1)
+tooth = Color(1, 1, 1, 1)
+marking_a = Color(0.435, 0.941, 0.878, 1)
+marking_b = Color(0.941, 0.435, 0.784, 1)
+crest = Color(0.659, 0.769, 1, 1)
+garment = Color(0.180, 0.212, 0.376, 1)
+garment_trim = Color(0.431, 0.541, 0.847, 1)
+background = Color(0.102, 0.118, 0.227, 1)
+outline = Color(0.769, 0.839, 1, 1)

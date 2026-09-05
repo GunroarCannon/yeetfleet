@@ -1,0 +1,1230 @@
+{
+  "_comment": "Utility modules: canisters, tanks, shield generators, sensors and the recursive pod rack. Pods are centred on their mount and lie along Z, so an unrotated well gives a fore-aft canister. The rack is the recursion showcase - it is a cargo part that itself exposes four cargo sockets, so nesting a rack inside a rack is legal and does exactly what you would expect.",
+  "parts": [
+    {
+      "id": "cargo_pod_s",
+      "name": "Cargo Canister (S)",
+      "desc": "Eight tonnes of standard-gauge hold. Bolts to any utility bay and comes off again in ninety seconds when a patrol asks politely.",
+      "category": "cargo",
+      "size": "fighter",
+      "cost": 4200,
+      "tags": [
+        "civilian",
+        "trader",
+        "starter"
+      ],
+      "stats": {
+        "mass": 1.1,
+        "cargo_capacity": 8.0,
+        "hull_hp": 15.0,
+        "agility_pool": -0.4
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 1.8,
+        "radius": 0.42,
+        "sides": 6,
+        "caps": 0.6,
+        "ribs": 2
+      },
+      "func": {
+        "jettison": true
+      },
+      "sockets": [
+        {
+          "id": "greeble",
+          "name": "Manifest Plate",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.43,
+            0.0
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.3,
+              0.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "fuel_tank_s",
+      "name": "Drop Tank (S)",
+      "desc": "Extra hydrogen slung outside the hull. Adds jump range, ruins your turn rate, and is the first thing you dump when shot at.",
+      "category": "cargo",
+      "size": "fighter",
+      "cost": 6800,
+      "tags": [
+        "civilian",
+        "explorer"
+      ],
+      "stats": {
+        "mass": 1.4,
+        "fuel_capacity": 6.0,
+        "hull_hp": 8.0,
+        "agility_pool": -0.6
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 2.2,
+        "radius": 0.38,
+        "sides": 8,
+        "caps": 0.35,
+        "ribs": 1,
+        "squash": 0.95
+      },
+      "func": {
+        "jettison": true
+      },
+      "sockets": []
+    },
+    {
+      "id": "shield_gen_s",
+      "name": "Shield Generator (S)",
+      "desc": "A modest bubble that stops the first two hits of most engagements. Draws power whether or not anyone is shooting at you.",
+      "category": "cargo",
+      "size": "fighter",
+      "cost": 26000,
+      "tags": [
+        "military",
+        "defence"
+      ],
+      "stats": {
+        "mass": 2.0,
+        "shield_hp": 120.0,
+        "power_draw": 3.0,
+        "energy_capacity": 8.0,
+        "heat": 10.0
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 1.3,
+        "radius": 0.48,
+        "sides": 8,
+        "caps": 0.72,
+        "ribs": 3
+      },
+      "func": {
+        "shield_recharge": 6.0,
+        "shield_delay": 4.0
+      },
+      "sockets": []
+    },
+    {
+      "id": "sensor_array_s",
+      "name": "Survey Sensor Array (S)",
+      "desc": "Long-baseline scanners for people whose job is finding things. Fragile, power-hungry, and the difference between a survey contract and a guess.",
+      "category": "cargo",
+      "size": "fighter",
+      "cost": 18000,
+      "tags": [
+        "civilian",
+        "explorer",
+        "science"
+      ],
+      "stats": {
+        "mass": 0.9,
+        "sensor_range": 42.0,
+        "power_draw": 1.8,
+        "hull_hp": 4.0
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 1.5,
+        "radius": 0.3,
+        "sides": 6,
+        "caps": 0.5,
+        "ribs": 1
+      },
+      "func": {
+        "scan_speed": 2.0
+      },
+      "sockets": [
+        {
+          "id": "dish",
+          "name": "Dish Mount",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.31,
+            -0.2
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -60,
+              60
+            ],
+            "scale": [
+              0.6,
+              1.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reactor_compact_s",
+      "name": "Compact Reactor (S)",
+      "desc": "A sealed fission cell for hulls whose own generator cannot keep up. Costs you a utility bay and runs hot, but a lit capacitor beats a full hold you cannot defend.",
+      "category": "cargo",
+      "size": "fighter",
+      "cost": 34000,
+      "tags": [
+        "military",
+        "power"
+      ],
+      "stats": {
+        "mass": 2.4,
+        "power_output": 9.0,
+        "energy_capacity": 14.0,
+        "heat": 12.0,
+        "agility_pool": -0.2
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 1.5,
+        "radius": 0.44,
+        "sides": 6,
+        "caps": 0.6,
+        "ribs": 4
+      },
+      "func": {
+        "reactor": true,
+        "spool_time": 1.8
+      },
+      "sockets": [
+        {
+          "id": "radiator",
+          "name": "Reactor Radiator",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.46,
+            0.1
+          ],
+          "rot": [
+            -90,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.7,
+              1.4
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cargo_pod_m",
+      "name": "Cargo Module (M)",
+      "desc": "Corvette-scale hold with powered doors and its own manifest terminal. Where the money actually comes from.",
+      "category": "cargo",
+      "size": "corvette",
+      "cost": 21000,
+      "tags": [
+        "civilian",
+        "trader"
+      ],
+      "stats": {
+        "mass": 4.5,
+        "cargo_capacity": 40.0,
+        "hull_hp": 50.0,
+        "power_draw": 0.4,
+        "agility_pool": -1.0
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 3.4,
+        "radius": 0.8,
+        "sides": 8,
+        "caps": 0.66,
+        "ribs": 3
+      },
+      "func": {
+        "jettison": true
+      },
+      "sockets": [
+        {
+          "id": "greeble",
+          "name": "Manifest Plate",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.81,
+            0.4
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.4,
+              1.2
+            ]
+          }
+        },
+        {
+          "id": "armor_face",
+          "name": "Outboard Armour",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -0.81,
+            0.0,
+            0.0
+          ],
+          "rot": [
+            0,
+            -90,
+            0
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.2,
+              1.2
+            ],
+            "scale": [
+              0.8,
+              1.6
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cargo_rack_cluster_m",
+      "name": "Modular Pod Rack (M)",
+      "desc": "A spine of quick-release clamps that turns one big mount into four small ones. Fit canisters, tanks, shields, or another rack - the frame does not care.",
+      "category": "cargo",
+      "size": "corvette",
+      "cost": 15500,
+      "tags": [
+        "civilian",
+        "trader",
+        "modular"
+      ],
+      "stats": {
+        "mass": 2.2,
+        "cargo_capacity": 4.0,
+        "hull_hp": 30.0,
+        "agility_pool": -0.5
+      },
+      "mesh": {
+        "kind": "segment",
+        "length": 3.8,
+        "width": 1.05,
+        "height": 0.5,
+        "corner": 0.12,
+        "taper": 1.0,
+        "ribs": 4
+      },
+      "func": {
+        "rack": 4
+      },
+      "sockets": [
+        {
+          "id": "clamp_fwd_l",
+          "name": "Forward Port Clamp",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.5,
+            -0.26,
+            -1.0
+          ],
+          "group": "clamp_fwd",
+          "joint": {
+            "roll": [
+              -15,
+              15
+            ],
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -0.5,
+              0.5
+            ]
+          }
+        },
+        {
+          "id": "clamp_fwd_r",
+          "name": "Forward Starboard Clamp",
+          "mirror_of": "clamp_fwd_l",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "clamp_fwd"
+        },
+        {
+          "id": "clamp_aft_l",
+          "name": "Aft Port Clamp",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.5,
+            -0.26,
+            1.0
+          ],
+          "group": "clamp_aft",
+          "joint": {
+            "roll": [
+              -15,
+              15
+            ],
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -0.5,
+              0.5
+            ]
+          }
+        },
+        {
+          "id": "clamp_aft_r",
+          "name": "Aft Starboard Clamp",
+          "mirror_of": "clamp_aft_l",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "clamp_aft"
+        },
+        {
+          "id": "greeble",
+          "name": "Rack Spine Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.26,
+            0.0
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.3,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "shield_gen_m",
+      "name": "Shield Generator (M)",
+      "desc": "Proper warship shielding. Heavy, thirsty, and the single best survivability purchase in the catalogue.",
+      "category": "cargo",
+      "size": "corvette",
+      "cost": 132000,
+      "tags": [
+        "military",
+        "defence"
+      ],
+      "stats": {
+        "mass": 9.0,
+        "shield_hp": 620.0,
+        "power_draw": 11.0,
+        "energy_capacity": 26.0,
+        "heat": 34.0
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 2.4,
+        "radius": 0.86,
+        "sides": 10,
+        "caps": 0.78,
+        "ribs": 4
+      },
+      "func": {
+        "shield_recharge": 22.0,
+        "shield_delay": 5.0
+      },
+      "sockets": []
+    },
+    {
+      "id": "refinery_m",
+      "name": "Ore Refinery (M)",
+      "desc": "Crushes, sorts and cooks raw rock into something a station will buy. Pointless without a mining beam; transformative with one.",
+      "category": "cargo",
+      "size": "corvette",
+      "cost": 74000,
+      "tags": [
+        "civilian",
+        "industrial",
+        "mining"
+      ],
+      "stats": {
+        "mass": 11.0,
+        "cargo_capacity": 18.0,
+        "power_draw": 4.5,
+        "heat": 26.0,
+        "hull_hp": 40.0,
+        "agility_pool": -0.8
+      },
+      "mesh": {
+        "kind": "segment",
+        "length": 3.2,
+        "width": 1.5,
+        "height": 1.3,
+        "corner": 0.22,
+        "taper": 0.9,
+        "ribs": 3
+      },
+      "func": {
+        "refine_rate": 1.5,
+        "requires": "mining"
+      },
+      "sockets": [
+        {
+          "id": "stack_l",
+          "name": "Port Exhaust Stack",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.5,
+            0.66,
+            0.9
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "group": "stacks",
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.5,
+              1.6
+            ]
+          }
+        },
+        {
+          "id": "stack_r",
+          "name": "Starboard Exhaust Stack",
+          "mirror_of": "stack_l",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "stacks"
+        },
+        {
+          "id": "radiator",
+          "name": "Waste Heat Panel",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            -0.66,
+            0.4
+          ],
+          "rot": [
+            -90,
+            0,
+            0
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.0,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              1.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reactor_fusion_m",
+      "name": "Fusion Plant (M)",
+      "desc": "The standard answer to a corvette with real weapons on it. Doubles a hull's output and asks for a radiator in return.",
+      "category": "cargo",
+      "size": "corvette",
+      "cost": 128000,
+      "tags": [
+        "military",
+        "power"
+      ],
+      "stats": {
+        "mass": 9.5,
+        "power_output": 34.0,
+        "energy_capacity": 60.0,
+        "heat": 40.0,
+        "hull_hp": 40.0,
+        "agility_pool": -0.5
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 2.6,
+        "radius": 0.78,
+        "sides": 8,
+        "caps": 0.66,
+        "ribs": 5
+      },
+      "func": {
+        "reactor": true,
+        "spool_time": 3.0
+      },
+      "sockets": [
+        {
+          "id": "radiator",
+          "name": "Primary Radiator",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            0.8,
+            0.2
+          ],
+          "rot": [
+            -90,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.8,
+              1.8
+            ]
+          }
+        },
+        {
+          "id": "greeble_pipe",
+          "name": "Coolant Run",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -1.35
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.6,
+              1.5
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cargo_bay_l",
+      "name": "Freight Bay (L)",
+      "desc": "Two hundred tonnes in one lump. Hauler frames are built around these; anything smaller cannot carry one and would not know what to do with it.",
+      "category": "cargo",
+      "size": "hauler",
+      "cost": 96000,
+      "tags": [
+        "civilian",
+        "trader"
+      ],
+      "stats": {
+        "mass": 18.0,
+        "cargo_capacity": 200.0,
+        "hull_hp": 180.0,
+        "power_draw": 1.2,
+        "agility_pool": -2.4
+      },
+      "mesh": {
+        "kind": "segment",
+        "length": 6.0,
+        "width": 2.6,
+        "height": 2.2,
+        "corner": 0.3,
+        "taper": 1.0,
+        "ribs": 5
+      },
+      "func": {
+        "jettison": true
+      },
+      "sockets": [
+        {
+          "id": "armor_face",
+          "name": "Outboard Armour",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -1.32,
+            0.0,
+            0.0
+          ],
+          "rot": [
+            0,
+            -90,
+            0
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -2.2,
+              2.2
+            ],
+            "scale": [
+              0.8,
+              2.0
+            ]
+          }
+        },
+        {
+          "id": "greeble",
+          "name": "Bay Roof Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.12,
+            -1.6
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.5,
+              2.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "shield_gen_l",
+      "name": "Shield Generator (L)",
+      "desc": "A hauler-scale bubble with enough overlap to cover slung cargo. Convoy escorts are built around one of these and a lot of patience.",
+      "category": "cargo",
+      "size": "hauler",
+      "cost": 410000,
+      "tags": [
+        "military",
+        "defence"
+      ],
+      "stats": {
+        "mass": 26.0,
+        "shield_hp": 1800.0,
+        "power_draw": 26.0,
+        "energy_capacity": 60.0,
+        "heat": 78.0
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 3.6,
+        "radius": 1.3,
+        "sides": 12,
+        "caps": 0.8,
+        "ribs": 5
+      },
+      "func": {
+        "shield_recharge": 55.0,
+        "shield_delay": 6.0
+      },
+      "sockets": []
+    },
+    {
+      "id": "reactor_fusion_l",
+      "name": "Fusion Plant (L)",
+      "desc": "A hauler-scale core. Enough headroom for a heavy shield and a railgun at the same time, which is precisely why privateers bolt them in.",
+      "category": "cargo",
+      "size": "hauler",
+      "cost": 340000,
+      "tags": [
+        "military",
+        "power",
+        "industrial"
+      ],
+      "stats": {
+        "mass": 27.0,
+        "power_output": 100.0,
+        "energy_capacity": 180.0,
+        "heat": 105.0,
+        "hull_hp": 120.0,
+        "agility_pool": -1.2
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 4.4,
+        "radius": 1.25,
+        "sides": 10,
+        "caps": 0.7,
+        "ribs": 6
+      },
+      "func": {
+        "reactor": true,
+        "spool_time": 5.0
+      },
+      "sockets": [
+        {
+          "id": "radiator",
+          "name": "Primary Radiator",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            0.0,
+            1.28,
+            0.3
+          ],
+          "rot": [
+            -90,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.8,
+              2.0
+            ]
+          }
+        },
+        {
+          "id": "radiator_aux",
+          "name": "Auxiliary Radiator",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            -1.28,
+            0.3
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.7,
+              1.6
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hangar_module_capital",
+      "name": "Fighter Hangar (XL)",
+      "desc": "Four launch cradles, a deck crew, and their coffee machine. Turns a capital hull into something that projects force rather than merely surviving it.",
+      "category": "cargo",
+      "size": "capital",
+      "cost": 1120000,
+      "tags": [
+        "capital",
+        "military",
+        "carrier"
+      ],
+      "stats": {
+        "mass": 120.0,
+        "cargo_capacity": 60.0,
+        "hull_hp": 700.0,
+        "power_draw": 14.0,
+        "heat": 40.0,
+        "agility_pool": -3.0
+      },
+      "mesh": {
+        "kind": "segment",
+        "length": 8.5,
+        "width": 4.6,
+        "height": 3.0,
+        "corner": 0.45,
+        "taper": 0.95,
+        "ribs": 6
+      },
+      "func": {
+        "hangar_slots": 4,
+        "launch_rate": 0.5
+      },
+      "sockets": [
+        {
+          "id": "deck_gun_l",
+          "name": "Port Deck Gun",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -2.35,
+            1.2,
+            -2.0
+          ],
+          "group": "deck_guns",
+          "joint": {
+            "yaw": [
+              -120,
+              120
+            ],
+            "pitch": [
+              -10,
+              70
+            ],
+            "scale": [
+              0.7,
+              1.2
+            ]
+          }
+        },
+        {
+          "id": "deck_gun_r",
+          "name": "Starboard Deck Gun",
+          "mirror_of": "deck_gun_l",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "deck_guns"
+        },
+        {
+          "id": "armor_face",
+          "name": "Hangar Door Armour",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            -4.3
+          ],
+          "rot": [
+            0,
+            0,
+            0
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              1,
+              0
+            ],
+            "slide": [
+              -1.4,
+              1.4
+            ],
+            "scale": [
+              0.9,
+              1.8
+            ]
+          }
+        },
+        {
+          "id": "mast",
+          "name": "Traffic Control Mast",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.52,
+            3.0
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "scale": [
+              1.0,
+              4.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reactor_capital_xl",
+      "name": "Capital Core (XL)",
+      "desc": "Three hundred megawatts and a heat problem to match. Nothing smaller than a keel can carry one, and nothing with beam batteries can do without.",
+      "category": "cargo",
+      "size": "capital",
+      "cost": 1450000,
+      "tags": [
+        "military",
+        "power",
+        "capital"
+      ],
+      "stats": {
+        "mass": 115.0,
+        "power_output": 330.0,
+        "energy_capacity": 900.0,
+        "heat": 300.0,
+        "hull_hp": 600.0,
+        "agility_pool": -2.5
+      },
+      "mesh": {
+        "kind": "pod",
+        "length": 8.0,
+        "radius": 2.3,
+        "sides": 12,
+        "caps": 0.74,
+        "ribs": 8
+      },
+      "func": {
+        "reactor": true,
+        "spool_time": 9.0
+      },
+      "sockets": [
+        {
+          "id": "radiator_l",
+          "name": "Radiator (Port)",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            -2.36,
+            0.0,
+            0.4
+          ],
+          "rot": [
+            0,
+            90,
+            0
+          ],
+          "joint": {
+            "pitch": [
+              -90,
+              90
+            ],
+            "scale": [
+              0.8,
+              1.8
+            ]
+          }
+        },
+        {
+          "id": "radiator_r",
+          "name": "Radiator (Starboard)",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "mirror_of": "radiator_l"
+        },
+        {
+          "id": "greeble_stack",
+          "name": "Exchanger Stack",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            2.34,
+            -1.2
+          ],
+          "rot": [
+            -90,
+            0,
+            0
+          ],
+          "joint": {
+            "roll": [
+              -180,
+              180
+            ],
+            "scale": [
+              0.8,
+              2.4
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

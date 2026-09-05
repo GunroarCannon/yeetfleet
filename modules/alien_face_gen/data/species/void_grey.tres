@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "VOID_GREY"
+display_name = "Void Grey"
+ranges = {"cranium_width": Vector2(0.75, 0.95), "cranium_height": Vector2(0.7, 0.85), "jaw_width": Vector2(0.1, 0.25), "chin_taper": Vector2(0.8, 1.0), "eye_size": Vector2(0.75, 0.95), "eye_tilt": Vector2(0.6, 0.8)}
+presence = {"nose": -1.0, "mandible": -1.0}
+enum_weights = {"eye_shape": {1: 1.0}, "pupil_shape": {7: 1.0}, "nose_type": {0: 1.0}, "mouth_type": {2: 1.0}}
+allowed_palettes = ["void_grey", "ash_husk"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "VOID_GREY"

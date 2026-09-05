@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "UMBRAL"
+display_name = "Umbral"
+ranges = {}
+presence = {"nose": -1.0, "mouth": -1.0}
+enum_weights = {"eye_shape": {7: 1.0}, "nose_type": {0: 1.0}, "mouth_type": {0: 1.0}, "crest_type": {6: 1.0}, "skin_texture": {7: 1.0}}
+allowed_palettes = ["deep_bio", "crystal_prism"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "UMBRAL"

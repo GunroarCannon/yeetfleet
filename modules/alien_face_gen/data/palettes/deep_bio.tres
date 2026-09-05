@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="FacePalette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/face_palette.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "deep_bio"
+is_emissive_palette = true
+skin_base = Color(0.165, 0.118, 0.259, 1)
+skin_shade = Color(0.094, 0.059, 0.165, 1)
+skin_light = Color(0.271, 0.196, 0.392, 1)
+skin_deep = Color(0.047, 0.027, 0.094, 1)
+eye_sclera = Color(0.047, 0.027, 0.094, 1)
+eye_iris = Color(0.227, 0.941, 0.784, 1)
+eye_pupil = Color(0.047, 0.027, 0.094, 1)
+eye_glow = Color(0.227, 0.941, 0.784, 1)
+mouth_inner = Color(0.071, 0.031, 0.118, 1)
+tooth = Color(0.659, 0.941, 0.878, 1)
+marking_a = Color(0.227, 0.941, 0.784, 1)
+marking_b = Color(0.941, 0.227, 0.557, 1)
+crest = Color(0.227, 0.165, 0.337, 1)
+garment = Color(0.078, 0.047, 0.133, 1)
+garment_trim = Color(0.227, 0.941, 0.784, 1)
+background = Color(0.031, 0.020, 0.071, 1)
+outline = Color(0.227, 0.941, 0.784, 1)

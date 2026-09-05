@@ -1,0 +1,2163 @@
+{
+  "_comment": "Chassis parts are ship roots. Coordinates: -Z is forward, +Y up, origin at the hull centre. A hull_spine of length L spans z=-L/2 (nose) to z=+L/2 (tail). Socket sizes list every class that fits, so a fighter-class part drops into a corvette mount but not the reverse.",
+  "parts": [
+    {
+      "id": "hull_scout_kestrel",
+      "name": "Kestrel Scout Frame",
+      "desc": "Cheap, light and quick. Two thruster mounts, a pair of wing roots and one nose hardpoint — everything a first ship needs and nothing it does not.",
+      "category": "chassis",
+      "size": "fighter",
+      "cost": 42000,
+      "mass_limit": 30.0,
+      "tags": [
+        "starter",
+        "civilian",
+        "agile"
+      ],
+      "stats": {
+        "mass": 8.0,
+        "hull_hp": 180.0,
+        "agility_pool": 5.0,
+        "power_output": 11.0,
+        "power_draw": 1.2,
+        "energy_capacity": 30.0,
+        "fuel_capacity": 2.2,
+        "sensor_range": 24.0,
+        "heat_dissipation": 20.0
+      },
+      "mesh": {
+        "kind": "hull_spine",
+        "length": 5.0,
+        "width": 1.5,
+        "height": 1.0,
+        "corner": 0.3,
+        "nose": 0.26,
+        "tail": 0.7,
+        "stripe": 0.34
+      },
+      "sockets": [
+        {
+          "id": "cockpit",
+          "name": "Cockpit",
+          "accepts": [
+            "cockpit"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.44,
+            -0.5
+          ],
+          "required": true,
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -0.35,
+              0.35
+            ],
+            "scale": [
+              0.9,
+              1.15
+            ]
+          }
+        },
+        {
+          "id": "engine_l",
+          "name": "Port Thruster",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.4,
+            0.0,
+            2.45
+          ],
+          "required": true,
+          "group": "engines",
+          "joint": {
+            "yaw": [
+              -8,
+              8
+            ],
+            "pitch": [
+              -8,
+              8
+            ],
+            "scale": [
+              0.85,
+              1.2
+            ]
+          }
+        },
+        {
+          "id": "engine_r",
+          "name": "Starboard Thruster",
+          "mirror_of": "engine_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "engines"
+        },
+        {
+          "id": "wing_l",
+          "name": "Port Wing Root",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.68,
+            -0.05,
+            0.2
+          ],
+          "group": "wings",
+          "joint": {
+            "yaw": [
+              -14,
+              14
+            ],
+            "pitch": [
+              -12,
+              12
+            ],
+            "roll": [
+              -25,
+              25
+            ],
+            "scale": [
+              0.8,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "wing_r",
+          "name": "Starboard Wing Root",
+          "mirror_of": "wing_l",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "wings"
+        },
+        {
+          "id": "hardpoint_c",
+          "name": "Chin Hardpoint",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            -0.36,
+            -1.5
+          ],
+          "joint": {
+            "yaw": [
+              -6,
+              6
+            ],
+            "pitch": [
+              -8,
+              4
+            ],
+            "scale": [
+              0.85,
+              1.1
+            ]
+          }
+        },
+        {
+          "id": "utility",
+          "name": "Belly Utility Bay",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            -0.58,
+            0.55
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              -1,
+              0
+            ],
+            "slide": [
+              -0.25,
+              0.4
+            ],
+            "scale": [
+              0.85,
+              1.15
+            ]
+          }
+        },
+        {
+          "id": "greeble_spine",
+          "name": "Dorsal Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.5,
+            1.1
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -45,
+              45
+            ],
+            "scale": [
+              0.6,
+              1.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hull_fighter_lance",
+      "name": "Lance Interceptor Frame",
+      "desc": "A narrow dart built around wing-mounted guns. Tougher and faster than the Kestrel, with less room for cargo and a thirstier power bus.",
+      "category": "chassis",
+      "size": "fighter",
+      "cost": 78000,
+      "mass_limit": 48.0,
+      "tags": [
+        "military",
+        "agile"
+      ],
+      "stats": {
+        "mass": 11.0,
+        "hull_hp": 240.0,
+        "agility_pool": 6.0,
+        "power_output": 15.0,
+        "power_draw": 1.8,
+        "energy_capacity": 46.0,
+        "fuel_capacity": 2.6,
+        "sensor_range": 30.0,
+        "heat_dissipation": 26.0
+      },
+      "mesh": {
+        "kind": "hull_spine",
+        "length": 6.2,
+        "width": 1.35,
+        "height": 0.95,
+        "corner": 0.22,
+        "nose": 0.18,
+        "tail": 0.66,
+        "stripe": 0.28
+      },
+      "sockets": [
+        {
+          "id": "cockpit",
+          "name": "Cockpit",
+          "accepts": [
+            "cockpit"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.42,
+            -0.9
+          ],
+          "required": true,
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -0.4,
+              0.6
+            ],
+            "scale": [
+              0.9,
+              1.1
+            ]
+          }
+        },
+        {
+          "id": "engine_l",
+          "name": "Port Thruster",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.36,
+            0.0,
+            3.05
+          ],
+          "required": true,
+          "group": "engines",
+          "joint": {
+            "yaw": [
+              -6,
+              6
+            ],
+            "pitch": [
+              -6,
+              6
+            ],
+            "scale": [
+              0.85,
+              1.25
+            ]
+          }
+        },
+        {
+          "id": "engine_r",
+          "name": "Starboard Thruster",
+          "mirror_of": "engine_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "engines"
+        },
+        {
+          "id": "wing_l",
+          "name": "Port Wing Root",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.6,
+            -0.02,
+            0.55
+          ],
+          "group": "wings",
+          "joint": {
+            "yaw": [
+              -18,
+              18
+            ],
+            "pitch": [
+              -12,
+              12
+            ],
+            "roll": [
+              -30,
+              30
+            ],
+            "scale": [
+              0.8,
+              1.35
+            ]
+          }
+        },
+        {
+          "id": "wing_r",
+          "name": "Starboard Wing Root",
+          "mirror_of": "wing_l",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "wings"
+        },
+        {
+          "id": "hardpoint_c",
+          "name": "Nose Hardpoint",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            -0.28,
+            -2.0
+          ],
+          "joint": {
+            "yaw": [
+              -5,
+              5
+            ],
+            "pitch": [
+              -6,
+              4
+            ],
+            "scale": [
+              0.85,
+              1.15
+            ]
+          }
+        },
+        {
+          "id": "dorsal_fin",
+          "name": "Dorsal Fin Mount",
+          "accepts": [
+            "wing",
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.44,
+            2.1
+          ],
+          "rot": [
+            0,
+            0,
+            -90
+          ],
+          "joint": {
+            "pitch": [
+              -10,
+              10
+            ],
+            "scale": [
+              0.7,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "armor_l",
+          "name": "Port Cheek Plate",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.6,
+            0.1,
+            -1.1
+          ],
+          "rot": [
+            0,
+            90,
+            0
+          ],
+          "group": "cheeks",
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -0.5,
+              0.5
+            ],
+            "scale": [
+              0.8,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "armor_r",
+          "name": "Starboard Cheek Plate",
+          "mirror_of": "armor_l",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "cheeks"
+        },
+        {
+          "id": "utility",
+          "name": "Belly Utility Bay",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            -0.55,
+            1.1
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              -1,
+              0
+            ],
+            "slide": [
+              -0.2,
+              0.4
+            ],
+            "scale": [
+              0.85,
+              1.1
+            ]
+          }
+        },
+        {
+          "id": "greeble_spine",
+          "name": "Dorsal Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.46,
+            0.6
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -45,
+              45
+            ],
+            "scale": [
+              0.6,
+              1.8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hull_corvette_bulwark",
+      "name": "Bulwark Corvette Frame",
+      "desc": "A working multirole hull. Three thruster mounts, four hardpoints, two cargo wells and enough plating area to survive a mistake.",
+      "category": "chassis",
+      "size": "corvette",
+      "cost": 310000,
+      "mass_limit": 210.0,
+      "tags": [
+        "military",
+        "multirole"
+      ],
+      "stats": {
+        "mass": 42.0,
+        "hull_hp": 620.0,
+        "agility_pool": 11.0,
+        "power_output": 40.0,
+        "power_draw": 4.0,
+        "energy_capacity": 120.0,
+        "fuel_capacity": 8.0,
+        "sensor_range": 44.0,
+        "heat_dissipation": 70.0
+      },
+      "mesh": {
+        "kind": "hull_spine",
+        "length": 9.4,
+        "width": 2.7,
+        "height": 1.9,
+        "corner": 0.42,
+        "nose": 0.34,
+        "tail": 0.78,
+        "stripe": 0.36
+      },
+      "sockets": [
+        {
+          "id": "cockpit",
+          "name": "Bridge",
+          "accepts": [
+            "cockpit"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            0.86,
+            -1.3
+          ],
+          "required": true,
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -0.8,
+              0.8
+            ],
+            "scale": [
+              0.9,
+              1.25
+            ]
+          }
+        },
+        {
+          "id": "engine_l",
+          "name": "Port Thruster",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -0.82,
+            -0.1,
+            4.6
+          ],
+          "required": true,
+          "group": "engines",
+          "joint": {
+            "yaw": [
+              -10,
+              10
+            ],
+            "pitch": [
+              -10,
+              10
+            ],
+            "scale": [
+              0.8,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "engine_r",
+          "name": "Starboard Thruster",
+          "mirror_of": "engine_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "engines"
+        },
+        {
+          "id": "engine_c",
+          "name": "Centre Thruster",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            0.42,
+            4.6
+          ],
+          "joint": {
+            "yaw": [
+              -6,
+              6
+            ],
+            "pitch": [
+              -6,
+              6
+            ],
+            "scale": [
+              0.8,
+              1.35
+            ]
+          }
+        },
+        {
+          "id": "wing_l",
+          "name": "Port Wing Root",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -1.3,
+            -0.1,
+            0.9
+          ],
+          "group": "wings",
+          "joint": {
+            "yaw": [
+              -16,
+              16
+            ],
+            "pitch": [
+              -12,
+              12
+            ],
+            "roll": [
+              -28,
+              28
+            ],
+            "scale": [
+              0.8,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "wing_r",
+          "name": "Starboard Wing Root",
+          "mirror_of": "wing_l",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "wings"
+        },
+        {
+          "id": "turret_dorsal",
+          "name": "Dorsal Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            0.94,
+            1.4
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -10,
+              60
+            ],
+            "scale": [
+              0.85,
+              1.2
+            ]
+          }
+        },
+        {
+          "id": "turret_ventral",
+          "name": "Ventral Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            -0.9,
+            1.0
+          ],
+          "rot": [
+            0,
+            0,
+            180
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -10,
+              60
+            ],
+            "scale": [
+              0.85,
+              1.2
+            ]
+          }
+        },
+        {
+          "id": "hardpoint_l",
+          "name": "Port Chin Hardpoint",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            -0.7,
+            -0.62,
+            -2.4
+          ],
+          "group": "chin",
+          "joint": {
+            "yaw": [
+              -8,
+              8
+            ],
+            "pitch": [
+              -8,
+              6
+            ],
+            "scale": [
+              0.85,
+              1.15
+            ]
+          }
+        },
+        {
+          "id": "hardpoint_r",
+          "name": "Starboard Chin Hardpoint",
+          "mirror_of": "hardpoint_l",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "group": "chin"
+        },
+        {
+          "id": "cargo_l",
+          "name": "Port Cargo Well",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -1.05,
+            -0.72,
+            2.2
+          ],
+          "group": "cargo",
+          "joint": {
+            "slide_axis": [
+              -1,
+              -0.4,
+              0
+            ],
+            "slide": [
+              -0.3,
+              0.7
+            ],
+            "scale": [
+              0.85,
+              1.25
+            ]
+          }
+        },
+        {
+          "id": "cargo_r",
+          "name": "Starboard Cargo Well",
+          "mirror_of": "cargo_l",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "cargo"
+        },
+        {
+          "id": "armor_l",
+          "name": "Port Flank Plating",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -1.32,
+            0.2,
+            -0.6
+          ],
+          "rot": [
+            0,
+            90,
+            0
+          ],
+          "group": "flanks",
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.2,
+              1.2
+            ],
+            "scale": [
+              0.8,
+              1.5
+            ]
+          }
+        },
+        {
+          "id": "armor_r",
+          "name": "Starboard Flank Plating",
+          "mirror_of": "armor_l",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "flanks"
+        },
+        {
+          "id": "greeble_nose",
+          "name": "Nose Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.55,
+            -3.0
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -60,
+              60
+            ],
+            "scale": [
+              0.6,
+              2.0
+            ]
+          }
+        },
+        {
+          "id": "greeble_tail",
+          "name": "Tail Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            0.88,
+            3.4
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -60,
+              60
+            ],
+            "scale": [
+              0.6,
+              2.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hull_hauler_mule",
+      "name": "Mule Freight Frame",
+      "desc": "A flying warehouse. Six cargo wells, huge fuel bunkerage, and the turn rate of a moon. Fit wings if you ever want to see the inside of a station again.",
+      "category": "chassis",
+      "size": "hauler",
+      "cost": 640000,
+      "mass_limit": 640.0,
+      "tags": [
+        "civilian",
+        "trader"
+      ],
+      "stats": {
+        "mass": 120.0,
+        "hull_hp": 980.0,
+        "agility_pool": 16.0,
+        "power_output": 60.0,
+        "power_draw": 6.5,
+        "energy_capacity": 180.0,
+        "fuel_capacity": 26.0,
+        "cargo_capacity": 40.0,
+        "sensor_range": 38.0,
+        "heat_dissipation": 120.0
+      },
+      "mesh": {
+        "kind": "hull_spine",
+        "length": 14.0,
+        "width": 4.2,
+        "height": 3.4,
+        "corner": 0.7,
+        "nose": 0.46,
+        "tail": 0.86,
+        "stripe": 0.4
+      },
+      "sockets": [
+        {
+          "id": "cockpit",
+          "name": "Bridge",
+          "accepts": [
+            "cockpit"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            0.0,
+            1.58,
+            -3.4
+          ],
+          "required": true,
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.0,
+              1.6
+            ],
+            "scale": [
+              0.9,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "engine_l",
+          "name": "Port Drive",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -1.28,
+            -0.2,
+            6.9
+          ],
+          "required": true,
+          "group": "engines",
+          "joint": {
+            "yaw": [
+              -8,
+              8
+            ],
+            "pitch": [
+              -8,
+              8
+            ],
+            "scale": [
+              0.8,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "engine_r",
+          "name": "Starboard Drive",
+          "mirror_of": "engine_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "group": "engines"
+        },
+        {
+          "id": "engine_upper_l",
+          "name": "Upper Port Drive",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            -1.05,
+            1.05,
+            6.9
+          ],
+          "group": "engines_upper",
+          "joint": {
+            "yaw": [
+              -8,
+              8
+            ],
+            "pitch": [
+              -8,
+              8
+            ],
+            "scale": [
+              0.8,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "engine_upper_r",
+          "name": "Upper Starboard Drive",
+          "mirror_of": "engine_upper_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "group": "engines_upper"
+        },
+        {
+          "id": "wing_l",
+          "name": "Port Stub Wing",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -2.05,
+            0.1,
+            1.6
+          ],
+          "group": "wings",
+          "joint": {
+            "yaw": [
+              -12,
+              12
+            ],
+            "pitch": [
+              -10,
+              10
+            ],
+            "roll": [
+              -20,
+              20
+            ],
+            "scale": [
+              0.8,
+              1.5
+            ]
+          }
+        },
+        {
+          "id": "wing_r",
+          "name": "Starboard Stub Wing",
+          "mirror_of": "wing_l",
+          "accepts": [
+            "wing"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "group": "wings"
+        },
+        {
+          "id": "cargo_fwd_l",
+          "name": "Forward Port Well",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -1.7,
+            -1.32,
+            -1.4
+          ],
+          "group": "cargo_fwd",
+          "joint": {
+            "slide_axis": [
+              -1,
+              -0.5,
+              0
+            ],
+            "slide": [
+              -0.4,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "cargo_fwd_r",
+          "name": "Forward Starboard Well",
+          "mirror_of": "cargo_fwd_l",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette",
+            "hauler"
+          ],
+          "group": "cargo_fwd"
+        },
+        {
+          "id": "cargo_mid_l",
+          "name": "Mid Port Well",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -1.9,
+            -1.42,
+            1.6
+          ],
+          "group": "cargo_mid",
+          "joint": {
+            "slide_axis": [
+              -1,
+              -0.5,
+              0
+            ],
+            "slide": [
+              -0.4,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "cargo_mid_r",
+          "name": "Mid Starboard Well",
+          "mirror_of": "cargo_mid_l",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette",
+            "hauler"
+          ],
+          "group": "cargo_mid"
+        },
+        {
+          "id": "cargo_spine",
+          "name": "Dorsal Spine Rack",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            0.0,
+            1.78,
+            2.6
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              1,
+              0
+            ],
+            "slide": [
+              -0.5,
+              0.9
+            ],
+            "yaw": [
+              -90,
+              90
+            ],
+            "scale": [
+              0.8,
+              1.5
+            ]
+          }
+        },
+        {
+          "id": "turret_dorsal",
+          "name": "Dorsal Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            1.7,
+            0.2
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -10,
+              60
+            ],
+            "scale": [
+              0.85,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "turret_ventral",
+          "name": "Ventral Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "fighter",
+            "corvette"
+          ],
+          "pos": [
+            0.0,
+            -1.64,
+            0.6
+          ],
+          "rot": [
+            0,
+            0,
+            180
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -10,
+              60
+            ],
+            "scale": [
+              0.85,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "armor_l",
+          "name": "Port Flank Plating",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -2.12,
+            0.4,
+            -0.8
+          ],
+          "rot": [
+            0,
+            90,
+            0
+          ],
+          "group": "flanks",
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -2.0,
+              2.0
+            ],
+            "scale": [
+              0.8,
+              1.8
+            ]
+          }
+        },
+        {
+          "id": "armor_r",
+          "name": "Starboard Flank Plating",
+          "mirror_of": "armor_l",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "group": "flanks"
+        },
+        {
+          "id": "greeble_tail",
+          "name": "Tail Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.6,
+            5.4
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -60,
+              60
+            ],
+            "scale": [
+              0.6,
+              2.4
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hull_capital_keel",
+      "name": "Keel Command Section",
+      "desc": "The bow section of a capital ship. Chain hull segments onto its aft spine to build something genuinely enormous — the design tree does not care how deep you go.",
+      "category": "chassis",
+      "size": "capital",
+      "cost": 4200000,
+      "mass_limit": 3800.0,
+      "tags": [
+        "capital",
+        "military"
+      ],
+      "stats": {
+        "mass": 480.0,
+        "hull_hp": 4200.0,
+        "agility_pool": 42.0,
+        "power_output": 170.0,
+        "power_draw": 22.0,
+        "energy_capacity": 700.0,
+        "fuel_capacity": 60.0,
+        "sensor_range": 90.0,
+        "heat_dissipation": 420.0
+      },
+      "mesh": {
+        "kind": "segment",
+        "length": 8.0,
+        "width": 5.0,
+        "height": 3.8,
+        "corner": 0.8,
+        "taper": 0.62,
+        "ribs": 2
+      },
+      "sockets": [
+        {
+          "id": "bridge",
+          "name": "Command Bridge",
+          "accepts": [
+            "cockpit"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            1.95,
+            1.2
+          ],
+          "required": true,
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.5,
+              1.5
+            ],
+            "scale": [
+              0.9,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "spine_aft",
+          "name": "Aft Spine (chain hull here)",
+          "accepts": [
+            "chassis"
+          ],
+          "sizes": [
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            6.5
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.0,
+              1.5
+            ],
+            "scale": [
+              0.85,
+              1.15
+            ]
+          }
+        },
+        {
+          "id": "engine_l",
+          "name": "Port Main Drive",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            -1.6,
+            -0.4,
+            4.05
+          ],
+          "required": true,
+          "group": "engines",
+          "joint": {
+            "yaw": [
+              -5,
+              5
+            ],
+            "pitch": [
+              -5,
+              5
+            ],
+            "scale": [
+              0.85,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "engine_r",
+          "name": "Starboard Main Drive",
+          "mirror_of": "engine_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "group": "engines"
+        },
+        {
+          "id": "turret_dorsal_fwd",
+          "name": "Forward Dorsal Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            1.9,
+            -2.2
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -8,
+              70
+            ],
+            "scale": [
+              0.85,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "turret_ventral_fwd",
+          "name": "Forward Ventral Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            -1.9,
+            -2.2
+          ],
+          "rot": [
+            0,
+            0,
+            180
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -8,
+              70
+            ],
+            "scale": [
+              0.85,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "hangar",
+          "name": "Hangar Bay",
+          "accepts": [
+            "cargo"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            -1.85,
+            1.0
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              -1,
+              0
+            ],
+            "slide": [
+              -0.6,
+              1.2
+            ],
+            "yaw": [
+              -90,
+              90
+            ],
+            "scale": [
+              0.8,
+              1.6
+            ]
+          }
+        },
+        {
+          "id": "armor_l",
+          "name": "Port Belt Armour",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            -2.5,
+            0.3,
+            0.0
+          ],
+          "rot": [
+            0,
+            90,
+            0
+          ],
+          "group": "belt",
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -2.5,
+              2.5
+            ],
+            "scale": [
+              0.8,
+              2.0
+            ]
+          }
+        },
+        {
+          "id": "armor_r",
+          "name": "Starboard Belt Armour",
+          "mirror_of": "armor_l",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "group": "belt"
+        },
+        {
+          "id": "greeble_mast",
+          "name": "Sensor Mast",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.95,
+            -0.4
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -30,
+              30
+            ],
+            "scale": [
+              1.0,
+              4.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hull_capital_segment",
+      "name": "Capital Hull Segment",
+      "desc": "One repeatable hull block. Mounts on a capital spine and offers another spine of its own, so segments chain indefinitely — this is what recursive sockets buy you.",
+      "category": "chassis",
+      "size": "capital",
+      "cost": 1150000,
+      "tags": [
+        "capital",
+        "modular",
+        "component"
+      ],
+      "stats": {
+        "mass": 210.0,
+        "hull_hp": 1900.0,
+        "agility_pool": -1.0,
+        "power_output": 48.0,
+        "power_draw": 8.0,
+        "energy_capacity": 160.0,
+        "fuel_capacity": 22.0,
+        "cargo_capacity": 90.0,
+        "heat_dissipation": 150.0
+      },
+      "mesh": {
+        "kind": "segment",
+        "length": 5.0,
+        "width": 4.6,
+        "height": 3.6,
+        "corner": 0.7,
+        "taper": 1.0,
+        "ribs": 3
+      },
+      "sockets": [
+        {
+          "id": "spine_aft",
+          "name": "Aft Spine (chain hull here)",
+          "accepts": [
+            "chassis"
+          ],
+          "sizes": [
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            0.0,
+            5.0
+          ],
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.0,
+              1.5
+            ],
+            "scale": [
+              0.85,
+              1.15
+            ]
+          }
+        },
+        {
+          "id": "turret_dorsal",
+          "name": "Dorsal Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            1.82,
+            0.0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -8,
+              70
+            ],
+            "scale": [
+              0.85,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "turret_ventral",
+          "name": "Ventral Turret",
+          "accepts": [
+            "weapon"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            0.0,
+            -1.82,
+            0.0
+          ],
+          "rot": [
+            0,
+            0,
+            180
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -8,
+              70
+            ],
+            "scale": [
+              0.85,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "sponson_l",
+          "name": "Port Sponson",
+          "accepts": [
+            "weapon",
+            "cargo"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -2.3,
+            0.0,
+            0.0
+          ],
+          "group": "sponsons",
+          "joint": {
+            "yaw": [
+              -45,
+              45
+            ],
+            "pitch": [
+              -20,
+              20
+            ],
+            "scale": [
+              0.8,
+              1.4
+            ]
+          }
+        },
+        {
+          "id": "sponson_r",
+          "name": "Starboard Sponson",
+          "mirror_of": "sponson_l",
+          "accepts": [
+            "weapon",
+            "cargo"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "group": "sponsons"
+        },
+        {
+          "id": "armor_l",
+          "name": "Port Belt Armour",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "pos": [
+            -2.32,
+            0.5,
+            0.0
+          ],
+          "rot": [
+            0,
+            90,
+            0
+          ],
+          "group": "belt",
+          "joint": {
+            "slide_axis": [
+              0,
+              0,
+              1
+            ],
+            "slide": [
+              -1.6,
+              1.6
+            ],
+            "scale": [
+              0.8,
+              2.0
+            ]
+          }
+        },
+        {
+          "id": "armor_r",
+          "name": "Starboard Belt Armour",
+          "mirror_of": "armor_l",
+          "accepts": [
+            "armor"
+          ],
+          "sizes": [
+            "hauler",
+            "capital"
+          ],
+          "group": "belt"
+        },
+        {
+          "id": "engine_aux_l",
+          "name": "Port Auxiliary Drive",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "pos": [
+            -1.9,
+            -1.2,
+            2.5
+          ],
+          "group": "aux",
+          "joint": {
+            "yaw": [
+              -8,
+              8
+            ],
+            "pitch": [
+              -8,
+              8
+            ],
+            "scale": [
+              0.8,
+              1.3
+            ]
+          }
+        },
+        {
+          "id": "engine_aux_r",
+          "name": "Starboard Auxiliary Drive",
+          "mirror_of": "engine_aux_l",
+          "accepts": [
+            "engine"
+          ],
+          "sizes": [
+            "corvette",
+            "hauler"
+          ],
+          "group": "aux"
+        },
+        {
+          "id": "greeble_dorsal",
+          "name": "Dorsal Detail",
+          "accepts": [
+            "greeble"
+          ],
+          "sizes": [
+            "fighter"
+          ],
+          "pos": [
+            0.0,
+            1.85,
+            1.6
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "joint": {
+            "yaw": [
+              -180,
+              180
+            ],
+            "pitch": [
+              -60,
+              60
+            ],
+            "scale": [
+              0.8,
+              3.0
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

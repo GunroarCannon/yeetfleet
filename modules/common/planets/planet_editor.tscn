@@ -1,0 +1,169 @@
+; PROJECT NEBULA — Planet editor.
+;
+; Authored as text so the structure is reviewable in a diff, and shaped like
+; ship_builder.tscn on purpose — same three rules:
+;
+;   1. Every node a script reaches for is unique_name_in_owner, so scripts
+;      address it as %Name and the tree can be rearranged without touching code.
+;   2. The 3D lives in a SubViewport whose container IS the input surface, so the
+;      rectangle the camera frames against is the rectangle the player sees.
+;   3. The side panel is a plain sibling of the stage, so one breakpoint check can
+;      turn it from a column into an overlay drawer.
+;
+; The previous version put a full-rect opaque ColorRect over the whole Control and
+; then drew the sliders on top of it, which hid the planet the sliders were for.
+
+[gd_scene load_steps=5 format=3 uid="uid://cnbla0planeted"]
+
+[ext_resource type="Script" path="res://modules/common/planets/planet_editor.gd" id="1_editor"]
+[ext_resource type="Script" path="res://modules/common/planets/planet.gd" id="2_planet"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/editor/orbit_camera.gd" id="3_camera"]
+
+[sub_resource type="Environment" id="Environment_stage"]
+background_mode = 1
+background_color = Color(0.02, 0.027, 0.043, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.29, 0.35, 0.47, 1)
+ambient_light_energy = 0.45
+tonemap_mode = 3
+tonemap_white = 4.0
+
+[node name="PlanetEditor" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_editor")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+[node name="TopBar" type="PanelContainer" parent="Layout"]
+layout_mode = 2
+
+[node name="TitleBar" type="HBoxContainer" parent="Layout/TopBar"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Body" type="HBoxContainer" parent="Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="Center" type="Control" parent="Layout/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="Stage" type="SubViewportContainer" parent="Layout/Body/Center"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+focus_mode = 2
+stretch = true
+
+[node name="World" type="SubViewport" parent="Layout/Body/Center/Stage"]
+own_world_3d = true
+handle_input_locally = false
+gui_disable_input = true
+msaa_3d = 1
+size = Vector2i(960, 660)
+render_target_update_mode = 4
+
+[node name="Environment" type="WorldEnvironment" parent="Layout/Body/Center/Stage/World"]
+environment = SubResource("Environment_stage")
+
+[node name="Camera" type="Camera3D" parent="Layout/Body/Center/Stage/World"]
+unique_name_in_owner = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 14)
+current = true
+fov = 50.0
+near = 0.05
+far = 4000.0
+script = ExtResource("3_camera")
+
+[node name="PreviewPlanet" type="Node3D" parent="Layout/Body/Center/Stage/World"]
+unique_name_in_owner = true
+script = ExtResource("2_planet")
+sun_direction = Vector3(0.62, 0.3, 0.72)
+
+[node name="Overlay" type="MarginContainer" parent="Layout/Body/Center"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="OverlayColumn" type="VBoxContainer" parent="Layout/Body/Center/Overlay"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="PanelToggles" type="HBoxContainer" parent="Layout/Body/Center/Overlay/OverlayColumn"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Gap" type="Control" parent="Layout/Body/Center/Overlay/OverlayColumn/PanelToggles"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="PanelToggle" type="Button" parent="Layout/Body/Center/Overlay/OverlayColumn/PanelToggles"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+mouse_filter = 1
+tooltip_text = "Show or hide the planet controls (])"
+text = "Tune"
+
+[node name="Spacer" type="Control" parent="Layout/Body/Center/Overlay/OverlayColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="StatusLabel" type="Label" parent="Layout/Body/Center/Overlay/OverlayColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.545, 0.592, 0.659, 1)
+theme_override_font_sizes/font_size = 11
+text = "Drag to orbit · wheel or pinch to zoom"
+autowrap_mode = 2
+
+[node name="ViewBar" type="HBoxContainer" parent="Layout/Body/Center/Overlay/OverlayColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 1
+
+[node name="SidePanel" type="PanelContainer" parent="Layout/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+
+[node name="PanelScroll" type="ScrollContainer" parent="Layout/Body/SidePanel"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="Controls" type="VBoxContainer" parent="Layout/Body/SidePanel/PanelScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4

@@ -1,0 +1,303 @@
+; PROJECT NEBULA — Ship Builder test harness.
+;
+; Authored as text rather than through the editor so the structure is reviewable in
+; a diff. Three rules govern it:
+;
+;   1. Every node a script reaches for is marked unique_name_in_owner, so scripts
+;      address them as %Name and the tree can be rearranged without touching code.
+;   2. The 3D lives in a SubViewport whose container IS the BuilderViewport, so pick
+;      rays, framing and drop targets all use the same rectangle the player sees.
+;   3. Panels are plain children of the root scene, so `owner as BuilderRoot` finds
+;      the single mutation path from any depth.
+
+[gd_scene load_steps=19 format=3 uid="uid://bnbla0shipbuild"]
+
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/editor/builder_root.gd" id="1_root"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/design_bar.gd" id="2_bar"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/part_palette.gd" id="3_palette"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/editor/builder_viewport.gd" id="4_viewport"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/editor/orbit_camera.gd" id="5_camera"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/editor/ghost_preview.gd" id="6_ghost"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/editor/systems_sim.gd" id="7_systems"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/stat_panel.gd" id="8_stats"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/part_inspector.gd" id="9_inspector"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/socket_tree.gd" id="10_tree"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/paint_panel.gd" id="11_paint"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/systems_panel.gd" id="12_systems_ui"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/toast.gd" id="13_toast"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/help_overlay.gd" id="14_help"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/view_bar.gd" id="15_viewbar"]
+[ext_resource type="Script" path="res://modules/ship_builder/scripts/ui/coach_overlay.gd" id="16_coach"]
+
+[sub_resource type="Environment" id="Environment_stage"]
+background_mode = 1
+background_color = Color(0.043, 0.055, 0.078, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.29, 0.35, 0.47, 1)
+ambient_light_energy = 0.5
+tonemap_mode = 3
+tonemap_white = 4.0
+
+[node name="ShipBuilder" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_root")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+[node name="TopBar" type="PanelContainer" parent="Layout"]
+layout_mode = 2
+
+[node name="DesignBar" type="HBoxContainer" parent="Layout/TopBar"]
+layout_mode = 2
+script = ExtResource("2_bar")
+
+[node name="Body" type="HBoxContainer" parent="Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="LeftPanel" type="PanelContainer" parent="Layout/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+
+[node name="PartPalette" type="VBoxContainer" parent="Layout/Body/LeftPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 5
+script = ExtResource("3_palette")
+
+[node name="Center" type="Control" parent="Layout/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ViewportFrame" type="SubViewportContainer" parent="Layout/Body/Center"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+focus_mode = 2
+stretch = true
+script = ExtResource("4_viewport")
+
+[node name="Stage" type="SubViewport" parent="Layout/Body/Center/ViewportFrame"]
+own_world_3d = true
+handle_input_locally = false
+gui_disable_input = true
+msaa_3d = 1
+size = Vector2i(660, 660)
+render_target_update_mode = 4
+
+[node name="World" type="Node3D" parent="Layout/Body/Center/ViewportFrame/Stage"]
+unique_name_in_owner = true
+
+[node name="Environment" type="WorldEnvironment" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+environment = SubResource("Environment_stage")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+transform = Transform3D(0.536875, 0, -0.843661, -0.636738, 0.656033, -0.405197, 0.55347, 0.754732, 0.352208, 6, 8, 4)
+light_color = Color(1, 0.957, 0.89, 1)
+light_energy = 1.5
+light_specular = 0.55
+shadow_enabled = true
+directional_shadow_mode = 0
+directional_shadow_max_distance = 70.0
+
+[node name="FillLight" type="DirectionalLight3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+transform = Transform3D(-0.675725, 0, 0.737154, 0.216436, 0.955925, 0.1984, -0.704664, 0.29361, -0.645942, -6, 3, -6)
+light_color = Color(0.545, 0.643, 0.847, 1)
+light_energy = 0.28
+light_specular = 0.0
+
+[node name="RimLight" type="DirectionalLight3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+transform = Transform3D(0.998618, 0, 0.0525588, -0.0158072, 0.953702, 0.300337, -0.0501255, -0.300753, 0.952384, 0, -3, 9)
+light_color = Color(0.353, 0.702, 0.98, 1)
+light_energy = 0.22
+light_specular = 0.0
+
+[node name="Camera" type="Camera3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+unique_name_in_owner = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 8)
+current = true
+fov = 55.0
+near = 0.05
+far = 600.0
+script = ExtResource("5_camera")
+
+[node name="ShipHolder" type="Node3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+unique_name_in_owner = true
+
+[node name="Ghost" type="Node3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+unique_name_in_owner = true
+script = ExtResource("6_ghost")
+
+[node name="Systems" type="Node3D" parent="Layout/Body/Center/ViewportFrame/Stage/World"]
+unique_name_in_owner = true
+script = ExtResource("7_systems")
+
+[node name="ViewportOverlay" type="MarginContainer" parent="Layout/Body/Center"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="OverlayColumn" type="VBoxContainer" parent="Layout/Body/Center/ViewportOverlay"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="PanelToggles" type="HBoxContainer" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 1
+
+[node name="LeftToggle" type="Button" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn/PanelToggles"]
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+tooltip_text = "Show or hide the parts palette ([)"
+text = "Parts"
+
+[node name="Gap" type="Control" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn/PanelToggles"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="RightToggle" type="Button" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn/PanelToggles"]
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+tooltip_text = "Show or hide the stats and inspector (])"
+text = "Stats"
+
+[node name="Spacer" type="Control" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Toast" type="VBoxContainer" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn"]
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("13_toast")
+
+[node name="StatusLabel" type="Label" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.545, 0.592, 0.659, 1)
+theme_override_font_sizes/font_size = 11
+text = "Drag to orbit · tap a part to select it"
+
+[node name="ViewBar" type="HBoxContainer" parent="Layout/Body/Center/ViewportOverlay/OverlayColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 1
+script = ExtResource("15_viewbar")
+
+[node name="RightPanel" type="PanelContainer" parent="Layout/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+
+[node name="RightColumn" type="VBoxContainer" parent="Layout/Body/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="StatScroll" type="ScrollContainer" parent="Layout/Body/RightPanel/RightColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.55
+horizontal_scroll_mode = 0
+
+[node name="StatPanel" type="VBoxContainer" parent="Layout/Body/RightPanel/RightColumn/StatScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+script = ExtResource("8_stats")
+
+[node name="Tabs" type="TabContainer" parent="Layout/Body/RightPanel/RightColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+tab_alignment = 1
+clip_tabs = false
+
+[node name="Part" type="ScrollContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="PartInspector" type="VBoxContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs/Part"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+script = ExtResource("9_inspector")
+
+[node name="Structure" type="VBoxContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+script = ExtResource("10_tree")
+
+[node name="Paint" type="ScrollContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="PaintPanel" type="VBoxContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs/Paint"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+script = ExtResource("11_paint")
+
+[node name="Systems" type="ScrollContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="SystemsPanel" type="VBoxContainer" parent="Layout/Body/RightPanel/RightColumn/Tabs/Systems"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+script = ExtResource("12_systems_ui")
+
+[node name="HelpOverlay" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("14_help")
+
+[node name="Coach" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("16_coach")

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "MYCELID"
+display_name = "Mycelid"
+ranges = {"cranium_bulge": Vector2(0.7, 0.95), "temple_pinch": Vector2(0.6, 0.8)}
+presence = {"nose": -1.0}
+enum_weights = {"eye_shape": {7: 1.0}, "nose_type": {0: 1.0}, "mouth_type": {6: 1.0}, "crest_type": {4: 1.0}, "skin_texture": {6: 1.0}, "marking_type": {1: 0.5, 6: 0.5}}
+allowed_palettes = ["fungal_bloom", "amphib_moss"]
+symmetry_mode = 2
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "MYCELID"

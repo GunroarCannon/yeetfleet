@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "DRACONIAN"
+display_name = "Draconian"
+ranges = {"brow_ridge": Vector2(0.7, 1.0), "jaw_length": Vector2(0.6, 0.85), "occipital_extend": Vector2(0.5, 0.8)}
+presence = {}
+enum_weights = {"eye_shape": {2: 1.0}, "pupil_shape": {1: 1.0}, "nose_type": {4: 1.0}, "mouth_type": {8: 1.0}, "crest_type": {2: 0.5, 5: 0.5}}
+allowed_palettes = ["desert_scale", "plated_brute"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "DRACONIAN"

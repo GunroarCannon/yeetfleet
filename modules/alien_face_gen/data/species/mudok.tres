@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "MUDOK"
+display_name = "Mudok"
+ranges = {"cranium_height": Vector2(0.7, 0.9), "cranium_bulge": Vector2(0.6, 0.8), "jaw_width": Vector2(0.5, 0.7), "eye_spacing": Vector2(0.8, 1.0), "eye_glow": Vector2(0.2, 0.4)}
+presence = {"nose": -1.0}
+enum_weights = {"eye_shape": {0: 1.0}, "nose_type": {0: 1.0}, "mouth_type": {7: 1.0}, "crest_type": {6: 1.0}, "skin_texture": {7: 1.0}}
+allowed_palettes = ["amphib_moss", "deep_bio"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "MUDOK"

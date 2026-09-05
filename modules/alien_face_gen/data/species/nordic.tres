@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SpeciesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/alien_face_gen/core/species_def.gd" id="1"]
+[resource]
+script = ExtResource("1")
+id = "NORDIC"
+display_name = "Nordic"
+ranges = {"cranium_width": Vector2(0.35, 0.65), "cranium_height": Vector2(0.35, 0.65), "jaw_width": Vector2(0.35, 0.65), "brow_ridge": Vector2(0.35, 0.65)}
+presence = {}
+enum_weights = {"eye_shape": {1: 0.5, 0: 0.5}, "pupil_shape": {0: 1.0}, "nose_type": {2: 1.0}, "mouth_type": {1: 1.0}, "crest_type": {1: 1.0}, "marking_type": {0: 0.7, 3: 0.3}}
+allowed_palettes = ["terran_warm", "pop_flat"]
+symmetry_mode = 0
+radial_count = 2
+default_style_2d = "flat_vector"
+default_style_3d = "faceted"
+silhouette_tag = "NORDIC"
