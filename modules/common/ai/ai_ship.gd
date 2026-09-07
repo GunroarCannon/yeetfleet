@@ -150,6 +150,22 @@ func set_gravity(gravity_system: GravitySystem) -> void:
 		behaviour.gravity_ref = gravity_system
 
 
+## Give this ship's FlightModel a body in the shared [PhysWorld] (M1b), so it
+## collides with the player, other ships and scenery through the same layer the
+## player uses — a ship can now be knocked, not just bounce. Called by the
+## spawner after [method initialise]. Passing null unbinds.
+func set_phys_world(world: PhysWorld) -> void:
+	if model == null:
+		return
+	if world == null:
+		model.clear_phys_world()
+		return
+	var radius := 3.0
+	if _view != null:
+		radius = maxf(_view.aabb.size.length() * 0.5, 3.0)
+	model.set_phys_world(world, radius)
+
+
 ## Called by [AiSpawner] after spawning to assign faction archetype and
 ## group membership. The archetype determines HOW the ship moves and fights
 ## as part of a group.
@@ -296,6 +312,9 @@ func _destroy() -> void:
 	systems.set_firing(false)
 	systems.set_throttle(0.0)
 	systems.set_boost(false)
+	# Leave the physics world: a destroyed ship is a corpse, not a collider.
+	if model != null:
+		model.clear_phys_world()
 
 	# Explosion juice: the full stack.
 	Juice.burst(BurstPresets.Preset.SPARKS, global_transform, 2.0, Color("ff8844"))
@@ -372,6 +391,8 @@ func _build_random_design(library: PartLibrary) -> ShipDesign:
 ## Clean up and free this ship's resources.
 func teardown() -> void:
 	_alive = false
+	if model != null:
+		model.clear_phys_world()
 	if systems != null:
 		systems.stop_all()
 	if _view != null:

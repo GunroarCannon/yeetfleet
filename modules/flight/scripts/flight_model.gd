@@ -8,10 +8,13 @@
 ## travel are unrelated). Both run through the same integrator; assist is one
 ## extra force that steers velocity towards the nose.
 ##
-## The ship is a plain [Node3D] with manual collision checks against known
-## obstacles (planet, station, asteroids). A hand-integrated state is far easier
-## to tune and to test than a [RigidBody3D] whose behaviour is buried in the
-## physics server.
+## The ship is a plain [Node3D] that integrates its own velocity. Collision is a
+## separate concern: once the scene binds this model to a [PhysWorld] (M1b) the
+## ship is a driven body there — it writes its velocity each step and the world
+## resolves it against scenery and other ships, handing impulses and spin back.
+## A model that never joins a world keeps the old distance-based checks. A
+## hand-integrated state is far easier to tune and to test than a [RigidBody3D]
+## whose behaviour is buried in the physics server.
 class_name FlightModel
 extends Node3D
 
@@ -131,6 +134,38 @@ const WARP_SPEED_MULT := 8.0
 ## When non-null, gravitational forces are applied each physics frame.
 var gravity: GravitySystem = null
 
+## Physics-layer membership (M1b). Null until the scene binds this model to a
+## [PhysWorld]; once bound, collisions run through that world — this model
+## writes its velocity onto [member _phys] each step and reads the solver's
+## impulses and spin back, and the old distance-based [_method _check_collision]
+## is disabled. A model that never joins a world keeps the old hand-rolled
+## collision as a fallback.
+var phys_world: PhysWorld = null
+## This ship's body in the world. The controller (this model) writes its
+## velocity and moves its own node; the world resolves against it and never
+## integrates it. See [PhysBody.driven].
+var _phys: PhysBody = null
+## Rad/s of collision-induced tumble about a world axis, applied on top of the
+## commanded rotation and decaying at the profile's spin damp. Kept separate
+## from [member angular] so the pilot never fights a knocked spin through the
+## stick — you recover from a tumble by boosting, not by fighting it.
+var _tumble := Vector3.ZERO
+## Seconds left in the post-impact window where flight-assist, damping and the
+## orbital assist stay disengaged, so the consequence of a hit is visible
+## before the computer flies the ship back onto its rails (§3.1 #6). Set from
+## [PhysProfile.assist_lockout_on_impact].
+var _assist_lockout := 0.0
+
+## An induced tumble is capped so a lucky glancing hit cannot spin the ship so
+## fast it becomes unrecoverable or nauseating.
+const TUMBLE_MAX := 5.0
+## Approach speed (m/s) below which a contact is a touch, not a crash.
+const IMPACT_TOUCH_SPEED := 6.0
+## Approach speed at which a hit starts breaking parts off. One number where the
+## pre-M1 code had a per-scenery split (30 for rocks, 120 for planets); the
+## profile is where this belongs once the lab can tune it.
+const IMPACT_DAMAGE_SPEED := 60.0
+
 ## Orbit detection: emits when the ship enters or leaves a stable orbit.
 signal orbit_changed(body_name: String, in_orbit: bool)
 var _in_orbit := false
@@ -214,6 +249,10 @@ func configure(stats: ShipStats, systems: SystemsSim, damage: DamageSystem = nul
 	top_speed = base_speed * preset["speed_mult"]
 	accel = base_accel * preset["accel_mult"]
 	turn_rate = base_turn * preset["turn_mult"]
+	# A design re-tune (control mode preset, damage-driven re-derive) changes the
+	# mass the physics layer resolves this ship with.
+	if _phys != null:
+		_phys.mass = _ship_mass()
 
 
 func set_control_mode(mode: int) -> void:
@@ -265,7 +304,12 @@ func target_speed() -> float:
 func halt() -> void:
 	velocity = Vector3.ZERO
 	angular = Vector3.ZERO
+	_tumble = Vector3.ZERO
+	_assist_lockout = 0.0
 	boost_level = 0.0
+	if _phys != null:
+		_phys.velocity = Vector3.ZERO
+		_phys.angular = Vector3.ZERO
 	# Re-derive speed/turn from stats if we have them, undoing any damage.
 	if _stats != null:
 		top_speed = clampf(_stats.top_speed, SPEED_MIN, SPEED_MAX)
@@ -275,11 +319,16 @@ func halt() -> void:
 
 func _physics_process(delta: float) -> void:
 	_update_boost(delta)
+	_pull_solver_state(delta)
 	_integrate_rotation(delta)
 	_integrate_translation(delta)
 	_update_visual_roll(delta)
 	_update_quick_turn(delta)
-	_check_collision()
+	# Collisions are the PhysWorld's job once this model is bound to one; the old
+	# distance-based tests are only a fallback for a model that never joined a
+	# world (the tuning test volume, a combat arena without physics).
+	if phys_world == null:
+		_check_collision()
 
 
 # --- Rotation ---------------------------------------------------------------
@@ -306,7 +355,7 @@ func _integrate_rotation(delta: float) -> void:
 	if absf(command.roll) < 0.01:
 		angular.z = lerpf(angular.z, 0.0, decay)
 
-	if angular.length_squared() < 1e-8:
+	if angular.length_squared() < 1e-8 and _tumble.length_squared() < 1e-8:
 		return
 	# Rotate in the body frame, in pitch/yaw/roll order. Applied as three local
 	# rotations rather than one euler assignment so the ship has no gimbal lock
@@ -315,6 +364,17 @@ func _integrate_rotation(delta: float) -> void:
 	basis = basis.rotated(basis.x, angular.x * delta)
 	basis = basis.rotated(basis.y, angular.y * delta)
 	basis = basis.rotated(basis.z, angular.z * delta)
+	# Collision tumble rides on top, about a *world* axis (that is the axis the
+	# solver spun this ship around). Premultiplied so it is independent of where
+	# the nose happens to point, then decayed at the profile's mode-dependent
+	# spin damp — fast when assist is flying, slow when the pilot is on manual,
+	# which is what makes "got knocked, boost to recover" a real event.
+	if _tumble.length_squared() > 1e-10:
+		var rate := _tumble.length()
+		var step := rate * delta
+		if step > 1e-6:
+			basis = (Basis(_tumble / rate, step) * basis).orthonormalized()
+		_tumble *= clampf(1.0 - _spin_damp_now() * delta, 0.0, 1.0)
 	# Renormalise: thousands of incremental rotations accumulate skew otherwise,
 	# and a sheared basis shears the whole ship with it.
 	global_transform = Transform3D(basis.orthonormalized(), global_transform.origin)
@@ -339,7 +399,13 @@ func _integrate_translation(delta: float) -> void:
 	var coasting := gravity_active \
 		and absf(command.throttle) < 0.01 and command.strafe == Vector3.ZERO
 
-	if assist_mode == 2:
+	# For a moment after an impact the ship flies manual: assist and damping
+	# would erase the knock before the player has seen it, which is exactly the
+	# "assist that undoes the story" the design bans (§3.1 #6). During the
+	# lockout window the ship keeps whatever the collision handed it.
+	var ctl := 0 if _assist_lockout > 0.0 else assist_mode
+
+	if ctl == 2:
 		# Fly-by-wire: compute the velocity the pilot is asking for — the target
 		# speed, along the nose — and accelerate towards it. This one line is the
 		# whole difference between the full-assist mode.
@@ -351,7 +417,7 @@ func _integrate_translation(delta: float) -> void:
 				velocity = wanted
 			else:
 				velocity += error.normalized() * step
-	elif assist_mode == 1:
+	elif ctl == 1:
 		# Damping: thrust like manual, but the velocity slowly relaxes towards
 		# the nose heading. Gives the player a safety net without flying for them.
 		velocity += forward * (thrust * command.throttle * delta)
@@ -395,6 +461,12 @@ func _integrate_translation(delta: float) -> void:
 	# Orbit detection — check every frame, emit signal on state change.
 	_check_orbit()
 
+	# Hand the final velocity to the world (M1b) before moving the node, so the
+	# solver's swept test measures the same travel this node is about to make.
+	# The node moves here, not in the world: this is a driven body that keeps
+	# its tuned hand-integration.
+	if _phys != null:
+		_phys.velocity = velocity
 	global_position += velocity * delta
 
 
@@ -524,6 +596,107 @@ func _on_impact(impact_speed: float) -> void:
 		_damage.handle_impact(impact_speed)
 
 
+# --- Physics layer (M1b) ------------------------------------------------------
+
+## Bind this model to the scene's PhysWorld as a driven ship body. [param radius]
+## is the collision-sphere radius for the hull (from the design's bounds); the
+## mass is read from [ShipStats]. Once bound, collisions run through the world:
+## this model writes its velocity each step and reads the solver's impulses and
+## spin back, and the fallback [_method _check_collision] is disabled.
+func set_phys_world(world: PhysWorld, radius: float) -> void:
+	if _phys == null:
+		_phys = PhysBody.new(_ship_mass(), radius)
+		_phys.node = self
+		_phys.driven = true
+		_phys.layer = PhysBody.Layer.SHIP
+		_phys.impacted.connect(_on_phys_impacted)
+	else:
+		_phys.radius = radius
+	_phys.mass = _ship_mass()
+	_phys.velocity = velocity
+	phys_world = world
+	if world != null and not world.bodies.has(_phys):
+		world.add(_phys)
+
+
+## Leave the world (ship destroyed, scene torn down). Idempotent.
+func clear_phys_world() -> void:
+	if phys_world != null and _phys != null:
+		phys_world.remove(_phys)
+	phys_world = null
+
+
+## The mass the physics layer resolves this ship with: the fully-loaded mass the
+## stats computed, falling back to the hull stat when the ship carries no cargo.
+func _ship_mass() -> float:
+	if _stats == null:
+		return 1.0
+	var m := _stats.loaded_mass
+	if m <= 0.0:
+		m = _stats.get_stat("mass")
+	return maxf(m, 0.5)
+
+
+## Called by [PhysWorld] when this body took an impulse. Routes the severity of
+## the hit — its closing speed, the number a pilot reads as "how hard did I hit
+## that" — into the assist lockout, part damage and hitstop.
+func _on_phys_impacted(_other: PhysBody, _impulse: float, _point: Vector3, _normal: Vector3, closing: float) -> void:
+	if closing <= IMPACT_TOUCH_SPEED:
+		return
+	var profile := _active_profile()
+	# Disengage the assists for the profile's window so the knock plays out. The
+	# window is set, never shortened: a second hit inside it keeps the ship
+	# reeling rather than resetting the timer mid-fall.
+	var lockout := profile.assist_lockout_on_impact if profile != null else 0.6
+	if lockout > _assist_lockout:
+		_assist_lockout = lockout
+	# Damage: a genuinely fast slam breaks parts off. Only the player has a
+	# [DamageSystem]; AI ships (configured with none) just take the knock.
+	if closing >= IMPACT_DAMAGE_SPEED and _damage != null:
+		_damage.handle_impact(closing)
+	# Impact freeze, scaled by the profile. OFF by default in flight unless the
+	# profile or reduce-motion lets it through — calling it is the wiring; Juice
+	# holds the final say.
+	if profile != null and profile.hitstop_scale > 0.0 and closing > IMPACT_TOUCH_SPEED * 2.0:
+		var seconds := clampf(0.015 + closing * 0.0004, 0.02, profile.hitstop_max)
+		Juice.hitstop(seconds * profile.hitstop_scale, 0.15)
+	# A little shake so even a mid hit reads in the camera.
+	Juice.shake(clampf(closing * 0.002, 0.05, 0.35), 0.3)
+
+
+## At the start of each physics step, take back what the solver did to this
+## ship's body last step: the knocked velocity becomes this frame's base, and
+## any spin the solver wrote is folded into the induced tumble (then cleared so
+## it cannot accumulate). Also decays the assist-lockout window.
+func _pull_solver_state(delta: float) -> void:
+	if _assist_lockout > 0.0:
+		_assist_lockout = maxf(_assist_lockout - delta, 0.0)
+	if _phys == null:
+		return
+	velocity = _phys.velocity
+	if _phys.angular != Vector3.ZERO:
+		_tumble = (_tumble + _phys.angular).limit_length(TUMBLE_MAX)
+		_phys.angular = Vector3.ZERO
+
+
+## How fast an induced tumble decays right now: fast while full assist is flying
+## (it damps the wobble away), slow on manual or damping — and the ship is
+## effectively manual during the lockout window, so the knock is actually seen.
+func _spin_damp_now() -> float:
+	var profile := _active_profile()
+	if profile == null:
+		return SPIN_DAMP_ASSIST if assist_mode == 2 else SPIN_DAMP_FREE
+	if assist_mode == 2 and _assist_lockout <= 0.0:
+		return profile.spin_damp_assist
+	return profile.spin_damp_induced
+
+
+func _active_profile() -> PhysProfile:
+	if phys_world != null:
+		return phys_world.profile
+	return null
+
+
 ## Settle into orbit. In full assist, while coasting (no throttle / strafe /
 ## boost) under gravity near a body, gently steer velocity toward the local
 ## circular-orbit velocity — radial component driven to zero, tangential driven
@@ -534,6 +707,11 @@ func _apply_orbital_assist(delta: float) -> void:
 	if assist_mode != 2:
 		return
 	if gravity == null or gravity.mode == GravitySystem.GravityMode.OFF:
+		return
+	# A recent impact disengages orbital assist too: a ship knocked toward a
+	# planet should visibly fall for a moment, not be silently re-circularised
+	# the instant it stops touching the throttle (§3.1 #6).
+	if _assist_lockout > 0.0:
 		return
 	# Throttle, strafe or boost means the pilot is flying — leave orbit.
 	if absf(command.throttle) > 0.01 or command.strafe != Vector3.ZERO or command.boost:

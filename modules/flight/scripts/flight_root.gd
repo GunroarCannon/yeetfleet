@@ -138,6 +138,16 @@ var _touch_accel := false
 var _ai_spawner: AiSpawner = null
 var gravity: GravitySystem = null
 var _gravity_viz: GravityVisualizer = null
+
+## The scene's collision world (M1b). Built only for [constant Location.SPACE]:
+## populated with the player's ship, AI ships (via the spawner) and every static
+## collider SpaceScene exposes, then stepped by a [PhysWorldDriver] after all
+## controllers have written their bodies' velocities. Null elsewhere — the test
+## volume has no colliders and keeps the model's fallback collision. Torn down
+## with the space scene so a freed SpaceScene never leaves bodies dangling.
+var phys_world: PhysWorld = null
+var _phys_profile: PhysProfile = null
+var _phys_driver: PhysWorldDriver = null
 var _planet_pointer: PlanetPointer = null
 var _spawn := Transform3D()
 ## Rear view camera: SubViewport + Camera3D looking backward from the ship.
@@ -221,6 +231,10 @@ func _ready() -> void:
 		if space != null:
 			space.set_gravity(gravity)
 	_setup_gravity_viz()
+	# M1b: the physics layer. Must come after the ship is spawned and the space
+	# scene has built its rocks — both are above — so the player's body can be
+	# bound with its real mass and the scenery can be registered once.
+	_build_phys_world()
 
 
 	# The theme goes on the window rather than on a Control, because this scene's
@@ -349,6 +363,63 @@ func _setup_gravity_viz() -> void:
 		_gravity_viz.queue_free()
 		_gravity_viz = null
 	# Don't create until first toggle — nothing in the scene tree.
+
+
+## Build the scene's [PhysWorld] (M1b). Only space has colliders; the tuning
+## test volume keeps none and stays on the model's fallback collision.
+func _build_phys_world() -> void:
+	if location != Location.SPACE or space == null or model == null:
+		return
+	_phys_profile = load("res://modules/physics/data/profiles/grounded.tres") as PhysProfile
+	if _phys_profile == null:
+		push_warning("FlightRoot: grounded.tres missing — using built-in profile defaults")
+		_phys_profile = PhysProfile.new()
+	phys_world = PhysWorld.new(_phys_profile)
+
+	var driver := PhysWorldDriver.new()
+	driver.name = "PhysDriver"
+	driver.world = phys_world
+	add_child(driver)
+	_phys_driver = driver
+
+	# Static scenery: planets, the moon, the station and every rock become
+	# kinematic bodies — infinite-mass walls with a radius. Rocks bounce the
+	# ship per the profile's restitution but are not pushed yet (that is the
+	# rock-promotion step, M1 continuing).
+	for collider in space.collision_statics():
+		var body := PhysBody.new(1.0, float(collider["radius"]))
+		body.node = collider["node"]
+		body.layer = int(collider["layer"])
+		body.kinematic = true
+		phys_world.add(body)
+
+	# The player's own ship: a driven body that keeps its hand integration.
+	var hull_radius := 3.0
+	if view != null:
+		hull_radius = _ship_collision_radius(view.aabb)
+	model.set_phys_world(phys_world, hull_radius)
+
+
+## Drop the physics layer: unbind the player's body, free the driver, clear the
+## world. Called when leaving space so a freed SpaceScene never leaves bodies
+## pointing at its (now gone) collider nodes. The AI ships unbind themselves on
+## teardown, which the caller runs before this.
+func _teardown_phys_world() -> void:
+	if model != null:
+		model.clear_phys_world()
+	if _phys_driver != null:
+		_phys_driver.queue_free()
+		_phys_driver = null
+	phys_world = null
+	_phys_profile = null
+
+
+## The collision-sphere radius for the assembled hull: half the bounding box's
+## diagonal, i.e. the sphere that just contains the whole design. This replaces
+## the old fixed +5/+3 standoffs (plan §3.1 #13) with a number that scales with
+## the actual ship — a scout and a hauler no longer collide at the same size.
+func _ship_collision_radius(bounds: AABB) -> float:
+	return maxf(bounds.size.length() * 0.5, 3.0)
 
 
 func _build_test_volume_environment() -> void:
@@ -1560,6 +1631,9 @@ func toggle_location() -> void:
 		_ai_spawner.teardown()
 		_ai_spawner.queue_free()
 		_ai_spawner = null
+	# Drop the physics layer before the space scene goes: bodies must not keep
+	# pointing at collider nodes that are about to be freed.
+	_teardown_phys_world()
 	if space != null:
 		space.queue_free()
 		space = null
@@ -1575,6 +1649,9 @@ func toggle_location() -> void:
 	camera_rig.space = space
 	if gravity != null and model != null:
 		model.gravity = gravity
+	# Returning to space rebuilds the physics layer over the fresh scene.
+	if location == Location.SPACE:
+		_build_phys_world()
 	_mote_field_on = true
 	_motes.visible = _mote_field_on
 	match location:

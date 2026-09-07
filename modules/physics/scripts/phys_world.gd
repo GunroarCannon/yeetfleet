@@ -54,34 +54,70 @@ func step(delta: float) -> void:
 			_integrate(body, delta)
 		return
 
-	var pairs := Broadphase.pairs(bodies)
+	# Movers are bodies that can be pushed (ships, rocks, debris); scenery is
+	# kinematic — infinite-mass walls. Two movers pair through the spatial hash.
+	# Scenery never hashes: it is static, so it cannot need pruning against
+	# itself, and hashing a 1400 m planet alongside 6 m rocks would blow the
+	# cell size up and make the hash useless. Instead every mover is tested
+	# against every piece of scenery directly — a couple of hundred rocks
+	# against a dozen ships is a cheap sweep, and a reach check prunes each pair
+	# before it spends the budget. (When rocks become movable in M1's later
+	# step they join the mover hash and this sweep stops.)
+	var movers: Array[PhysBody] = []
+	var scenery: Array[PhysBody] = []
+	for body in bodies:
+		if body.kinematic:
+			scenery.append(body)
+		else:
+			movers.append(body)
+
 	_stepped_pairs = 0
 	_resolved_pairs = 0
 	var budget := profile.max_pairs_per_step
-	for pair in pairs:
+	if movers.size() >= 2:
+		for pair in Broadphase.pairs(movers):
+			budget = _try_pair(movers[pair[0]], movers[pair[1]], delta, budget)
+	for s in scenery:
+		for m in movers:
+			budget = _try_pair(s, m, delta, budget)
+			if budget <= 0:
+				break
 		if budget <= 0:
 			break
-		budget -= 1
-		_stepped_pairs += 1
-		var a: PhysBody = bodies[pair[0]]
-		var b: PhysBody = bodies[pair[1]]
-		if not _layers_touch(a, b):
-			continue
-		if a.kinematic and b.kinematic:
-			continue
-		var report := ImpulseSolver.resolve(a, b, delta, profile)
-		if not bool(report["resolved"]):
-			continue
-		_resolved_pairs += 1
-		var impulse := float(report["impulse"])
-		var point: Vector3 = report["point"]
-		var normal: Vector3 = report["normal"]
-		var closing := float(report.get("closing", 0.0))
-		a.impacted.emit(b, impulse, point, normal, closing)
-		b.impacted.emit(a, impulse, point, normal, closing)
 
 	for body in bodies:
 		_integrate(body, delta)
+
+
+## Resolve one candidate pair if it could actually touch this step, spending
+## one unit of [param budget] (returned drained) only on a pair that reaches
+## the solver. Emits `impacted` on both sides when a contact was resolved.
+func _try_pair(a: PhysBody, b: PhysBody, delta: float, budget: int) -> int:
+	if not _layers_touch(a, b):
+		return budget
+	if a.kinematic and b.kinematic:
+		return budget
+	# Reach check before spending budget: two bodies whose spheres cannot meet
+	# this step (their radii plus the furthest either travels) are a no-op.
+	var travel := (a.velocity - b.velocity).length() * delta
+	var reach := a.radius + b.radius + travel
+	if a.position().distance_squared_to(b.position()) > reach * reach:
+		return budget
+	if budget <= 0:
+		return budget
+	budget -= 1
+	_stepped_pairs += 1
+	var report := ImpulseSolver.resolve(a, b, delta, profile)
+	if not bool(report["resolved"]):
+		return budget
+	_resolved_pairs += 1
+	var impulse := float(report["impulse"])
+	var point: Vector3 = report["point"]
+	var normal: Vector3 = report["normal"]
+	var closing := float(report.get("closing", 0.0))
+	a.impacted.emit(b, impulse, point, normal, closing)
+	b.impacted.emit(a, impulse, point, normal, closing)
+	return budget
 
 
 ## Does body A's mask admit body B's layer, and vice versa? Both sides have to

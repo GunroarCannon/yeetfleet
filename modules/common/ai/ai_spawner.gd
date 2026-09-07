@@ -220,6 +220,8 @@ func _spawn_group() -> void:
 		var grav := _find_gravity()
 		if grav != null:
 			ship.set_gravity(grav)
+		# Join the shared physics layer so ships can knock and be knocked (M1b).
+		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
 		_ships.append(ship)
 
@@ -247,6 +249,16 @@ func _find_gravity() -> GravitySystem:
 	var root := get_parent()
 	if root is FlightRoot:
 		return root.gravity
+	return null
+
+
+## The shared PhysWorld, found the same way gravity is. Null when the parent is
+## not a space [FlightRoot] (the tuning test volume, a combat arena without a
+## physics layer) — ships just do not join a world there.
+func _find_world() -> PhysWorld:
+	var root := get_parent()
+	if root is FlightRoot:
+		return root.phys_world
 	return null
 
 
@@ -287,6 +299,7 @@ func spawn_ballistic_satellite(grav: GravitySystem, distance: float) -> AiShip:
 	var grav_ref := _find_gravity()
 	if grav_ref != null:
 		ship.set_gravity(grav_ref)
+	ship.set_phys_world(_find_world())
 	# Ballistic: no AI, no teams — just the perfect circular orbit.
 	ship._ai_paused = true
 	ship.is_satellite = true
@@ -356,6 +369,8 @@ func spawn_hunters() -> void:
 		var grav := _find_gravity()
 		if grav != null:
 			ship.set_gravity(grav)
+		# Join the shared physics layer so ships can knock and be knocked (M1b).
+		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
 		_ships.append(ship)
 
@@ -394,6 +409,8 @@ func spawn_group_with(arch: AiFactions.ArchetypeData, count: int, team: int = 0)
 		var grav := _find_gravity()
 		if grav != null:
 			ship.set_gravity(grav)
+		# Join the shared physics layer so ships can knock and be knocked (M1b).
+		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
 		_ships.append(ship)
 
@@ -441,6 +458,8 @@ func spawn_near_player(count: int = 3) -> void:
 		var grav := _find_gravity()
 		if grav != null:
 			ship.set_gravity(grav)
+		# Join the shared physics layer so ships can knock and be knocked (M1b).
+		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
 		_ships.append(ship)
 

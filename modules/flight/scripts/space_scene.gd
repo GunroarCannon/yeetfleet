@@ -91,6 +91,10 @@ var _moon_node: Node3D = null
 var _moon_velocity := Vector3.ZERO
 ## Reference to the gravity system — set by FlightRoot after it builds gravity.
 var _gravity_ref: GravitySystem = null
+## Parent for the per-rock collision anchors (M1b). Rocks are drawn by a
+## MultiMesh with no per-rock node, but the PhysWorld needs a node per body to
+## read positions from — these empty Node3Ds are that anchor, nothing else.
+var _rock_holder: Node3D = null
 
 
 ## 1 = normal, 2 = high detail. Reads [Session]'s toggle so that turning high-res
@@ -129,6 +133,35 @@ func set_gravity(gravity: GravitySystem) -> void:
 	# the moon into a too-high orbit on the first frame.
 	if _moon_node != null and gravity != null and gravity._bodies.size() > 3:
 		gravity._bodies[3].position = _moon_node.global_position
+
+
+## Every static collision surface in the scene (M1b), for [PhysWorld]:
+## planets, the moon and the station as STATIC kinematic bodies, plus every rock
+## (belt + near-field) as a ROCK kinematic body. FlightRoot consumes this once
+## when it builds the scene's world. Rocks are scenery for now — they collide
+## and bounce a ship per the profile, but are not yet pushed themselves.
+func collision_statics() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var planet := get_node_or_null("Planet")
+	if planet != null:
+		out.append({"node": planet, "radius": planet_radius, "layer": PhysBody.Layer.STATIC})
+		var moon := planet.get_node_or_null("Moon")
+		if moon != null:
+			out.append({"node": moon, "radius": MOON_RADIUS, "layer": PhysBody.Layer.STATIC})
+	var p2 := get_node_or_null("Planet2")
+	if p2 != null:
+		out.append({"node": p2, "radius": planet2_radius, "layer": PhysBody.Layer.STATIC})
+	var p3 := get_node_or_null("Planet3")
+	if p3 != null:
+		out.append({"node": p3, "radius": planet3_radius, "layer": PhysBody.Layer.STATIC})
+	var station := get_node_or_null("Station")
+	if station != null:
+		out.append({"node": station, "radius": STATION_RADIUS, "layer": PhysBody.Layer.STATIC})
+	for rock in asteroid_data:
+		var node: Node3D = rock.get("node")
+		if node != null:
+			out.append({"node": node, "radius": rock["radius"], "layer": PhysBody.Layer.ROCK})
+	return out
 
 
 ## Set up the moon to orbit Tarn IV using real Newtonian mechanics.
@@ -720,6 +753,11 @@ func _build_belt() -> void:
 	var material := _rock_material(Color("6a6257"), Color("8a7f6c"), Color("3d3831"))
 	var buckets: Array[Array] = [[], [], []]
 
+	# One invisible anchor per rock, for the PhysWorld (M1b). See _rock_holder.
+	_rock_holder = Node3D.new()
+	_rock_holder.name = "PhysRocks"
+	add_child(_rock_holder)
+
 	for i in ASTEROID_COUNT:
 		var angle := _rng.randf() * TAU
 		var radius := _rng.randf_range(BELT_INNER, BELT_OUTER)
@@ -732,7 +770,11 @@ func _build_belt() -> void:
 			_rng.randf() * TAU, _rng.randf() * TAU, _rng.randf() * TAU
 		)).scaled(Vector3.ONE * size)
 		buckets[i % 3].append(Transform3D(basis, pos))
-		asteroid_data.append({"position": pos, "radius": size})
+		var anchor := Node3D.new()
+		anchor.name = "Rock%d" % i
+		anchor.position = pos
+		_rock_holder.add_child(anchor)
+		asteroid_data.append({"position": pos, "radius": size, "node": anchor})
 		# Tumble speed: slow, random per axis, seeded from the same RNG.
 		_asteroid_spin.append(_rng.randf_range(0.05, 0.25))
 
@@ -780,7 +822,11 @@ func _build_nearfield() -> void:
 			_rng.randf() * TAU, _rng.randf() * TAU, _rng.randf() * TAU
 		)).scaled(Vector3.ONE * size)
 		mm.set_instance_transform(i, Transform3D(basis, pos))
-		asteroid_data.append({"position": pos, "radius": size})
+		var anchor := Node3D.new()
+		anchor.name = "RockNear%d" % i
+		anchor.position = pos
+		_rock_holder.add_child(anchor)
+		asteroid_data.append({"position": pos, "radius": size, "node": anchor})
 		_asteroid_spin.append(_rng.randf_range(0.1, 0.4))
 	_nearfield_mesh = MultiMeshInstance3D.new()
 	_nearfield_mesh.name = "NearField"
