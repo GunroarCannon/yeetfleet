@@ -148,6 +148,13 @@ var _gravity_viz: GravityVisualizer = null
 var phys_world: PhysWorld = null
 var _phys_profile: PhysProfile = null
 var _phys_driver: PhysWorldDriver = null
+## Every profile found in modules/physics/data/profiles, keyed by file base
+## name, plus the current id. KEY_K cycles the live profile for honest A/B —
+## the world reads its profile on every step, so swapping the Resource the
+## world holds changes feel instantly, no rebuild.
+var _phys_profiles: Dictionary = {}
+var _phys_profile_ids: Array[String] = []
+var _phys_profile_id := "grounded"
 var _planet_pointer: PlanetPointer = null
 var _spawn := Transform3D()
 ## Rear view camera: SubViewport + Camera3D looking backward from the ship.
@@ -370,9 +377,10 @@ func _setup_gravity_viz() -> void:
 func _build_phys_world() -> void:
 	if location != Location.SPACE or space == null or model == null:
 		return
-	_phys_profile = load("res://modules/physics/data/profiles/grounded.tres") as PhysProfile
+	_load_phys_profiles()
+	_phys_profile = _profiles_for_id(_phys_profile_id)
 	if _phys_profile == null:
-		push_warning("FlightRoot: grounded.tres missing — using built-in profile defaults")
+		push_warning("FlightRoot: profile '%s' not in data/profiles — using built-in defaults" % _phys_profile_id)
 		_phys_profile = PhysProfile.new()
 	phys_world = PhysWorld.new(_phys_profile)
 
@@ -412,6 +420,53 @@ func _teardown_phys_world() -> void:
 		_phys_driver = null
 	phys_world = null
 	_phys_profile = null
+
+
+## Load every .tres profile in modules/physics/data/profiles, keyed by file base
+## name, so the A/B key can hot-swap the live profile without a Resource load.
+## The physics lab authors new profiles here; anything saved lands in the cycle.
+func _load_phys_profiles() -> void:
+	_phys_profiles.clear()
+	_phys_profile_ids.clear()
+	var dir := "res://modules/physics/data/profiles"
+	var files := DirAccess.get_files_at(dir)
+	files.sort()
+	for file in files:
+		if not file.ends_with(".tres"):
+			continue
+		var loaded := load(dir.path_join(file)) as PhysProfile
+		if loaded == null:
+			continue
+		var id := file.get_basename()
+		_phys_profiles[id] = loaded
+		_phys_profile_ids.append(id)
+	if _phys_profile_ids.is_empty():
+		_phys_profile_ids.append("default")
+
+
+func _profiles_for_id(id: String) -> PhysProfile:
+	return _phys_profiles.get(id) as PhysProfile
+
+
+## Cycle the live collision profile (debug A/B, KEY_K). Returns the new id, or
+## "" when there is no world to swap. Because the world and every FlightModel
+## read profile.* live each step, the swap takes effect immediately.
+func cycle_phys_profile() -> String:
+	if phys_world == null or _phys_profile_ids.is_empty():
+		return ""
+	var idx := _phys_profile_ids.find(_phys_profile_id)
+	idx = (idx + 1) % _phys_profile_ids.size()
+	_phys_profile_id = _phys_profile_ids[idx]
+	_phys_profile = _profiles_for_id(_phys_profile_id)
+	if _phys_profile == null:
+		_phys_profile = PhysProfile.new()
+	phys_world.profile = _phys_profile
+	return _phys_profile_id
+
+
+## The name of the live profile, for the HUD.
+func phys_profile_id() -> String:
+	return _phys_profile_id
 
 
 ## The collision-sphere radius for the assembled hull: half the bounding box's
@@ -1762,6 +1817,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_P:
 			camera_rig.set_mode(FlightCamera.Mode.PLANET)
 			_hud.show_hint("Planet view — %s" % camera_rig.mode_label())
+		KEY_K:
+			# A/B the collision feel: cycles every .tres in physics/data/profiles
+			# live. Only does anything in space, where a world exists.
+			var profile := cycle_phys_profile()
+			if profile != "":
+				_hud.show_hint("Collision profile: %s" % profile)
 		KEY_R:
 			respawn()
 		KEY_D:
