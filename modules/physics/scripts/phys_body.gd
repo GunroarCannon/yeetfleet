@@ -24,8 +24,11 @@ enum Layer {
 }
 
 ## Emitted when this body took an impulse from another. `impulse` is the scalar
-## along the contact normal (positive = hit); point and normal are world space.
-signal impacted(other: PhysBody, impulse: float, point: Vector3, normal: Vector3)
+## along the contact normal (positive = hit); point and normal are world space;
+## `closing` is the approach speed in m/s that caused the hit (0 for a purely
+## separating contact the solver only had to push apart). Consumed by the
+## flight model to route damage, hitstop and its assist lockout.
+signal impacted(other: PhysBody, impulse: float, point: Vector3, normal: Vector3, closing: float)
 
 ## The node whose position is this body's position. Written by the controller,
 ## moved by [PhysWorld] integration. May be null only in a headless test that
@@ -62,6 +65,14 @@ var mask := 0xFF
 ## Infinite mass, never pushed, not integrated. Planets and stations. A
 ## kinematic body still collides — it is a wall with a radius.
 var kinematic := false
+
+## A controller owns this body's motion — it writes [member velocity] and moves
+## [member node] itself, and the world must not integrate, roll or damp it.
+## The solver still reads its velocity and writes impulses and spin back onto
+## it, which the controller picks up on its next step; and the positional
+## correction still pushes its node out of an overlap. This is how a ship joins
+## the layer without surrendering its tuned hand-integration to [PhysWorld].
+var driven := false
 
 ## Faction this body belongs to, for blame attribution (M5). -1 = nobody.
 var faction_id := -1

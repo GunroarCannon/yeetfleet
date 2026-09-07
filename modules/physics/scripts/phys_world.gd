@@ -76,8 +76,9 @@ func step(delta: float) -> void:
 		var impulse := float(report["impulse"])
 		var point: Vector3 = report["point"]
 		var normal: Vector3 = report["normal"]
-		a.impacted.emit(b, impulse, point, normal)
-		b.impacted.emit(a, impulse, point, normal)
+		var closing := float(report.get("closing", 0.0))
+		a.impacted.emit(b, impulse, point, normal, closing)
+		b.impacted.emit(a, impulse, point, normal, closing)
 
 	for body in bodies:
 		_integrate(body, delta)
@@ -93,8 +94,11 @@ func _layers_touch(a: PhysBody, b: PhysBody) -> bool:
 ## Move the body's node by its velocity and roll it by its angular velocity.
 ## Kinematic bodies are skipped: their controllers move them, and the world
 ## must not add drift on top of a planet's orbit or a station's stillness.
+## Driven bodies are skipped too: a ship's FlightModel owns its motion and
+## reads the solver's velocity and spin back on its own step — the world must
+## not double-integrate it or roll its basis under its own rotation code.
 func _integrate(body: PhysBody, delta: float) -> void:
-	if body.kinematic or body.node == null:
+	if body.kinematic or body.driven or body.node == null:
 		return
 	body.node.global_position += body.velocity * delta
 	_roll(body, delta)

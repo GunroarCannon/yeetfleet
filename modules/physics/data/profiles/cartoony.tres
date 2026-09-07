@@ -12,3 +12,7 @@ impulse_to_spin = 0.85
 friction = 0.15
 position_correction = 0.3
 spin_damp_induced = 2.5
+spin_damp_assist = 6.0
+assist_lockout_on_impact = 0.35
+hitstop_scale = 1.2
+hitstop_max = 0.09

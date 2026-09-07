@@ -28,6 +28,12 @@ func _initialize() -> void:
 	cartoony.friction = 0.15
 	cartoony.position_correction = 0.3
 	cartoony.spin_damp_induced = 2.5
+	# Cartoony keeps the knocked tumble going longer and freezes the frame harder,
+	# and lets the consequence breathe before the assists grab the ship back.
+	cartoony.spin_damp_assist = 6.0
+	cartoony.assist_lockout_on_impact = 0.35
+	cartoony.hitstop_scale = 1.2
+	cartoony.hitstop_max = 0.09
 	_save(cartoony, dir, "cartoony.tres")
 	quit(0)
 

@@ -6,11 +6,11 @@
 ## authored: every field below is a live slider there, and "save profile as
 ## .tres" writes exactly this Resource.
 ##
-## Not every dial in the plan lands in M1a. The dials that route an impact into
-## [Juice] (hitstop, squash), the gravity g and the assist-lockout live here as
-## numbers so a profile is one place to look at, but only the collision-solver
-## subset is read yet; the others become live when the module that consumes them
-## lands.
+## Not every dial in the plan lands in M1a. The gravity g, boost-impulse and
+## squash dials exist only as ideas until the module that consumes them does;
+## the collision-solver subset is read by [ImpulseSolver], and the impact-routing
+## dials below (assist lockout, spin damp, hitstop) became live when the flight
+## model was wired onto the layer in M1b.
 class_name PhysProfile
 extends Resource
 
@@ -60,6 +60,25 @@ extends Resource
 ## Spin damping applied to a body whose tumble was induced (assist off), per
 ## second. Tuned per mode later; one value per profile for now.
 @export var spin_damp_induced := 1.5
+
+## How fast an induced tumble decays when the pilot is in full assist, per
+## second. Faster than [member spin_damp_free]: fly-by-wire actively damps the
+## spin so a knock reads as a wobble that the assist then cleans up.
+@export_range(0.0, 20.0) var spin_damp_assist := 4.0
+
+## Seconds flight-assist, damping and the orbital assist stay disengaged after
+## an impact, so the consequence of a hit is visible before the computer flies
+## the ship back onto its rails (TECHNICAL_PLAN §3.1 #6). During the window the
+## ship behaves as if manual, its knocked velocity plays out, then assist
+## re-engages and recovery begins.
+@export_range(0.0, 3.0) var assist_lockout_on_impact := 0.6
+
+## Impact magnitude → hitstop. `hitstop_scale` scales the whole response and
+## `hitstop_max` (seconds) caps it, so a profile can turn impact freeze off
+## entirely (scale 0) without touching the flight model. The exact mapping is
+## the flight model's, but every knob a profile author needs lives here.
+@export_range(0.0, 1.0) var hitstop_scale := 1.0
+@export var hitstop_max := 0.06
 
 
 ## The bounciness of a contact between two layers: the average of the two

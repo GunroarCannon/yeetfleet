@@ -31,6 +31,9 @@ func _initialize() -> void:
 	await _check_ccd_discrete_misses()
 	await _check_ccd_no_tunnel()
 	await _check_perf_budget()
+	await _check_driven_not_integrated()
+	await _check_closing_on_signal()
+	await _check_scenery_never_pairs()
 	_finish()
 
 
@@ -337,3 +340,87 @@ func _finish() -> void:
 		for f in _failures:
 			print("  ✗ " + f)
 		quit(1)
+
+
+# --- M1b groundwork -----------------------------------------------------------
+
+## A driven body is controller-owned: the world must not translate or roll it,
+## however fast it is going. The flight model moves its own node and only uses
+## the layer for the impulses — a driven body that the world also moved would
+## travel twice as far per frame.
+func _check_driven_not_integrated() -> void:
+	var rig := _rig()
+	var b := _body(rig, Vector3(10.0, 0.0, 0.0), 1.0, 1.0, PhysBody.Layer.SHIP, Vector3(50.0, 0.0, 0.0))
+	b.driven = true
+	await _settle()
+	var before := b.node.global_position
+	var world := PhysWorld.new()
+	world.add(b)
+	world.step(0.016)
+	world.step(0.016)
+	_check(b.node.global_position.is_equal_approx(before),
+		"driven body was moved by the world (%.1f)" % b.node.global_position.distance_to(before))
+	_done("Driven body is not integrated by the world")
+	_free_rig(rig)
+
+
+## The impacted signal must carry the approach speed that caused the hit, not
+## just the impulse — the flight model keys damage, hitstop and its assist
+## lockout on "how hard did I hit that", which the impulse alone does not say.
+func _check_closing_on_signal() -> void:
+	var rig := _rig()
+	var a := _body(rig, Vector3.ZERO, 1.0, 1.0, PhysBody.Layer.ROCK, Vector3(5.0, 0.0, 0.0))
+	var b := _body(rig, Vector3(1.5, 0.0, 0.0), 1.0, 1.0, PhysBody.Layer.ROCK, Vector3(-5.0, 0.0, 0.0))
+	await _settle()
+	_capture_closing_reset()
+	# Bound method, not a lambda: lambdas snapshot their outer locals by value, so
+	# they cannot hand a captured number back out of a synchronous signal.
+	a.impacted.connect(_capture_closing)
+	var world := PhysWorld.new()
+	world.profile.restitution_rock = 1.0
+	world.add(a)
+	world.add(b)
+	world.step(0.016)
+	_check(_closing_seen and absf(_seen_closing - 10.0) < MOMENTUM_EPS,
+		"closing speed was %s, expected ~10 m/s for a ±5 head-on" % _seen_closing)
+	_done("impacted() carries the approach speed")
+	_free_rig(rig)
+
+
+var _closing_seen := false
+var _seen_closing := 0.0
+
+
+func _capture_closing_reset() -> void:
+	_closing_seen = false
+	_seen_closing = 0.0
+
+
+func _capture_closing(_o: PhysBody, _imp: float, _p: Vector3, _n: Vector3, closing: float) -> void:
+	_closing_seen = true
+	_seen_closing = closing
+
+
+## Two kinematic scenery bodies must never appear as a pair, or a belt of rocks
+## sitting in shared cells would eat the pair budget every step before a single
+## ship collision was resolved.
+func _check_scenery_never_pairs() -> void:
+	var rig := _rig()
+	var rock_a := _body(rig, Vector3.ZERO, 1.0, 1.0, PhysBody.Layer.ROCK, Vector3.ZERO)
+	rock_a.kinematic = true
+	var rock_b := _body(rig, Vector3(1.0, 0.0, 0.0), 1.0, 1.0, PhysBody.Layer.ROCK, Vector3.ZERO)
+	rock_b.kinematic = true
+	var ship := _body(rig, Vector3(500.0, 0.0, 0.0), 1.0, 1.0, PhysBody.Layer.SHIP, Vector3.ZERO)
+	await _settle()
+	var pairs := Broadphase.pairs([rock_a, rock_b, ship] as Array[PhysBody])
+	var scenery_pair := false
+	for pair in pairs:
+		var bi: int = pair[0]
+		var bj: int = pair[1]
+		var all_bodies := [rock_a, rock_b, ship] as Array[PhysBody]
+		if all_bodies[bi].kinematic and all_bodies[bj].kinematic:
+			scenery_pair = true
+	_check(not scenery_pair, "broadphase emitted a kinematic-kinematic pair")
+	_check(pairs.size() == 0, "kinematic rocks far from the ship produced %d pairs" % pairs.size())
+	_done("Kinematic scenery never pairs against itself")
+	_free_rig(rig)

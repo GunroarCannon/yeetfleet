@@ -24,10 +24,12 @@ extends RefCounted
 ##   impulse  : the normal impulse applied (0 when only separated)
 ##   normal   : the contact normal
 ##   point    : the contact point
+##   closing  : the approach speed in m/s that produced the hit (0 when the
+##              pair was separating and only needed pushing apart)
 static func resolve(a: PhysBody, b: PhysBody, delta: float, profile: PhysProfile) -> Dictionary:
 	var contact := _contact(a, b, delta, profile)
 	if not bool(contact["hit"]):
-		return _report(false, 0.0, Vector3.ZERO, Vector3.ZERO)
+		return _report(false, 0.0, Vector3.ZERO, Vector3.ZERO, 0.0)
 	var normal: Vector3 = contact["normal"]
 
 	# Relative velocity of B with respect to A along the normal (which points
@@ -38,13 +40,16 @@ static func resolve(a: PhysBody, b: PhysBody, delta: float, profile: PhysProfile
 	var ib := _effective_inv_mass(b, profile)
 	var inv_sum := ia + ib
 	if inv_sum <= 0.0:
-		return _report(false, 0.0, Vector3.ZERO, Vector3.ZERO)
+		return _report(false, 0.0, Vector3.ZERO, Vector3.ZERO, 0.0)
 
 	# Bounce: a normal impulse that reverses the approaching component by the
 	# pair's restitution. Applied in opposite directions to both bodies — the
 	# line the whole module exists for.
 	var e := _restitution(a, b, profile)
 	var jn := -(1.0 + e) * vn / inv_sum
+	# The approach speed is what a consumer keys damage and lockout on — the
+	# number a pilot reads as "how hard did I hit that".
+	var closing := maxf(-vn, 0.0)
 	if jn > 0.0:
 		# knock_transfer > 1 lets the victim be flung harder than strict momentum
 		# allows — the arcade "asteroid goes flying" knob. 1.0 is exact.
@@ -58,15 +63,16 @@ static func resolve(a: PhysBody, b: PhysBody, delta: float, profile: PhysProfile
 		# Separating already — but the pair may still be overlapping, in which
 		# case they need pushing apart, not bouncing.
 		_separate(a, b, normal, ia, ib, profile)
-	return _report(true, maxf(jn, 0.0), normal, contact["point"])
+	return _report(true, maxf(jn, 0.0), normal, contact["point"], closing)
 
 
-static func _report(resolved: bool, impulse: float, normal: Vector3, point: Vector3) -> Dictionary:
+static func _report(resolved: bool, impulse: float, normal: Vector3, point: Vector3, closing := 0.0) -> Dictionary:
 	return {
 		"resolved": resolved,
 		"impulse": impulse,
 		"normal": normal,
 		"point": point,
+		"closing": closing,
 	}
 
 

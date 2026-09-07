@@ -12,12 +12,15 @@ extends RefCounted
 
 
 ## All candidate pairs in the world this step, each as [body_i, body_j] with
-## i < j. `bodies` is the live [PhysWorld] roster.
+## i < j. `bodies` is the live [PhysWorld] roster. A pair where both sides are
+## kinematic (two rocks of scenery, a planet against a station) is never worth
+## resolving — two infinite masses cannot move each other — and is dropped at
+## generation, so a scenery wall cannot eat the world's pair budget.
 static func pairs(bodies: Array[PhysBody]) -> Array:
 	if bodies.size() < 2:
 		return []
 	var cells := _build_cells(bodies)
-	return _neighbour_pairs(cells)
+	return _neighbour_pairs(cells, bodies)
 
 
 ## Map of cell coord (Vector3i) -> indices into `bodies`. Bodies are keyed by
@@ -52,17 +55,17 @@ static func _cell_size(bodies: Array[PhysBody]) -> float:
 ## "forward" neighbours — the 13 offsets (dx,dy,dz) chosen so each unordered
 ## pair of cells is visited exactly once: dx>0, or dx==0 and dy>0, or dx==0 and
 ## dy==0 and dz>0.
-static func _neighbour_pairs(cells: Dictionary) -> Array:
+static func _neighbour_pairs(cells: Dictionary, bodies: Array[PhysBody]) -> Array:
 	var out: Array = []
 	var offsets := _forward_offsets()
 	for key in cells:
 		var here := cells[key] as Array
-		_same_cell_pairs(here, out)
+		_same_cell_pairs(here, bodies, out)
 		var k: Vector3i = key
 		for o in offsets:
 			var other_key := k + (o as Vector3i)
 			if cells.has(other_key):
-				_cross_cell_pairs(here, cells[other_key] as Array, out)
+				_cross_cell_pairs(here, cells[other_key] as Array, bodies, out)
 	return out
 
 
@@ -78,13 +81,19 @@ static func _forward_offsets() -> Array[Vector3i]:
 	return offsets
 
 
-static func _same_cell_pairs(indices: Array, out: Array) -> void:
+static func _same_cell_pairs(indices: Array, bodies: Array[PhysBody], out: Array) -> void:
 	for i in indices.size():
 		for j in range(i + 1, indices.size()):
-			out.append([indices[i], indices[j]])
+			_emit_pair(indices[i], indices[j], bodies, out)
 
 
-static func _cross_cell_pairs(a: Array, b: Array, out: Array) -> void:
+static func _cross_cell_pairs(a: Array, b: Array, bodies: Array[PhysBody], out: Array) -> void:
 	for i in a:
 		for j in b:
-			out.append([i, j])
+			_emit_pair(i, j, bodies, out)
+
+
+static func _emit_pair(i: int, j: int, bodies: Array[PhysBody], out: Array) -> void:
+	if bodies[i].kinematic and bodies[j].kinematic:
+		return
+	out.append([i, j])
