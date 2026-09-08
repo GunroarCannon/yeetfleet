@@ -35,14 +35,19 @@ func _init(p: PhysProfile = null) -> void:
 
 func add(body: PhysBody) -> void:
 	bodies.append(body)
+	if body.kinematic:
+		_scenery_dirty = true
 
 
 func remove(body: PhysBody) -> void:
 	bodies.erase(body)
+	if body.kinematic:
+		_scenery_dirty = true
 
 
 func clear() -> void:
 	bodies.clear()
+	_scenery_dirty = true
 
 
 ## One physics step at `delta` seconds: broadphase, pair resolution, then
@@ -53,22 +58,19 @@ func step(delta: float) -> void:
 		for body in bodies:
 			_integrate(body, delta)
 		return
+	if _scenery_dirty:
+		_build_scenery_index()
 
 	# Movers are bodies that can be pushed (ships, rocks, debris); scenery is
 	# kinematic — infinite-mass walls. Two movers pair through the spatial hash.
-	# Scenery never hashes: it is static, so it cannot need pruning against
-	# itself, and hashing a 1400 m planet alongside 6 m rocks would blow the
-	# cell size up and make the hash useless. Instead every mover is tested
-	# against every piece of scenery directly — a couple of hundred rocks
-	# against a dozen ships is a cheap sweep, and a reach check prunes each pair
-	# before it spends the budget. (When rocks become movable in M1's later
-	# step they join the mover hash and this sweep stops.)
+	# Scenery never pairs against itself and never hashes with movers: a rock is
+	# only ever collided with by the movers near it, so instead of sweeping every
+	# mover against every rock (O(ships × 270 rocks) every step — plan §3.1 #10,
+	# and a measured ~10 ms/tick) the scenery is spatially indexed once and a
+	# mover is tested against the few rocks in its neighbourhood.
 	var movers: Array[PhysBody] = []
-	var scenery: Array[PhysBody] = []
 	for body in bodies:
-		if body.kinematic:
-			scenery.append(body)
-		else:
+		if not body.kinematic:
 			movers.append(body)
 
 	_stepped_pairs = 0
@@ -77,16 +79,87 @@ func step(delta: float) -> void:
 	if movers.size() >= 2:
 		for pair in Broadphase.pairs(movers):
 			budget = _try_pair(movers[pair[0]], movers[pair[1]], delta, budget)
-	for s in scenery:
+	# Huge scenery (planets, the station, the moon): a handful, direct-tested.
+	for s in _scenery_large:
 		for m in movers:
 			budget = _try_pair(s, m, delta, budget)
 			if budget <= 0:
 				break
 		if budget <= 0:
 			break
+	# Small scenery (rocks): look up only the cells near each mover.
+	if movers.size() > 0:
+		for m in movers:
+			budget = _query_scenery(m, delta, budget)
+			if budget <= 0:
+				break
 
 	for body in bodies:
 		_integrate(body, delta)
+
+
+## Test a mover against the small scenery (rocks) whose grid cells overlap its
+## swept neighbourhood. Returns the drained budget.
+func _query_scenery(m: PhysBody, delta: float, budget: int) -> int:
+	var reach := m.radius + _scenery_max_r + m.velocity.length() * delta
+	var span := int(ceil(reach / maxf(_scenery_cell, 0.001)))
+	var base := _cell_of(m)
+	for dx in range(-span, span + 1):
+		for dy in range(-span, span + 1):
+			for dz in range(-span, span + 1):
+				var key := base + Vector3i(dx, dy, dz)
+				if not _scenery_grid.has(key):
+					continue
+				for s in _scenery_grid[key] as Array:
+					budget = _try_pair(s as PhysBody, m, delta, budget)
+					if budget <= 0:
+						return budget
+	return budget
+
+
+func _cell_of(body: PhysBody) -> Vector3i:
+	return Vector3i(
+		floori(body.position().x / maxf(_scenery_cell, 0.001)),
+		floori(body.position().y / maxf(_scenery_cell, 0.001)),
+		floori(body.position().z / maxf(_scenery_cell, 0.001)),
+	)
+
+
+## Index kinematic scenery into a fixed grid. Bodies too large for the cell
+## (planets, the station, the moon) are set aside and direct-tested instead —
+## a 1400 m planet must not define the cell size for 6 m rocks.
+func _build_scenery_index() -> void:
+	_scenery_dirty = false
+	_scenery_grid.clear()
+	_scenery_large.clear()
+	var small_r := 1.0
+	for body in bodies:
+		if body.kinematic and body.radius <= SCENERY_SMALL_MAX:
+			small_r = maxf(small_r, body.radius)
+	_scenery_cell = small_r * 2.0
+	_scenery_max_r = small_r
+	for body in bodies:
+		if not body.kinematic:
+			continue
+		if body.radius > SCENERY_SMALL_MAX:
+			_scenery_large.append(body)
+			continue
+		var key := _cell_of(body)
+		if not _scenery_grid.has(key):
+			_scenery_grid[key] = []
+		(_scenery_grid[key] as Array).append(body)
+
+
+## Rocks and debris this size or under go in the scenery grid; anything bigger
+## (a station, a moon, a planet) is direct-tested. Set well above the biggest
+## rock so a 70 m boulder still gets the grid's spatial pruning.
+const SCENERY_SMALL_MAX := 100.0
+
+var _scenery_dirty := true
+var _scenery_cell := 1.0
+var _scenery_max_r := 1.0
+var _scenery_grid := {}
+var _scenery_large: Array[PhysBody] = []
 
 
 ## Resolve one candidate pair if it could actually touch this step, spending
