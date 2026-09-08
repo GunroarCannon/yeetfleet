@@ -356,12 +356,17 @@ func _build_gravity() -> void:
 		space.planet3_centre, _gravity_mass("glacius", 500000.0) * mass_scale, space.planet3_radius,
 		"Glacius", true
 	)
-	# Moon — orbits Tarn IV.
+	# Moon — orbits Tarn IV, and is heavy enough to hold *its own* orbiters. A
+	# moon is "what orbits what" by strength and closeness: whoever pulls hardest
+	# at a point wins. With its old tiny mass the planet swamped the moon even a
+	# few hundred metres out, so nothing could ever orbit the moon. This mass
+	# gives the moon a domination radius of ~1 km (scaled with the world like the
+	# planets), so a ship or a station can genuinely settle into orbit around it.
 	var moon_pos: Vector3 = space.planet_centre + Vector3(
 		space.moon_orbit_radius, 0.0, 0.0
 	)
 	gravity.register_body(
-		moon_pos, 50000.0, SpaceScene.MOON_RADIUS,
+		moon_pos, 2000000.0 * mass_scale, SpaceScene.MOON_RADIUS,
 		"Tarn IV Moon", true
 	)
 	# Station — negligible pull.
