@@ -139,6 +139,13 @@ var _ai_spawner: AiSpawner = null
 var gravity: GravitySystem = null
 var _gravity_viz: GravityVisualizer = null
 
+## Gravity chaos: a debug toggle (Y) that slams the force law to cartoon
+## extremes for wild slingshots and flung rocks. Off restores the live profile's
+## own law. Reset whenever the world is rebuilt.
+var _gravity_chaos := false
+const GRAVITY_CHAOS_G := 9.0
+const GRAVITY_CHAOS_FALLOFF := 1.55
+
 ## The scene's collision world (M1b). Built only for [constant Location.SPACE]:
 ## populated with the player's ship, AI ships (via the spawner) and every static
 ## collider SpaceScene exposes, then stepped by a [PhysWorldDriver] after all
@@ -490,6 +497,9 @@ func _ensure_profile_selected() -> void:
 func _apply_gravity_profile() -> void:
 	if gravity == null:
 		return
+	# Any (re)apply of the profile's own law drops a chaos override, so Y's chaos
+	# cannot leak across a profile cycle or a location rebuild.
+	_gravity_chaos = false
 	_ensure_profile_selected()
 	gravity.apply_law(_phys_profile.gravity_g, _phys_profile.gravity_falloff)
 	if space != null:
@@ -953,11 +963,15 @@ func _physics_process(delta: float) -> void:
 	systems_now.set_boost(flight.command.boost)
 
 
-## True when the active ship's control mode is dogfight — the mode that
-## implicitly keeps the nose on the locked target.
+## True when the active ship's control mode should implicitly keep the nose on a
+## locked target: dogfight (built for knife-fight range) and arcade (the mode a
+## player goes to to actually hit things). Realistic and Sim stay manual.
 func _dogfight_armed() -> bool:
 	var flight := active_model()
-	return flight != null and flight.control_mode == FlightModel.ControlMode.DOGFIGHT
+	if flight == null:
+		return false
+	return flight.control_mode == FlightModel.ControlMode.DOGFIGHT \
+		or flight.control_mode == FlightModel.ControlMode.ARCADE
 
 
 ## Steer the active ship's yaw/pitch to keep it facing [member locked_target].
@@ -1494,7 +1508,25 @@ func toggle_gravity_viz() -> void:
 	# and is too chatty (a line per ship per second) to run all the time.
 	Session.debug_orbit_log = _gravity_viz.is_showing()
 	var viz_state := "ON" if _gravity_viz.is_showing() else "OFF"
-	_hud.show_hint("Gravity visualizer: %s" % viz_state)
+	_hud.show_hint("Gravity viz: %s — arrows = pull at your ship, cyan rings = orbit, green = bound / orange-red = escaping" % viz_state)
+
+
+## Slam the force law to cartoon extremes for wild slingshots and flung rocks,
+## or restore the live profile's own law (debug key Y). Only affects gravity, so
+## KEY_K (feel profile) and the collision dials are untouched.
+func toggle_gravity_chaos() -> void:
+	if gravity == null:
+		_hud.show_hint("Gravity chaos needs gravity (G)")
+		return
+	_gravity_chaos = not _gravity_chaos
+	if _gravity_chaos:
+		gravity.apply_law(GRAVITY_CHAOS_G, GRAVITY_CHAOS_FALLOFF)
+		gravity.range_multiplier = 6.0
+		_hud.show_hint("Gravity chaos ON — slingshots get wild (Y to restore)")
+	else:
+		_apply_gravity_profile()
+		gravity.range_multiplier = 1.0
+		_hud.show_hint("Gravity chaos OFF")
 
 
 ## Toggle the planet-pointer debug. Called by both J key and the menu.
@@ -2001,6 +2033,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_hud.show_hint("Mother ship launched" if mother != null else "No room for a mother ship")
 			else:
 				_hud.show_hint("Mother ships need space")
+		KEY_Y:
+			toggle_gravity_chaos()
 		KEY_TAB:
 			var new_str := model.cycle_gravity_strength()
 			_hud.show_hint("Gravity strength: ×%.1f" % new_str)
