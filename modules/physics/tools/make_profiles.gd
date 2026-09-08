@@ -34,6 +34,10 @@ func _initialize() -> void:
 	cartoony.assist_lockout_on_impact = 0.35
 	cartoony.hitstop_scale = 1.2
 	cartoony.hitstop_max = 0.09
+	# Cartoon gravity: same constant, but a shallower falloff (1.75 instead of
+	# inverse-square 2.0) so it reaches further and slingshots get dramatic.
+	cartoony.gravity_g = 3.0
+	cartoony.gravity_falloff = 1.75
 	_save(cartoony, dir, "cartoony.tres")
 	quit(0)
 

@@ -79,6 +79,15 @@ var mode: int = GravityMode.NORMAL
 ## Range multiplier: scales how far gravity reaches (applied to effective_dist).
 var range_multiplier := 1.0
 
+## The gravitational constant and falloff exponent of this system's force law,
+## a = g·M / r^falloff. Both are profile-driven (M1): a profile can turn gravity
+## up, or set falloff below the inverse-square 2.0 so it reaches further and
+## slingshots turn dramatic and cartoonish. Defaults are the historical values;
+## set them before bodies are registered (or call [method apply_law]) so every
+## derived number uses the same law as the force itself.
+var g := GAME_G
+var falloff := 2.0
+
 
 func _init() -> void:
 	pass
@@ -97,11 +106,23 @@ func register_body(
 	body.radius = body_radius
 	body.name = body_name
 	body.is_planet = is_planet_flag
-	body.surface_gravity = GAME_G * body_mass / (body_radius * body_radius)
+	body.surface_gravity = g * body_mass / pow(maxf(body_radius, 0.01), falloff)
 	# Derived relevance range: where acceleration drops below epsilon.
-	body.relevant_range = sqrt(GAME_G * body_mass / RELEVANCE_EPSILON)
+	body.relevant_range = pow(g * body_mass / RELEVANCE_EPSILON, 1.0 / falloff)
 	_bodies.append(body)
 	return body
+
+
+## Apply a force law (g, falloff) and recompute every body's derived numbers so
+## nothing keeps using the old law — the ranges a dominant-body search prunes by
+## must match the force actually being integrated. Called when a feel profile is
+## applied or cycled live.
+func apply_law(new_g: float, new_falloff: float) -> void:
+	g = new_g
+	falloff = maxf(new_falloff, 1.01)
+	for body in _bodies:
+		body.surface_gravity = g * body.mass / pow(maxf(body.radius, 0.01), falloff)
+		body.relevant_range = pow(g * body.mass / RELEVANCE_EPSILON, 1.0 / falloff)
 
 
 ## Remove all registered bodies. Call on scene teardown.
@@ -116,7 +137,7 @@ func _accel_magnitude(body: GravityBody, pos: Vector3) -> float:
 	var diff := body.position - pos
 	var dist := maxf(diff.length(), MIN_ORBIT_RADIUS)
 	var effective_dist := dist / maxf(range_multiplier, 0.1)
-	return GAME_G * body.mass / (effective_dist * effective_dist)
+	return g * body.mass / pow(effective_dist, falloff)
 
 
 ## Find the top N bodies by acceleration at a given position.
@@ -215,7 +236,7 @@ func compute_gravity(object_position: Vector3) -> Vector3:
 		var diff := body.position - object_position
 		var dist := maxf(diff.length(), MIN_ORBIT_RADIUS)
 		var effective_dist := dist / maxf(range_multiplier, 0.1)
-		var accel_mag := GAME_G * body.mass / (effective_dist * effective_dist) * strength_mult
+		var accel_mag := g * body.mass / pow(effective_dist, falloff) * strength_mult
 		total_force += diff.normalized() * accel_mag * weight
 
 	return total_force
@@ -227,7 +248,7 @@ func compute_gravity_from(body: GravityBody, object_position: Vector3) -> Vector
 		return Vector3.ZERO
 	var diff := body.position - object_position
 	var dist := maxf(diff.length(), MIN_ORBIT_RADIUS)
-	var accel_magnitude := GAME_G * body.mass / (dist * dist)
+	var accel_magnitude := g * body.mass / pow(dist, falloff)
 	if mode == GravityMode.HIGH:
 		accel_magnitude *= 2.0
 	return diff.normalized() * accel_magnitude
@@ -235,15 +256,23 @@ func compute_gravity_from(body: GravityBody, object_position: Vector3) -> Vector
 
 # --- Orbital mechanics -------------------------------------------------------
 
-## Circular orbit velocity at a given distance from a body's centre.
+## Circular orbit velocity at a given distance from a body's centre, for the
+## system's own force law: a = gM/r^falloff needs v = sqrt(gM·r^(1-falloff)),
+## which collapses to the familiar sqrt(gM/r) at the inverse-square falloff 2.
 func orbit_velocity(body: GravityBody, distance: float) -> float:
 	var r := maxf(distance, MIN_ORBIT_RADIUS)
-	return sqrt(GAME_G * body.mass / r)
+	return sqrt(g * body.mass * pow(r, 1.0 - falloff))
 
 
-## Escape velocity at a given distance from a body's centre.
+## Escape velocity at a given distance from a body's centre. For falloff > 1 the
+## power-law potential is bounded below at infinity; at falloff 2 this is the
+## usual sqrt(2)·v_orbit.
 func escape_velocity(body: GravityBody, distance: float) -> float:
-	return orbit_velocity(body, distance) * sqrt(2.0)
+	var r := maxf(distance, MIN_ORBIT_RADIUS)
+	var denom := falloff - 1.0
+	if denom <= 0.01:
+		return INF
+	return sqrt(2.0 * g * body.mass * pow(r, 1.0 - falloff) / denom)
 
 
 ## Roche limit — inside this distance, tidal forces break apart a body.
@@ -290,7 +319,9 @@ func orbit_elements(body: GravityBody, pos: Vector3, vel: Vector3) -> Dictionary
 	if r < MIN_ORBIT_RADIUS:
 		return {}
 	var v := vel.length()
-	var mu := GAME_G * body.mass
+	# Effective mu for this system's law. Orbital elements assume the inverse-
+	# square shape, so for a cartoon falloff this is an approximation, not exact.
+	var mu := g * body.mass
 	# Specific orbital energy: E = v²/2 - μ/r
 	var energy := v * v / 2.0 - mu / r
 	# Semi-major axis: a = -μ / (2E)  (negative E = bound orbit)

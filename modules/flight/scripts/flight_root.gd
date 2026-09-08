@@ -154,7 +154,7 @@ var _phys_driver: PhysWorldDriver = null
 ## world holds changes feel instantly, no rebuild.
 var _phys_profiles: Dictionary = {}
 var _phys_profile_ids: Array[String] = []
-var _phys_profile_id := "grounded"
+var _phys_profile_id := "cartoony"
 var _planet_pointer: PlanetPointer = null
 var _spawn := Transform3D()
 ## Rear view camera: SubViewport + Camera3D looking backward from the ship.
@@ -349,6 +349,10 @@ func _build_gravity() -> void:
 		SpaceScene.STATION_POS, 10000.0, SpaceScene.STATION_RADIUS,
 		"Ceres Gate", false
 	)
+	# The force law comes from the feel profile (g, falloff). Applied before the
+	# ship spawns so the spawn orbit is computed for the same gravity the ship
+	# will actually feel, and before the moon integrates so it starts matched.
+	_apply_gravity_profile()
 	# Gravity starts ON in space — player disables with G if desired.
 	gravity.mode = GravitySystem.GravityMode.NORMAL
 
@@ -377,11 +381,9 @@ func _setup_gravity_viz() -> void:
 func _build_phys_world() -> void:
 	if location != Location.SPACE or space == null or model == null:
 		return
-	_load_phys_profiles()
-	_phys_profile = _profiles_for_id(_phys_profile_id)
-	if _phys_profile == null:
-		push_warning("FlightRoot: profile '%s' not in data/profiles — using built-in defaults" % _phys_profile_id)
-		_phys_profile = PhysProfile.new()
+	# _apply_gravity_profile in _build_gravity already selected the profile; this
+	# just guarantees it is loaded even if gravity was not in play.
+	_ensure_profile_selected()
 	phys_world = PhysWorld.new(_phys_profile)
 
 	var driver := PhysWorldDriver.new()
@@ -448,9 +450,33 @@ func _profiles_for_id(id: String) -> PhysProfile:
 	return _phys_profiles.get(id) as PhysProfile
 
 
-## Cycle the live collision profile (debug A/B, KEY_K). Returns the new id, or
-## "" when there is no world to swap. Because the world and every FlightModel
-## read profile.* live each step, the swap takes effect immediately.
+## Pick the current profile id's resource, loading the profile list first if it
+## has not been scanned yet. Safe to call from gravity setup in _enter_tree.
+func _ensure_profile_selected() -> void:
+	if _phys_profiles.is_empty():
+		_load_phys_profiles()
+	if _phys_profile == null:
+		_phys_profile = _profiles_for_id(_phys_profile_id)
+		if _phys_profile == null:
+			push_warning("FlightRoot: profile '%s' not in data/profiles — using built-in defaults" % _phys_profile_id)
+			_phys_profile = PhysProfile.new()
+
+
+## Push this profile's gravity law (g, falloff) into the GravitySystem and
+## re-circularise the moon so nothing keeps orbiting under the old law. Called
+## when a profile is applied at build and again when KEY_K cycles it.
+func _apply_gravity_profile() -> void:
+	if gravity == null:
+		return
+	_ensure_profile_selected()
+	gravity.apply_law(_phys_profile.gravity_g, _phys_profile.gravity_falloff)
+	if space != null:
+		space.sync_moon_orbit(gravity)
+
+
+## Cycle the live feel profile (debug A/B, KEY_K). Returns the new id, or ""
+## when there is no world to swap. Because the world and every FlightModel read
+## profile.* live each step, the swap takes effect immediately.
 func cycle_phys_profile() -> String:
 	if phys_world == null or _phys_profile_ids.is_empty():
 		return ""
@@ -461,6 +487,9 @@ func cycle_phys_profile() -> String:
 	if _phys_profile == null:
 		_phys_profile = PhysProfile.new()
 	phys_world.profile = _phys_profile
+	# Gravity rides on the same feel profile: re-apply the law live so a cartoon
+	# falloff actually turns into cartoon slingshots as soon as you press K.
+	_apply_gravity_profile()
 	return _phys_profile_id
 
 
@@ -1818,11 +1847,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			camera_rig.set_mode(FlightCamera.Mode.PLANET)
 			_hud.show_hint("Planet view — %s" % camera_rig.mode_label())
 		KEY_K:
-			# A/B the collision feel: cycles every .tres in physics/data/profiles
-			# live. Only does anything in space, where a world exists.
+			# A/B the feel: cycles every .tres in physics/data/profiles live. The
+			# swap covers collision AND gravity. Only in space, where a world exists.
 			var profile := cycle_phys_profile()
 			if profile != "":
-				_hud.show_hint("Collision profile: %s" % profile)
+				_hud.show_hint("Feel profile: %s (collision + gravity)" % profile)
 		KEY_R:
 			respawn()
 		KEY_D:

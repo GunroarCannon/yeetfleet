@@ -72,7 +72,10 @@ func _finish() -> bool:
 	_check(_orbit_max < SPAWN_DIST + 400.0, "ship climbed to %.0f m — escaping on its own" % _orbit_max)
 
 	print("  boosting: %.0f m -> %.0f m after 6s of boost" % [_leave_d0, d])
-	_check(d > _leave_d0 + 300.0, "boosting did not break the orbit (%.0f -> %.0f m)" % [_leave_d0, d])
+	# The invariant is "a boost pushes you out of orbit", not a fixed distance:
+	# under a cartoon gravity profile (shallower falloff) escape takes longer, so
+	# require a solid outward climb rather than the inverse-square's ~380 m.
+	_check(d > _leave_d0 + 120.0, "boosting did not push the ship out of orbit (%.0f -> %.0f m)" % [_leave_d0, d])
 
 	if moon != null:
 		var moved := moon.global_position.distance_to(_moon_pos_a)

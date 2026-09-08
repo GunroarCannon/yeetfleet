@@ -135,6 +135,23 @@ func set_gravity(gravity: GravitySystem) -> void:
 		gravity._bodies[3].position = _moon_node.global_position
 
 
+## Re-target the moon's orbital velocity to the gravity system's current force
+## law, so applying or cycling a feel profile (which can change g and falloff)
+## does not kick the moon off its orbit. The moon integrates through the same
+## gravity each frame, so matching the circular speed keeps it stable.
+func sync_moon_orbit(gravity: GravitySystem) -> void:
+	if _moon_node == null or gravity == null:
+		return
+	var pos := _moon_node.global_position
+	var body := gravity.find_dominant_body(pos)
+	if body == null:
+		return
+	var v := gravity.circular_orbit_velocity(body, pos)
+	if v.length_squared() < 0.001:
+		return
+	_moon_velocity = v
+
+
 ## Every static collision surface in the scene (M1b), for [PhysWorld]:
 ## planets, the moon and the station as STATIC kinematic bodies, plus every rock
 ## (belt + near-field) as a ROCK kinematic body. FlightRoot consumes this once

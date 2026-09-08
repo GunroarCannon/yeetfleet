@@ -6,11 +6,11 @@
 ## authored: every field below is a live slider there, and "save profile as
 ## .tres" writes exactly this Resource.
 ##
-## Not every dial in the plan lands in M1a. The gravity g, boost-impulse and
-## squash dials exist only as ideas until the module that consumes them does;
-## the collision-solver subset is read by [ImpulseSolver], and the impact-routing
-## dials below (assist lockout, spin damp, hitstop) became live when the flight
-## model was wired onto the layer in M1b.
+## Not every dial in the plan lands in M1a. The boost-impulse and squash dials
+## exist only as ideas until the module that consumes them does; the collision
+## subset is read by [ImpulseSolver], the impact-routing dials (assist lockout,
+## spin damp, hitstop) became live when the flight model was wired onto the
+## layer in M1b, and the gravity dials are routed into [GravitySystem].
 class_name PhysProfile
 extends Resource
 
@@ -79,6 +79,13 @@ extends Resource
 ## the flight model's, but every knob a profile author needs lives here.
 @export_range(0.0, 1.0) var hitstop_scale := 1.0
 @export var hitstop_max := 0.06
+
+## This profile's gravity law, routed into [GravitySystem] (a = g·M/r^falloff).
+## `gravity_g` is the gravitational constant (GAME_G is 3.0); `gravity_falloff`
+## below the inverse-square 2.0 makes gravity reach further and slingshots turn
+## dramatic and cartoonish. A feel profile is the whole feel — gravity included.
+@export_range(0.5, 10.0) var gravity_g := 3.0
+@export_range(1.5, 2.0) var gravity_falloff := 2.0
 
 
 ## The bounciness of a contact between two layers: the average of the two

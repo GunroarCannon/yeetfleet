@@ -134,7 +134,9 @@ func _draw_force_lines() -> void:
 		var to_body := body.position - ship_pos
 		var dist := maxf(to_body.length(), 10.0)
 		var force_dir := to_body.normalized()
-		var force_mag := GravitySystem.GAME_G * body.mass / (dist * dist)
+		# The visualizer draws the same force law the system integrates: profile-
+		# driven g and falloff, not the baked-in constant.
+		var force_mag := _gravity.g * body.mass / pow(dist, _gravity.falloff)
 		if _gravity.mode == GravitySystem.GravityMode.HIGH:
 			force_mag *= 2.0
 
