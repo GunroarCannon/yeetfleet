@@ -129,7 +129,12 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 	# Assemble the ship geometry.
 	_view = ShipAssembler.assemble(_design, library, 0.0, false, false)
 	# The Ship-size setting scales every AI hull the same way as the player's; a
-	# mother ship adds its own extra multiplier on top.
+	# mother ship adds its own extra multiplier on top. Ordinary traffic also
+	# occasionally runs big so the belt shows real size variety instead of a
+	# uniform crowd — mothers and fighters set their own scale and skip this.
+	if not is_mother and not is_satellite and is_equal_approx(scale_multiplier, 1.0) \
+		and _rng.randf() < 0.18:
+		scale_multiplier = _rng.randf_range(3.0, 6.5)
 	_view.apply_scale(Session.ship_scale * scale_multiplier)
 	_hull_holder.add_child(_view.root)
 
@@ -176,6 +181,11 @@ func set_phys_world(world: PhysWorld) -> void:
 	if _view != null:
 		radius = maxf(_view.aabb.size.length() * 0.5, 3.0)
 	model.set_phys_world(world, radius)
+	# A bigger hull is a heavier hull (mass ~ scale^2), so a scaled-up hauler or
+	# mother reads as a wrecking ball instead of a balloon that every scout can
+	# shove around. Normal-size ships keep their design mass.
+	if scale_multiplier > 1.0 and model._phys != null:
+		model._phys.mass *= scale_multiplier * scale_multiplier
 
 
 ## Called by [AiSpawner] after spawning to assign faction archetype and
