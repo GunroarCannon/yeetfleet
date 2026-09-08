@@ -76,6 +76,11 @@ class GravityBody:
 var _bodies: Array[GravityBody] = []
 ## Current gravity mode.
 var mode: int = GravityMode.NORMAL
+## Whether bodies attract things in ("pull"). When false, gravity is orbit-only:
+## bodies still exist and keep their own orbits, and a ship can still be given a
+## circular-orbit velocity, but nothing is ever dragged *towards* a body — no
+## falling in. The player toggles this from the Gravity menu (or 6/…).
+var pull_enabled := true
 ## Range multiplier: scales how far gravity reaches (applied to effective_dist).
 var range_multiplier := 1.0
 
@@ -220,7 +225,7 @@ func find_dominant_body(pos: Vector3) -> GravityBody:
 ## Returns m/s² in world space. Smooth transition at sphere-of-influence
 ## boundaries because the blend is continuous, not a hard switch.
 func compute_gravity(object_position: Vector3) -> Vector3:
-	if mode == GravityMode.OFF:
+	if mode == GravityMode.OFF or not pull_enabled:
 		return Vector3.ZERO
 
 	var strength_mult := 2.0 if mode == GravityMode.HIGH else 1.0
@@ -244,7 +249,7 @@ func compute_gravity(object_position: Vector3) -> Vector3:
 
 ## Compute gravitational acceleration from a single body (for visualization, etc).
 func compute_gravity_from(body: GravityBody, object_position: Vector3) -> Vector3:
-	if mode == GravityMode.OFF:
+	if mode == GravityMode.OFF or not pull_enabled:
 		return Vector3.ZERO
 	var diff := body.position - object_position
 	var dist := maxf(diff.length(), MIN_ORBIT_RADIUS)

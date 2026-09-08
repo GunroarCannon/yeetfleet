@@ -35,6 +35,7 @@ func _initialize() -> void:
 	await _check_closing_on_signal()
 	await _check_scenery_never_pairs()
 	await _check_free_body_gravity()
+	await _check_pull_off_no_fall()
 	_finish()
 
 
@@ -422,6 +423,29 @@ func _check_free_body_gravity() -> void:
 	_check(b.position().z < start_z - 0.5,
 		"a free body under gravity did not fall (z %.1f -> %.1f)" % [start_z, b.position().z])
 	_done("Free bodies fall under the world's gravity")
+	_free_rig(rig)
+
+
+## The "no-pull" gravity toggle: bodies keep their orbits but nothing is dragged
+## towards them. With pull disabled a free body must NOT fall toward the planet.
+func _check_pull_off_no_fall() -> void:
+	var rig := _rig()
+	var b := _body(rig, Vector3(0.0, 0.0, 300.0), 1.0, 1.0, PhysBody.Layer.ROCK, Vector3.ZERO)
+	await _settle()
+	var gs := GravitySystem.new()
+	gs.register_body(Vector3.ZERO, 10000000.0, 200.0, "Planet", true)
+	gs.pull_enabled = false
+	var world := PhysWorld.new()
+	world.gravity = gs
+	world.add(b)
+	var start_z := b.position().z
+	for i in 25:
+		world.step(0.016)
+	_check(b.velocity.length() < 1e-3,
+		"pull-off gravity accelerated a body (v %.2f)" % b.velocity.length())
+	_check(absf(b.position().z - start_z) < 0.1,
+		"pull-off gravity pulled a body down (z %.1f -> %.1f)" % [start_z, b.position().z])
+	_done("Pull-off: bodies orbit, nothing falls in")
 	_free_rig(rig)
 
 

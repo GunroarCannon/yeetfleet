@@ -742,6 +742,10 @@ func _apply_orbital_assist(delta: float) -> void:
 	# the instant it stops touching the throttle (§3.1 #6).
 	if _assist_lockout > 0.0:
 		return
+	# No-pull gravity has no radial force to orbit against; catching you onto a
+	# circular rail would just drift you outward, so the assist stands down.
+	if not gravity.pull_enabled:
+		return
 	# Throttle past the deadzone, strafe or boost means the pilot is really
 	# flying — leave orbit. A light throttle tap stays inside the deadzone and the
 	# orbit holds.

@@ -518,6 +518,9 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_action_row("Spawn 1 AI ship", func() -> void: _spawn_quick(1))
 	popup.add_action_row("Spawn 3 AI ships", func() -> void: _spawn_quick(3))
 	popup.add_action_row("Spawn 6 AI ships", func() -> void: _spawn_quick(6))
+	popup.add_action_row("Spawn mother ship (6)", func() -> void:
+		var ok := _root.spawn_mother_ship()
+		show_hint("Mother ship launched" if ok else "No room for a mother ship"))
 	popup.add_action_row("Kill all AI ships", func() -> void: _kill_all_ai())
 	popup.add_action_row("AI test arena", func() -> void: _root.go_arena())
 	popup.add_separator()
@@ -572,6 +575,8 @@ func _fill_gravity_popup(popup: FlightMenu.DraggablePopup) -> void:
 			"Mode: " + String(entry[0]), mode == int(entry[1]), int(entry[1]),
 			func(v: int) -> void: grav.mode = v
 		)
+	# No-pull ("orbit only"): bodies keep their orbits and nothing falls in.
+	popup.add_check_row("Pull (things fall in)", grav.pull_enabled, func(_on: bool) -> void: _root.toggle_gravity_pull())
 	popup.add_separator()
 	var grav_str := 1.0
 	if _root.model != null:

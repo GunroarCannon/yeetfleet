@@ -1534,6 +1534,31 @@ func toggle_gravity_chaos() -> void:
 		_hud.show_hint("Gravity chaos OFF")
 
 
+## True when gravity bodies attract things in ("pull"). Gravity menu toggle:
+## off means orbit-only — bodies keep their own orbits and nothing falls in.
+func gravity_pull_on() -> bool:
+	return gravity != null and gravity.pull_enabled
+
+
+func toggle_gravity_pull() -> void:
+	if gravity == null:
+		_hud.show_hint("Gravity pull needs gravity (G)")
+		return
+	gravity.pull_enabled = not gravity.pull_enabled
+	_hud.show_hint("Gravity pull: %s — bodies %s drag things in" % [
+		"ON" if gravity.pull_enabled else "OFF",
+		"do" if gravity.pull_enabled else "do not",
+	])
+
+
+## Spawn a mother ship near the player (debug/testing). True if one was dropped.
+## Used by the Combat menu's "Spawn mother ship" row and key 6.
+func spawn_mother_ship() -> bool:
+	if _ai_spawner == null or space == null:
+		return false
+	return _ai_spawner.spawn_mother() != null
+
+
 ## Toggle the planet-pointer debug. Called by both J key and the menu.
 func toggle_planet_pointer() -> void:
 	if gravity == null or model == null:
@@ -2031,13 +2056,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			model.gravity_strength = 10.0
 			_hud.show_hint("Gravity strength: ×10.0 (extreme)")
 		KEY_6, KEY_KP_6:
-			# Debug/testing: drop a mother ship that launches fighters (6 > the
-			# gravity keys 1-5; "six" for "huge").
-			if _ai_spawner != null and space != null:
-				var mother := _ai_spawner.spawn_mother()
-				_hud.show_hint("Mother ship launched" if mother != null else "No room for a mother ship")
-			else:
-				_hud.show_hint("Mother ships need space")
+			# Debug/testing: drop a mother ship that launches fighters.
+			_hud.show_hint("Mother ship launched" if spawn_mother_ship() else "No room for a mother ship")
 		KEY_Y:
 			toggle_gravity_chaos()
 		KEY_TAB:
