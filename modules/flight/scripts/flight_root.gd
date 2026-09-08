@@ -1993,6 +1993,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_5, KEY_KP_5:
 			model.gravity_strength = 10.0
 			_hud.show_hint("Gravity strength: ×10.0 (extreme)")
+		KEY_6, KEY_KP_6:
+			# Debug/testing: drop a mother ship that launches fighters (6 > the
+			# gravity keys 1-5; "six" for "huge").
+			if _ai_spawner != null and space != null:
+				var mother := _ai_spawner.spawn_mother()
+				_hud.show_hint("Mother ship launched" if mother != null else "No room for a mother ship")
+			else:
+				_hud.show_hint("Mother ships need space")
 		KEY_TAB:
 			var new_str := model.cycle_gravity_strength()
 			_hud.show_hint("Gravity strength: ×%.1f" % new_str)

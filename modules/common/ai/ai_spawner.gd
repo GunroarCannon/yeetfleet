@@ -16,6 +16,10 @@ const DESPAWN_DISTANCE := 3500.0
 const SPAWN_MIN_DIST := 300.0
 const SPAWN_MAX_DIST := 2200.0
 const RESPAWN_INTERVAL := 2.0
+## Size multiplier for a mother ship, on top of [member Session.ship_scale].
+const MOTHER_SCALE := 16.0
+## Size multiplier for the normal-size fighters a mother ejects.
+const MOTHER_FIGHTER_SCALE := 0.7
 
 var _ships: Array[AiShip] = []
 var _library: PartLibrary
@@ -305,6 +309,82 @@ func spawn_ballistic_satellite(grav: GravitySystem, distance: float) -> AiShip:
 	ship.is_satellite = true
 	ship.team_id = 0
 	ship.model.velocity = grav.circular_orbit_velocity(body, pos)
+	_ships.append(ship)
+	return ship
+
+
+## A mother ship: a huge carrier hull that periodically launches normal-size
+## fighters (see [method AiShip.tick_ai]). Spawned near the player; huge and
+## light (mass is not scaled), so ramming one is gloriously funny.
+func spawn_mother() -> AiShip:
+	if _library == null:
+		return null
+	# Deliberately ignores the live-ship cap: a mother is a debug/testing spawn
+	# and should drop in even when the fleet is full. Its fighters still respect
+	# the cap.
+	var player := _find_player_node()
+	var dir := Vector3(
+		_rng.randf_range(-1.0, 1.0), _rng.randf_range(-0.3, 0.3), _rng.randf_range(-1.0, 1.0)
+	).normalized()
+	var anchor := player.global_position if player != null else global_position
+	var pos := anchor + dir * 400.0
+	var spawn_xform := Transform3D(Basis.looking_at(-dir, Vector3.UP), pos)
+	var ship := AiShip.new()
+	ship.name = "Mother_%d" % _ships.size()
+	ship.scale_multiplier = MOTHER_SCALE
+	ship.is_mother = true
+	ship.spawner_ref = self
+	add_child(ship)
+	ship.initialise(_library, spawn_xform, player)
+	if ship.model == null:
+		ship.queue_free()
+		return null
+	# A carrier that takes a real beating, not a one-shot wreck.
+	ship.max_hp = maxf(ship.max_hp * 12.0, 5000.0)
+	ship.hp = ship.max_hp
+	ship.set_group_context(-1, AiFactions.create(AiFactions.Archetype.LONE_WOLF), [])
+	var grav := _find_gravity()
+	if grav != null:
+		ship.set_gravity(grav)
+	ship.set_phys_world(_find_world())
+	ship.destroyed.connect(_on_ship_destroyed)
+	_ships.append(ship)
+	return ship
+
+
+## A normal-size fighter ejected by a mother ship, near the host. Inherits the
+## host's team and aggression, so a mother's fighters take up its fight.
+func spawn_fighter_near(host: Node3D) -> AiShip:
+	if _library == null or host == null:
+		return null
+	var max_ships: int = MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP
+	if _ships.size() >= max_ships:
+		return null
+	var player := _find_player_node()
+	var dir := Vector3(
+		_rng.randf_range(-1.0, 1.0), _rng.randf_range(-0.4, 0.4), _rng.randf_range(-1.0, 1.0)
+	).normalized()
+	var pos := host.global_position + dir * _rng.randf_range(40.0, 90.0)
+	var spawn_xform := Transform3D(Basis.looking_at(dir, Vector3.UP), pos)
+	var ship := AiShip.new()
+	ship.name = "Fighter_%d" % _ships.size()
+	ship.scale_multiplier = MOTHER_FIGHTER_SCALE
+	ship.spawner_ref = self
+	add_child(ship)
+	ship.initialise(_library, spawn_xform, player)
+	if ship.model == null:
+		ship.queue_free()
+		return null
+	if host is AiShip:
+		var mother := host as AiShip
+		ship.team_id = mother.team_id
+		ship.aggressive_to = mother.aggressive_to.duplicate()
+	ship.set_group_context(-1, AiFactions.create(AiFactions.Archetype.HUNTER_SQUAD), [])
+	var grav := _find_gravity()
+	if grav != null:
+		ship.set_gravity(grav)
+	ship.set_phys_world(_find_world())
+	ship.destroyed.connect(_on_ship_destroyed)
 	_ships.append(ship)
 	return ship
 

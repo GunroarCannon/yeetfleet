@@ -69,6 +69,15 @@ var _ai_paused := false
 ## A ballistic orbit probe (see [AiSpawner.spawn_ballistic_satellite]): excluded
 ## from the spawner's distance-based despawn so it stays in view for orbit tests.
 var is_satellite := false
+## A carrier-grade mother ship: huge, and periodically launches normal-size
+## fighters from the spawner. See [member scale_multiplier].
+var is_mother := false
+## Extra size on top of [member Session.ship_scale]. 1 = a normal hull; a mother
+## ship uses a large multiplier so it towers over everything around it.
+var scale_multiplier := 1.0
+## Countdown until this mother launches its next fighter, seconds.
+var _launch_timer := 2.0
+const MOTHER_LAUNCH_INTERVAL := 5.0
 ## The enemy this ship currently has a weapons lock on, or null. Set whenever a
 ## target is inside firing range; read by the HUD to bracket ships that are
 ## locked onto someone, mirroring the player's own lock bracket.
@@ -119,8 +128,9 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 
 	# Assemble the ship geometry.
 	_view = ShipAssembler.assemble(_design, library, 0.0, false, false)
-	# The Ship-size setting scales every AI hull the same way as the player's.
-	_view.apply_scale(Session.ship_scale)
+	# The Ship-size setting scales every AI hull the same way as the player's; a
+	# mother ship adds its own extra multiplier on top.
+	_view.apply_scale(Session.ship_scale * scale_multiplier)
 	_hull_holder.add_child(_view.root)
 
 	# Bind systems and configure the flight model from the design's stats.
@@ -228,6 +238,15 @@ func tick_ai(delta: float) -> void:
 	model.command.pitch = float(cmd.get("pitch", 0.0))
 	model.command.roll = float(cmd.get("roll", 0.0))
 	model.command.boost = bool(cmd.get("boost", false))
+
+	# A mother ship periodically ejects a normal-size fighter that takes up its
+	# fight. The spawner refuses when the live roster is full, so this just
+	# retries on the next interval.
+	if is_mother and _alive and spawner_ref != null and is_instance_valid(spawner_ref):
+		_launch_timer -= delta
+		if _launch_timer <= 0.0:
+			_launch_timer = MOTHER_LAUNCH_INTERVAL
+			spawner_ref.spawn_fighter_near(self)
 
 	# Combat: fire at the chosen enemy if in range and roughly aligned.
 	_update_combat(delta, target)
