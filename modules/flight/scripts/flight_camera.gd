@@ -94,7 +94,7 @@ const IDLE_DRIFT_AMOUNT := 0.15
 const IDLE_DRIFT_FREQ := 0.11
 
 const ORBIT_MIN_DIST := 1.6
-const ORBIT_MAX_DIST := 40.0
+const ORBIT_MAX_DIST := 600.0
 ## The FAR view is an orbit view pulled right out — enough to frame the belt,
 ## the planet and a bit of the arena at once. A var (not const) so the settings
 ## panel's "Far-view distance" slider can raise it.

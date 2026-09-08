@@ -219,11 +219,15 @@ func _setup_moon_orbit() -> void:
 ## Per-frame: integrate moon position via real gravity, then tumble asteroids.
 ## When gravity is OFF the moon drifts at constant velocity (no force applied).
 func _process(delta: float) -> void:
-	# Real Newtonian moon orbit — no sine hack.
+	# Real Newtonian moon orbit — no sine hack. The moon rides the gravity
+	# system's circular orbit for whatever force law is live, re-targeted every
+	# frame: under a cartoon falloff (< 2) a true 1/r^n orbit is a rosette that
+	# wanders and can plunge, so a scenery moon keeps a stable ring instead.
 	if _moon_node != null and _gravity_ref != null:
 		var moon_pos := _moon_node.global_position
-		var grav_force := _gravity_ref.compute_gravity(moon_pos)
-		_moon_velocity += grav_force * delta
+		var dominant := _gravity_ref.find_dominant_body(moon_pos)
+		if dominant != null:
+			_moon_velocity = _gravity_ref.circular_orbit_velocity(dominant, moon_pos)
 		moon_pos += _moon_velocity * delta
 		_moon_node.global_position = moon_pos
 		# Update the moon's gravity body so the player feels the moon

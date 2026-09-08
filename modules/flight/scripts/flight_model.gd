@@ -101,6 +101,15 @@ var turn_rate := 0.6
 
 var boost_level := 0.0
 
+## Control-feel values in force from the control-mode preset: how hard full
+## assist snaps velocity onto the nose, how hard damping relaxes it, and how fast
+## the ship spools to the commanded turn rate. Wiring these per preset (they were
+## declared but never read) is what actually separates Arcade from Realistic —
+## authority and spool are the feel; the turn-rate multiplier alone is not.
+var assist_authority := ASSIST_AUTHORITY
+var damping_authority := DAMPING_AUTHORITY
+var turn_spool := ROTATION_SPOOL
+
 var _stats: ShipStats
 ## The capacitor lives in [SystemsSim] so weapons and boost draw on one pool.
 var _systems: SystemsSim
@@ -176,14 +185,21 @@ var _orbit_body_name := ""
 const ORBIT_GAIN_TIME := 0.4
 const ORBIT_LOSE_TIME := 3.0
 ## How strongly the orbital assist pulls velocity toward the local circular-orbit
-## velocity, per second. A lerp factor: 0.6/s means the ship is ~60% of the way
-## to circular in the first second of coasting — a catch, not a snatch.
-const ORBITAL_ASSIST_RATE := 0.6
+## velocity, per second. A lerp factor: 1.2/s catches you back into a circular
+## orbit within about a second of coasting — a firm hold, so a stray nudge does
+## not lose the orbit.
+const ORBITAL_ASSIST_RATE := 1.8
 ## The orbital assist engages when the ship is between these multiples of the
 ## body's radius from its centre. Inside ~1.15× it's too late (collision handles
 ## it); outside ~4× it's free flight.
 const ORBITAL_ASSIST_MIN_R := 1.15
 const ORBITAL_ASSIST_MAX_R := 4.0
+## Throttle must pass this much before the ship is "really flying" under gravity.
+## Below it the ship is treated as coasting and the orbital assist holds the
+## orbit, so a light tap on the throttle does not kick you out of orbit — to
+## leave you have to commit (throttle past ~20% or boost). Only applies where
+## gravity is live; in open space a small throttle drives normally.
+const ORBIT_THROTTLE_DEADZONE := 0.2
 var _orbit_solid_time := 0.0
 var _orbit_lost_time := 0.0
 ## Gravity strength multiplier, adjustable at runtime via number keys.
@@ -197,34 +213,42 @@ var _orbit_log_timer := 0.0
 ## assist: the ship is agile enough to stay pointed at a locked target.
 enum ControlMode { ARCADE, SIM, REALISTIC, DOGFIGHT }
 var control_mode: int = ControlMode.SIM
-## Multipliers applied on top of the design's own stats.
+## Multipliers applied on top of the design's own stats. `assist_autority` is how
+## hard full-assist snaps velocity onto the nose, `damping` scales the damping
+## authority, and `turn_spool` is how fast the ship reaches the commanded turn
+## rate (seconds — small = snappy, large = heavy). These are the numbers that
+## give a preset its character.
 const PRESET_ARCADE := {
-	"speed_mult": 1.3,
-	"accel_mult": 1.6,
-	"turn_mult": 1.5,
-	"assist_autority": 3.5,
-	"damping": 1.0,
+	"speed_mult": 1.8,
+	"accel_mult": 2.5,
+	"turn_mult": 3.0,
+	"assist_autority": 4.5,
+	"damping": 0.8,
+	"turn_spool": 0.02,
 }
 const PRESET_SIM := {
 	"speed_mult": 1.0,
 	"accel_mult": 1.0,
 	"turn_mult": 1.0,
 	"assist_autority": ASSIST_AUTHORITY,
-	"damping": 1.0,
+	"damping": 0.8,
+	"turn_spool": ROTATION_SPOOL,
 }
 const PRESET_REALISTIC := {
-	"speed_mult": 0.7,
-	"accel_mult": 0.6,
-	"turn_mult": 0.65,
-	"assist_autority": 1.5,
-	"damping": 0.5,
+	"speed_mult": 0.5,
+	"accel_mult": 0.4,
+	"turn_mult": 0.4,
+	"assist_autority": 0.8,
+	"damping": 0.8,
+	"turn_spool": 0.25,
 }
 const PRESET_DOGFIGHT := {
 	"speed_mult": 1.2,
-	"accel_mult": 1.5,
-	"turn_mult": 1.8,
-	"assist_autority": 3.2,
+	"accel_mult": 1.6,
+	"turn_mult": 2.0,
+	"assist_autority": 3.6,
 	"damping": 1.2,
+	"turn_spool": 0.02,
 }
 
 
@@ -249,6 +273,11 @@ func configure(stats: ShipStats, systems: SystemsSim, damage: DamageSystem = nul
 	top_speed = base_speed * preset["speed_mult"]
 	accel = base_accel * preset["accel_mult"]
 	turn_rate = base_turn * preset["turn_mult"]
+	# The preset's feel numbers — the authority, damping and spool that actually
+	# give each mode its character (this is what was declared-but-never-read).
+	assist_authority = float(preset.get("assist_autority", ASSIST_AUTHORITY))
+	damping_authority = DAMPING_AUTHORITY * float(preset.get("damping", 1.0))
+	turn_spool = clampf(float(preset.get("turn_spool", ROTATION_SPOOL)), 0.02, 0.5)
 	# A design re-tune (control mode preset, damage-driven re-derive) changes the
 	# mass the physics layer resolves this ship with.
 	if _phys != null:
@@ -343,7 +372,7 @@ func _integrate_rotation(delta: float) -> void:
 	# is not asking anything of. Two separate steps rather than one blended one,
 	# because damping an axis you are actively commanding is what makes a ship
 	# feel like it is fighting you.
-	var spool := clampf(delta / ROTATION_SPOOL, 0.0, 1.0)
+	var spool := clampf(delta / turn_spool, 0.0, 1.0)
 	angular = angular.lerp(wanted, spool)
 
 	var damp := SPIN_DAMP_ASSIST if assist_mode == 2 else (SPIN_DAMP_ASSIST * 0.6 if assist_mode == 1 else SPIN_DAMP_FREE)
@@ -397,7 +426,7 @@ func _integrate_translation(delta: float) -> void:
 	# yanked in. Hands on the stick, the modes behave as usual.
 	var gravity_active := gravity != null and gravity.mode != GravitySystem.GravityMode.OFF
 	var coasting := gravity_active \
-		and absf(command.throttle) < 0.01 and command.strafe == Vector3.ZERO
+		and absf(command.throttle) <= ORBIT_THROTTLE_DEADZONE and command.strafe == Vector3.ZERO
 
 	# For a moment after an impact the ship flies manual: assist and damping
 	# would erase the knock before the player has seen it, which is exactly the
@@ -412,7 +441,7 @@ func _integrate_translation(delta: float) -> void:
 		if not coasting:
 			var wanted := forward * target_speed() + _strafe_vector(basis) * (top_speed * 0.25)
 			var error := wanted - velocity
-			var step := thrust * ASSIST_AUTHORITY * delta
+			var step := thrust * assist_authority * delta
 			if error.length() <= step:
 				velocity = wanted
 			else:
@@ -425,7 +454,7 @@ func _integrate_translation(delta: float) -> void:
 		if not coasting:
 			var wanted := forward * velocity.dot(forward)
 			var error := wanted - velocity
-			var damping_step := DAMPING_AUTHORITY * velocity.length() * delta
+			var damping_step := damping_authority * velocity.length() * delta
 			if error.length() <= damping_step:
 				velocity = wanted
 			else:
@@ -713,8 +742,10 @@ func _apply_orbital_assist(delta: float) -> void:
 	# the instant it stops touching the throttle (§3.1 #6).
 	if _assist_lockout > 0.0:
 		return
-	# Throttle, strafe or boost means the pilot is flying — leave orbit.
-	if absf(command.throttle) > 0.01 or command.strafe != Vector3.ZERO or command.boost:
+	# Throttle past the deadzone, strafe or boost means the pilot is really
+	# flying — leave orbit. A light throttle tap stays inside the deadzone and the
+	# orbit holds.
+	if absf(command.throttle) > ORBIT_THROTTLE_DEADZONE or command.strafe != Vector3.ZERO or command.boost:
 		return
 	var body := gravity.find_dominant_body(global_position)
 	if body == null:

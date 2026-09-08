@@ -197,9 +197,10 @@ func _fill_settings_popup(popup: FlightMenu.DraggablePopup) -> void:
 	# Ship size: scales every spawned hull (player + AI) and its collision radius.
 	# Live value is stored as the slider drags; releasing reloads the flight scene
 	# so all ships rebuild at the new scale (assemble applies Session.ship_scale).
+	# Goes to 10x deliberately — "how big can a ship get" is a test question.
 	popup.add_separator()
 	var ship_slider := popup.add_slider_row(
-		"Ship size", 0.5, 3.0, 0.1, Session.ship_scale,
+		"Ship size", 0.5, 10.0, 0.5, Session.ship_scale,
 		func(v: float) -> void: Session.ship_scale = v,
 		"×%.1f"
 	)
