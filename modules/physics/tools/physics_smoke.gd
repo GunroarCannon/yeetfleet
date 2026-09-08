@@ -34,6 +34,7 @@ func _initialize() -> void:
 	await _check_driven_not_integrated()
 	await _check_closing_on_signal()
 	await _check_scenery_never_pairs()
+	await _check_free_body_gravity()
 	_finish()
 
 
@@ -399,6 +400,29 @@ func _capture_closing_reset() -> void:
 func _capture_closing(_o: PhysBody, _imp: float, _p: Vector3, _n: Vector3, closing: float) -> void:
 	_closing_seen = true
 	_seen_closing = closing
+
+
+## A free body (neither kinematic nor driven) with the world's optional gravity
+## set must fall toward the gravitating body — this is the path a knocked-loose
+## rock takes once it stops being scenery.
+func _check_free_body_gravity() -> void:
+	var rig := _rig()
+	var b := _body(rig, Vector3(0.0, 0.0, 300.0), 1.0, 1.0, PhysBody.Layer.ROCK, Vector3.ZERO)
+	await _settle()
+	var gs := GravitySystem.new()
+	gs.register_body(Vector3.ZERO, 10000000.0, 200.0, "Planet", true)
+	var world := PhysWorld.new()
+	world.gravity = gs
+	world.add(b)
+	var start_z := b.position().z
+	for i in 25:
+		world.step(0.016)
+	_check(b.velocity.z < 0.0,
+		"a free body under gravity did not accelerate toward the body (vz %.2f)" % b.velocity.z)
+	_check(b.position().z < start_z - 0.5,
+		"a free body under gravity did not fall (z %.1f -> %.1f)" % [start_z, b.position().z])
+	_done("Free bodies fall under the world's gravity")
+	_free_rig(rig)
 
 
 ## Two kinematic scenery bodies must never appear as a pair, or a belt of rocks

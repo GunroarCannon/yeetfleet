@@ -155,6 +155,19 @@ var _phys_driver: PhysWorldDriver = null
 var _phys_profiles: Dictionary = {}
 var _phys_profile_ids: Array[String] = []
 var _phys_profile_id := "cartoony"
+## Rocks knocked loose into free bodies (rock promotion, M1). Tracked in the
+## order they came loose, so the oldest can be put back to scenery when too many
+## are flying.
+var _live_rock_bodies: Array[PhysBody] = []
+var _rock_demote_timer := 0.0
+## Closing speed (m/s) above which a hit frees a rock from the belt.
+const ROCK_KNOCK_SPEED := 18.0
+## Tonnes per cubic metre of rock: a big boulder is heavy, a pebble is not.
+const ROCK_MASS_DENSITY := 0.02
+## How many rocks may fly at once before the oldest is put back.
+const ROCK_LIVE_MAX := 20
+## A live rock farther than this from the player is put back to scenery.
+const ROCK_DEMOTE_RANGE := 2200.0
 var _planet_pointer: PlanetPointer = null
 var _spawn := Transform3D()
 ## Rear view camera: SubViewport + Camera3D looking backward from the ship.
@@ -385,6 +398,10 @@ func _build_phys_world() -> void:
 	# just guarantees it is loaded even if gravity was not in play.
 	_ensure_profile_selected()
 	phys_world = PhysWorld.new(_phys_profile)
+	# Free bodies (rocks knocked loose) fall and orbit under the scene's gravity.
+	phys_world.gravity = gravity
+	_live_rock_bodies.clear()
+	_rock_demote_timer = 0.0
 
 	var driver := PhysWorldDriver.new()
 	driver.name = "PhysDriver"
@@ -393,14 +410,18 @@ func _build_phys_world() -> void:
 	_phys_driver = driver
 
 	# Static scenery: planets, the moon, the station and every rock become
-	# kinematic bodies — infinite-mass walls with a radius. Rocks bounce the
-	# ship per the profile's restitution but are not pushed yet (that is the
-	# rock-promotion step, M1 continuing).
+	# kinematic bodies — infinite-mass walls with a radius. Rocks bounce the ship
+	# per the profile's restitution until a hard knock frees one into a real body
+	# (see [_method _on_rock_impacted]); each rock gets a volume-derived mass so
+	# the knock it eventually takes is proportional to how heavy it looks.
 	for collider in space.collision_statics():
 		var body := PhysBody.new(1.0, float(collider["radius"]))
 		body.node = collider["node"]
 		body.layer = int(collider["layer"])
 		body.kinematic = true
+		if body.layer == PhysBody.Layer.ROCK:
+			body.mass = body.radius * body.radius * body.radius * ROCK_MASS_DENSITY
+			body.impacted.connect(_on_rock_impacted)
 		phys_world.add(body)
 
 	# The player's own ship: a driven body that keeps its hand integration.
@@ -422,6 +443,7 @@ func _teardown_phys_world() -> void:
 		_phys_driver = null
 	phys_world = null
 	_phys_profile = null
+	_live_rock_bodies.clear()
 
 
 ## Load every .tres profile in modules/physics/data/profiles, keyed by file base
@@ -496,6 +518,67 @@ func cycle_phys_profile() -> String:
 ## The name of the live profile, for the HUD.
 func phys_profile_id() -> String:
 	return _phys_profile_id
+
+
+# --- Rock promotion (M1) ------------------------------------------------------
+
+## A rock was hit hard enough to come loose. It stops being an immovable wall and
+## becomes a free body: the world integrates it, gravity steers it, and its
+## visual is drawn from its node each frame. It is given the velocity it would
+## have taken from this hit if it had had mass all along (the solver resolved it
+## as kinematic, so it absorbed the hit without moving).
+func _on_rock_impacted(
+	rock: PhysBody, _other: PhysBody, impulse: float, _point: Vector3, normal: Vector3, closing: float
+) -> void:
+	if not rock.kinematic or closing < ROCK_KNOCK_SPEED:
+		return
+	if _live_rock_bodies.size() >= ROCK_LIVE_MAX:
+		_demote_rock(_live_rock_bodies[0])
+	rock.kinematic = false
+	# Velocity from momentum exchange, not impulse/rock.mass (which explodes for a
+	# pebble): a rock of mass m_r hit at closing speed v by a ship of mass m_s
+	# leaves at about v·m_s/(m_s+m_r). Small rocks fly, big boulders barely stir.
+	var m_ship := _other.mass if _other != null and _other.mass > 0.0 else 30.0
+	var speed := clampf(closing * 1.2 * m_ship / (m_ship + rock.mass), 0.0, 320.0)
+	rock.velocity -= normal * speed
+	if phys_world != null:
+		phys_world.mark_scenery_dirty()
+	_live_rock_bodies.append(rock)
+	if space != null:
+		space.set_rock_visual_live(rock, true)
+
+
+## Put a flying rock back to scenery: it freezes where it is and becomes an
+## immovable wall again. Idempotent.
+func _demote_rock(rock: PhysBody) -> void:
+	if rock == null:
+		return
+	_live_rock_bodies.erase(rock)
+	if rock.kinematic:
+		return
+	rock.kinematic = true
+	rock.velocity = Vector3.ZERO
+	rock.angular = Vector3.ZERO
+	if phys_world != null:
+		phys_world.mark_scenery_dirty()
+	if space != null:
+		space.set_rock_visual_live(rock, false)
+
+
+## Periodically put flying rocks back to scenery once they drift clear of the
+## player, so knocked-loose rocks cannot accumulate forever. Once a second.
+func _sweep_live_rocks() -> void:
+	if _live_rock_bodies.is_empty():
+		return
+	var ref := model.global_position if model != null else Vector3.ZERO
+	var to_demote: Array[PhysBody] = []
+	for rock in _live_rock_bodies:
+		if rock == null or rock.kinematic or rock.node == null or not is_instance_valid(rock.node):
+			to_demote.append(rock)
+		elif rock.node.global_position.distance_to(ref) > ROCK_DEMOTE_RANGE:
+			to_demote.append(rock)
+	for rock in to_demote:
+		_demote_rock(rock)
 
 
 ## The collision-sphere radius for the assembled hull: half the bounding box's
@@ -845,6 +928,11 @@ func _process(delta: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	_read_keyboard(delta)
+	# Once a second, put knocked-loose rocks back to scenery when they drift away.
+	_rock_demote_timer -= delta
+	if _rock_demote_timer <= 0.0:
+		_rock_demote_timer = 1.0
+		_sweep_live_rocks()
 	# A dead lock is no lock — drop it so facing assist stops fighting a freed
 	# reference and the HUD stops drawing a bracket around nothing.
 	if locked_target != null and not is_instance_valid(locked_target):

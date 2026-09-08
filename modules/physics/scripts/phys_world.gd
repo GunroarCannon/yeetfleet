@@ -25,6 +25,13 @@ var bodies: Array[PhysBody] = []
 ## a scene chooses (and the lab authors) the real profile.
 var profile: PhysProfile = null
 
+## Optional scene gravity, applied each step to *free* bodies — things that are
+## neither kinematic scenery nor driven by a controller, which in flight means a
+## rock that was knocked loose. With this set, a promoted rock falls and orbits
+## like everything else instead of coasting forever. Null leaves free bodies
+## drifting at constant velocity.
+var gravity: GravitySystem = null
+
 var _stepped_pairs := 0
 var _resolved_pairs := 0
 
@@ -47,6 +54,13 @@ func remove(body: PhysBody) -> void:
 
 func clear() -> void:
 	bodies.clear()
+	_scenery_dirty = true
+
+
+## A body's kinematic flag changed outside the world (a rock promoted to free
+## body or demoted back to scenery): the scenery index must rebuild next step so
+## the body lands in the right bucket.
+func mark_scenery_dirty() -> void:
 	_scenery_dirty = true
 
 
@@ -211,6 +225,9 @@ func _layers_touch(a: PhysBody, b: PhysBody) -> bool:
 func _integrate(body: PhysBody, delta: float) -> void:
 	if body.kinematic or body.driven or body.node == null:
 		return
+	# Free bodies feel the scene's gravity (a knocked-loose rock falls and orbits).
+	if gravity != null and gravity.mode != GravitySystem.GravityMode.OFF:
+		body.velocity += gravity.compute_gravity(body.node.global_position) * delta
 	body.node.global_position += body.velocity * delta
 	_roll(body, delta)
 	_apply_angular_damping(body, delta)

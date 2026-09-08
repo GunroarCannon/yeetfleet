@@ -95,6 +95,10 @@ var _gravity_ref: GravitySystem = null
 ## MultiMesh with no per-rock node, but the PhysWorld needs a node per body to
 ## read positions from — these empty Node3Ds are that anchor, nothing else.
 var _rock_holder: Node3D = null
+## Rocks that have been knocked loose (M1, rock promotion): real free bodies the
+## world integrates. Their MultiMesh instances are written from the body's node
+## each frame so a flying rock is drawn where it actually is.
+var _live_rocks: Array[PhysBody] = []
 
 
 ## 1 = normal, 2 = high detail. Reads [Session]'s toggle so that turning high-res
@@ -265,6 +269,15 @@ func _process(delta: float) -> void:
 			).normalized(), spin_speed * delta)
 			t.basis = (spin * t.basis).orthonormalized()
 			mm.set_instance_transform(j, t)
+	# Knocked-loose rocks are written from their PhysBody node, which the physics
+	# world moves and rolls — so the rock on screen is the rock that flies.
+	for body in _live_rocks:
+		if body == null or body.node == null or not is_instance_valid(body.node):
+			continue
+		var mm := body.node.get_meta("mm") as MultiMeshInstance3D
+		if mm == null or mm.multimesh == null:
+			continue
+		mm.multimesh.set_instance_transform(int(body.node.get_meta("j")), body.node.global_transform)
 
 
 ## The dome and the starfield have no parallax, so they must ride with the camera
@@ -817,6 +830,41 @@ func _build_belt() -> void:
 	# Near-field close-pass rocks: small, close to the flight path.
 	# These streak past at cruise speed and are the primary speed cue.
 	_build_nearfield()
+	# Remember which MultiMesh instance draws each rock, so a rock that is knocked
+	# loose can have its visual tracked from its PhysBody node.
+	_bind_rock_visuals()
+
+
+## Record, on each rock's collision anchor, which MultiMesh instance draws it.
+## Belt rock `g` lives in instance g%3 at slot g/3 (rocks were appended to each
+## bucket in ascending order); the twelve near-field rocks are instance g-260 of
+## the near-field mesh.
+func _bind_rock_visuals() -> void:
+	for g in asteroid_data.size():
+		var anchor: Node3D = asteroid_data[g]["node"]
+		if g < ASTEROID_COUNT:
+			anchor.set_meta("mm", _belt_multimeshes[g % 3])
+			anchor.set_meta("j", g / 3)
+		else:
+			anchor.set_meta("mm", _nearfield_mesh)
+			anchor.set_meta("j", g - ASTEROID_COUNT)
+
+
+## Add or remove a rock from the live set: its MultiMesh instance is then written
+## from its PhysBody node every frame instead of tumbling in place.
+func set_rock_visual_live(body: PhysBody, live: bool) -> void:
+	if live:
+		if _live_rocks.has(body) or body.node == null:
+			return
+		# Carry the rock's current orientation onto the anchor so it does not pop
+		# to an identity pose the instant it is knocked loose.
+		var mm := body.node.get_meta("mm") as MultiMeshInstance3D
+		if mm != null and mm.multimesh != null:
+			var xform := mm.multimesh.get_instance_transform(int(body.node.get_meta("j")))
+			body.node.global_transform = Transform3D(xform.basis, body.node.global_position)
+		_live_rocks.append(body)
+	else:
+		_live_rocks.erase(body)
 
 
 ## A handful of small rocks placed very close to the origin, well inside the
