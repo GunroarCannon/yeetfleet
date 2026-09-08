@@ -87,8 +87,10 @@ func step(delta: float) -> void:
 				break
 		if budget <= 0:
 			break
-	# Small scenery (rocks): look up only the cells near each mover.
-	if movers.size() > 0:
+	# Small scenery (rocks): look up only the cells near each mover. Skipped
+	# entirely when there is none — the per-mover cell probe is cheap only when
+	# it returns rocks.
+	if movers.size() > 0 and not _scenery_grid.is_empty():
 		for m in movers:
 			budget = _query_scenery(m, delta, budget)
 			if budget <= 0:
