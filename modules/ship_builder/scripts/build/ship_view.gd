@@ -56,6 +56,29 @@ func has_path(path: String) -> bool:
 	return part_nodes.has(path)
 
 
+## Uniformly scale this ship (the "ship size" flight setting). Called right
+## after assembly: geometry scales via [member root], and every ship-space number
+## a downstream consumer reads — the bounding box, muzzle/exhaust/eye offsets —
+## scales by the same factor. That way camera framing, collision radius, plumes
+## and shots all agree with the bigger visuals without any of them knowing a
+## scale exists. A no-op at the default scale of 1.
+func apply_scale(s: float) -> void:
+	if is_equal_approx(s, 1.0):
+		return
+	root.scale = Vector3.ONE * s
+	aabb.position *= s
+	aabb.size *= s
+	_scale_offsets(muzzles, s)
+	_scale_offsets(exhausts, s)
+	_scale_offsets(eyes, s)
+
+
+func _scale_offsets(list: Array[Dictionary], s: float) -> void:
+	for entry in list:
+		if entry.has("xform"):
+			(entry["xform"] as Transform3D).origin *= s
+
+
 func material_for(path: String) -> ShaderMaterial:
 	return part_materials.get(path, null) as ShaderMaterial
 

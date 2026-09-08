@@ -119,6 +119,8 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 
 	# Assemble the ship geometry.
 	_view = ShipAssembler.assemble(_design, library, 0.0, false, false)
+	# The Ship-size setting scales every AI hull the same way as the player's.
+	_view.apply_scale(Session.ship_scale)
 	_hull_holder.add_child(_view.root)
 
 	# Bind systems and configure the flight model from the design's stats.

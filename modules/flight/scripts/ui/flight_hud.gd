@@ -194,6 +194,17 @@ func _fill_settings_popup(popup: FlightMenu.DraggablePopup) -> void:
 		func(v: float) -> void: _root.set_planet_spacing(v)
 	)
 
+	# Ship size: scales every spawned hull (player + AI) and its collision radius.
+	# Live value is stored as the slider drags; releasing reloads the flight scene
+	# so all ships rebuild at the new scale (assemble applies Session.ship_scale).
+	popup.add_separator()
+	var ship_slider := popup.add_slider_row(
+		"Ship size", 0.5, 3.0, 0.1, Session.ship_scale,
+		func(v: float) -> void: Session.ship_scale = v,
+		"×%.1f"
+	)
+	ship_slider.drag_ended.connect(func(_changed: bool) -> void: _apply_ship_size())
+
 	# Presets — jump the planet sliders to a pair and restart.
 	popup.add_separator()
 	for p: Array in [["Default", 1.0, 1.0], ["Big world", 3.0, 1.5], ["Realistic", 6.0, 3.0], ["Huge", 10.0, 5.0]]:
@@ -208,6 +219,13 @@ func _apply_planet_preset(preset: Array) -> void:
 	_root.set_planet_scale(float(preset[1]))
 	_root.set_planet_spacing(float(preset[2]))
 	show_hint("Planet scale preset: %s — restarting…" % String(preset[0]))
+	_root.restart_scene()
+
+
+## Fired once when the Ship-size slider is released: reload the flight scene so
+## every ship rebuilds at the new scale.
+func _apply_ship_size() -> void:
+	show_hint("Ship size ×%.1f — restarting…" % Session.ship_scale)
 	_root.restart_scene()
 
 

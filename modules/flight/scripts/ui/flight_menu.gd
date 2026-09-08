@@ -3,8 +3,9 @@
 ##
 ## This replaces the single ☰ hamburger. Categories are surfaced as icons across
 ## the top-left corner instead of buried behind one button, and each popup floats
-## like a small window — move it where you need it, close it with ✕, and only one
-## is open at a time so the screen never piles up panels.
+## like a small window — move it where you need it, close it with ✕ or by tapping
+## anywhere outside it, and only one is open at a time so the screen never piles
+## up panels.
 ##
 ## The toolbar only opens and moves popups; [FlightHud] owns what goes inside each
 ## one via [signal category_pressed]: the HUD reads the popup back with
@@ -19,6 +20,7 @@ signal category_pressed(id: int)
 var _hud: Control = null
 var _buttons: Dictionary = {}  # id -> Button
 var _popups: Dictionary = {}  # id -> DraggablePopup
+var _backdrop: BackdropShade = null
 var _open_id := -1
 
 
@@ -30,6 +32,11 @@ func _ready() -> void:
 ## Attach the HUD the popups are created under (they float over the instruments).
 func attach(hud: Control) -> void:
 	_hud = hud
+	_backdrop = BackdropShade.new()
+	_backdrop.name = "PopupBackdrop"
+	_backdrop.tapped.connect(func() -> void: close_all())
+	_backdrop.visible = false
+	hud.add_child(_backdrop)
 
 
 ## Add a category button. [param icon_path] is under res://assets/icons.
@@ -80,20 +87,52 @@ func _open(id: int) -> void:
 		# ✕ on the popup means "not open" as far as the toolbar is concerned, so
 		# pressing the same icon again reopens it instead of appearing dead.
 		popup.closed.connect(func() -> void: _on_popup_closed(id))
-	# Tell the HUD to fill the content before sizing/placing it.
+	# A tap anywhere outside the popup dismisses it: a full-screen shade sits under
+	# the popup but above everything else, and its tap closes the menu.
+	if _backdrop != null:
+		_backdrop.visible = true
+		_backdrop.move_to_front()
+	_open_id = id
+	# Fill the content, show a first pass, then re-measure and re-place on the
+	# next frame — row minimums are not reliable until a layout pass has run, and
+	# measuring too early is what made tall menus open as a sliver.
 	category_pressed.emit(id)
-	popup.reset_size()
+	_place_open(id)
+	_measure_open(id)
+
+
+## Position the open popup under its toolbar button and show it. Called twice:
+## once provisionally (before sizes are final) and again after the measure pass.
+func _place_open(id: int) -> void:
+	if _hud == null or not _popups.has(id) or not _buttons.has(id):
+		return
+	var popup := _popups[id] as DraggablePopup
 	var rect := (_buttons[id] as Button).get_global_rect()
-	var want := Vector2(rect.position.x, rect.end.y + BuilderTheme.GAP)
-	popup.position = want.clamp(Vector2.ZERO, _hud.size - popup.size)
+	popup.position = Vector2(rect.position.x, rect.end.y + BuilderTheme.GAP).clamp(
+		Vector2.ZERO, _hud.size - popup.size
+	)
 	popup.visible = true
 	popup.move_to_front()
-	_open_id = id
+
+
+## Re-fit the open popup after a layout frame so its content minimums are real,
+## then place it. If it was closed while waiting, do nothing.
+func _measure_open(id: int) -> void:
+	await get_tree().process_frame
+	if _open_id != id or not _popups.has(id):
+		return
+	var popup := _popups[id] as DraggablePopup
+	if popup == null or not is_instance_valid(popup):
+		return
+	popup.auto_fit(_hud.size)
+	_place_open(id)
 
 
 func _on_popup_closed(id: int) -> void:
 	if _open_id == id:
 		_open_id = -1
+	if _backdrop != null:
+		_backdrop.visible = false
 
 
 ## The popup for a category, created on first request. The HUD fills its content.
@@ -103,18 +142,19 @@ func popup_for(id: int) -> DraggablePopup:
 	return _popups[id] as DraggablePopup
 
 
-## Clamp the open popup back inside the screen (called after the HUD rebuilds
-## content that is taller/wider than before).
+## Clamp the open popup back inside the screen. Called by the HUD after it
+## rebuilds content that is taller/wider than before; the refit happens on the
+## next frame so the new rows' minimums are known.
 func recentre_open() -> void:
 	if _open_id >= 0 and _popups.has(_open_id):
-		var popup := _popups[_open_id] as DraggablePopup
-		if popup != null:
-			popup.position = popup.position.clamp(Vector2.ZERO, _hud.size - popup.size)
+		_measure_open(_open_id)
 
 
 func close_all() -> void:
 	for popup in _popups.values():
 		(popup as DraggablePopup).visible = false
+	if _backdrop != null:
+		_backdrop.visible = false
 	_open_id = -1
 
 
@@ -131,10 +171,42 @@ func close_open() -> bool:
 	return true
 
 
+# --- BackdropShade ------------------------------------------------------------
+
+## A transparent full-screen control behind the open popup. It swallows any tap
+## that lands outside the popup and reports it as a dismiss, so the menu goes
+## away when you touch anywhere else.
+class BackdropShade:
+	extends Control
+
+	signal tapped
+
+
+	func _init() -> void:
+		set_anchors_preset(Control.PRESET_FULL_RECT)
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		mouse_default_cursor_shape = Control.CURSOR_ARROW
+
+
+	func _gui_input(event: InputEvent) -> void:
+		var dismiss := false
+		if event is InputEventMouseButton:
+			var mb := event as InputEventMouseButton
+			dismiss = mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
+		elif event is InputEventScreenTouch:
+			var st := event as InputEventScreenTouch
+			dismiss = st.pressed
+		if dismiss:
+			tapped.emit()
+			accept_event()
+
+
 # --- DraggablePopup ----------------------------------------------------------
 
 ## A floating panel: title bar (draggable, ✕ to close) above a content VBox the
 ## owner fills. Lives as a HUD child so it can be positioned anywhere on screen.
+## Content taller than the screen scrolls inside the panel, so a long menu can
+## never get stuck past its own bottom edge.
 class DraggablePopup:
 	extends PanelContainer
 
@@ -149,6 +221,9 @@ class DraggablePopup:
 				_title_label.text = value
 
 	var _title_label: Label
+	var _scroll: ScrollContainer
+	const HEADER_H := 26.0
+	const PAD := 10.0
 
 
 	func _init() -> void:
@@ -157,15 +232,18 @@ class DraggablePopup:
 			"panel", BuilderTheme.flat(BuilderTheme.panel_alt_bg(), BuilderTheme.border_strong(), 6, 1)
 		)
 
-		# Column: drag handle / header, then the content rows.
-		var column := VBoxContainer.new()
-		column.add_theme_constant_override("separation", BuilderTheme.GAP)
-		add_child(column)
+		# A plain body Control fills the panel; the header is pinned to its top and
+		# the scroll area takes the rest. Using a plain Control (not a VBox) means
+		# the panel's minimum size is whatever we set it to — the content cannot
+		# force the panel taller than the screen.
+		var body := Control.new()
+		body.name = "Body"
+		add_child(body)
 
 		var handle := DragHandle.new()
-		handle.custom_minimum_size = Vector2(0, 26)
+		handle.name = "Handle"
 		handle.drag_by.connect(func(by: Vector2) -> void: _on_drag(by))
-		column.add_child(handle)
+		body.add_child(handle)
 
 		var header := HBoxContainer.new()
 		header.add_theme_constant_override("separation", BuilderTheme.GAP)
@@ -187,16 +265,47 @@ class DraggablePopup:
 		close.pressed.connect(func() -> void: close_popup())
 		header.add_child(close)
 
+		_scroll = ScrollContainer.new()
+		_scroll.name = "Scroll"
+		_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		body.add_child(_scroll)
+
 		content = VBoxContainer.new()
 		content.add_theme_constant_override("separation", BuilderTheme.GAP)
-		column.add_child(content)
+		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_scroll.add_child(content)
+
+		# Manual anchors: body fills the panel, the handle is a fixed strip at the
+		# top, and the scroll area is everything below it.
+		body.set_anchors_preset(Control.PRESET_FULL_RECT)
+		handle.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		handle.offset_bottom = HEADER_H
+		_scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_scroll.offset_top = HEADER_H + BuilderTheme.GAP
 
 
 	func _on_drag(by: Vector2) -> void:
 		var parent := get_parent() as Control
 		if parent == null:
 			return
-		position = (position + by).clamp(Vector2.ZERO, parent.size - size)
+		position += by
+		# Clamp per axis. A panel taller than the screen must be allowed to slide
+		# up past zero, or it pins at the top and rows below the fold become
+		# unreachable — the "stuck" bug. With this clamp it can move so its bottom
+		# edge is reachable and slide back to show the top again.
+		position.x = clampf(position.x, minf(0.0, parent.size.x - size.x), maxf(0.0, parent.size.x - size.x))
+		position.y = clampf(position.y, minf(0.0, parent.size.y - size.y), maxf(0.0, parent.size.y - size.y))
+
+
+	## Size the panel to its content, capped so it never exceeds the screen:
+	## short menus hug their rows, tall ones scroll internally instead of
+	## overflowing past the bottom edge.
+	func auto_fit(screen_size: Vector2) -> void:
+		var inner := content.get_combined_minimum_size()
+		var w := clampf(inner.x + PAD * 2.0, 140.0, maxf(screen_size.x - PAD, 140.0))
+		var h := clampf(HEADER_H + PAD + inner.y, HEADER_H + PAD, screen_size.y - PAD)
+		custom_minimum_size = Vector2(w, h)
+		reset_size()
 
 
 	func close_popup() -> void:

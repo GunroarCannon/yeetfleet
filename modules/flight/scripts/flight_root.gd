@@ -705,6 +705,8 @@ func _assemble() -> void:
 	# No colliders and no socket markers: nothing raycasts the hull in flight, and
 	# a ship covered in mount rings is a hangar view, not a cockpit view.
 	view = ShipAssembler.assemble(design, library, 0.0, false, false)
+	# The Ship-size setting scales the whole hull (and its offsets) at assembly.
+	view.apply_scale(Session.ship_scale)
 	_ship_holder.add_child(view.root)
 	model.configure(view.resolution.stats, systems, damage)
 	systems.bind(view, self)
@@ -1400,6 +1402,9 @@ func toggle_gravity_viz() -> void:
 		_gravity_viz.toggle()
 		if _gravity_viz.get_parent() != null:
 			remove_child(_gravity_viz)
+	# The [ORBIT] console stream rides on the visualizer: it exists to watch orbits
+	# and is too chatty (a line per ship per second) to run all the time.
+	Session.debug_orbit_log = _gravity_viz.is_showing()
 	var viz_state := "ON" if _gravity_viz.is_showing() else "OFF"
 	_hud.show_hint("Gravity visualizer: %s" % viz_state)
 

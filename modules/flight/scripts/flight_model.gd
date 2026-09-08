@@ -781,10 +781,13 @@ func _check_orbit() -> void:
 	_orbit_log_timer += get_physics_process_delta_time()
 	if _orbit_log_timer >= 1.0:
 		_orbit_log_timer = 0.0
-		print("[ORBIT] %s dist=%.0fm speed=%.0f m/s v_orbit=%.0f m/s (%.0f%% off) %s" % [
-			best_body.name, dist_to_body, speed, v_orbit, pct_off,
-			"IN ORBIT" if in_orbit_now else "not in orbit"
-		])
+		# Debug-only: one line per ship per second, off by default because the
+		# console flush stutters windowed runs. KEY_H (gravity viz) turns it on.
+		if Session.debug_orbit_log:
+			print("[ORBIT] %s dist=%.0fm speed=%.0f m/s v_orbit=%.0f m/s (%.0f%% off) %s" % [
+				best_body.name, dist_to_body, speed, v_orbit, pct_off,
+				"IN ORBIT" if in_orbit_now else "not in orbit"
+			])
 	# Hysteresis so the status doesn't flicker: "in orbit" needs a short solid
 	# stretch to appear, and once gained it takes a few seconds out of band to
 	# be declared lost. An elliptical orbit swings past the band every loop —

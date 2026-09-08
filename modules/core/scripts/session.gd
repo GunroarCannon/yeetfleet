@@ -60,6 +60,14 @@ static var planet_scale := 1.0
 ## Planet spacing scale: gaps between worlds and the moon's orbit.
 ## Formerly `FlightRoot._planet_spacing`.
 static var planet_spacing := 1.0
+## Ship size scale: multiplies every spawned hull — the player's own and each AI
+## ship — and its collision radius. 1.0 is the design size. Changing it reloads
+## the flight scene so all ships rebuild at the new scale.
+static var ship_scale := 1.0
+## Debug: stream one `[ORBIT]` line per gravitating ship per second to the
+## console. Off by default — the log exists for orbit tuning and, left on, flushes
+## the console every second per ship, which stutters windowed runs.
+static var debug_orbit_log := false
 ## High-res: render at a higher internal resolution and rebuild geometry denser.
 ## Formerly `FlightRoot._high_res_on`.
 static var high_res := false
