@@ -1,8 +1,0 @@
-ERROR: Parameter "t" is null.
-   at: texture_2d_get (servers/rendering/dummy/storage/texture_storage.h:106)
-   GDScript backtrace (most recent call first):
-       [0] _init (res://modules/reputation/tools/reputation_shot.gd:128)
-SCRIPT ERROR: Cannot call method 'save_png' on a null value.
-   at: _init (res://modules/reputation/tools/reputation_shot.gd:129)
-   GDScript backtrace (most recent call first):
-       [0] _init (res://modules/reputation/tools/reputation_shot.gd:129)
