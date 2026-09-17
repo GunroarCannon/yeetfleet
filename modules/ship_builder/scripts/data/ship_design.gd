@@ -92,6 +92,12 @@ func set_color(channel: String, color: Color) -> void:
 	palette[channel] = color
 
 
+## Refreshes the design's colour channels to match the active global [Palette].
+func refresh_palette() -> void:
+	for channel in CHANNELS:
+		palette[channel] = Palette.color(channel_role(channel))
+
+
 func material_params() -> Dictionary:
 	return MATERIAL_PRESETS.get(material_preset, MATERIAL_PRESETS["matte"])
 

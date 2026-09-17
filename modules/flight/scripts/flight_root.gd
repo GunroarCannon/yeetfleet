@@ -232,13 +232,15 @@ func _ready() -> void:
 	_assemble()
 	# The player's own hull has to follow a global look and palette change, like the
 	# traffic and the scenery do — see [method AiSpawner._on_style_changed] and
-	# [method SpaceScene._on_style_changed].
 	StyleManager.instance().style_changed.connect(_on_style_changed)
+	StyleManager.instance().palette_changed.connect(_on_palette_changed)
 	# Apply the Settings panel's persisted far values now that the camera exists
 	# (it is created in FlightCamera._ready, so _enter_tree was too early).
 	camera_rig.set_far_clip(_far_clip)
 	camera_rig.set_far_view_max(_far_view_max)
 	camera_rig.set_mode(FlightCamera.Mode.CHASE)
+	if Session.mobile_view_fit:
+		camera_rig.set_mobile_view(true)
 	camera_rig.adopt(model, model, view)
 	# Start closer to Tarn IV so gravity is immediately noticeable.
 	# Ship spawns in a stable orbit: correct tangential velocity and
@@ -774,6 +776,28 @@ func _on_style_changed(_profile: StyleProfile) -> void:
 	view.restyle()
 	if model != null:
 		model.refresh_hull(_ship_collision_radius(view), _ship_hull(view))
+
+
+func _on_palette_changed(_palette: Palette) -> void:
+	if view != null:
+		view.restyle(true)
+	if model != null:
+		model.refresh_hull(_ship_collision_radius(view), _ship_hull(view))
+	LargeCraftGenerator.refresh_materials()
+	for craft in _large_craft:
+		if is_instance_valid(craft):
+			craft.restyle()
+	if _hud != null:
+		_hud.refresh_palette()
+
+
+## Toggles mobile screen fitting view (closer framing & responsive UI).
+func set_mobile_view(enabled: bool) -> void:
+	Session.mobile_view_fit = enabled
+	if camera_rig != null:
+		camera_rig.set_mobile_view(enabled)
+	if _hud != null:
+		_hud.update_mobile_view(enabled)
 
 
 func _build_test_volume_environment() -> void:
@@ -2872,6 +2896,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 					_last_spawn_time = now
 		KEY_F5:
 			restart_scene()
+		KEY_F8:
+			set_mobile_view(not Session.mobile_view_fit)
+		KEY_F9:
+			if _hud != null:
+				_hud.toggle_art_style()
+		KEY_F10:
+			if _hud != null:
+				_hud.toggle_palette_menu()
 		KEY_QUESTION, KEY_SLASH, KEY_F1:
 			toggle_help()
 		KEY_ESCAPE:

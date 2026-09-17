@@ -632,6 +632,79 @@ func _add_part(kind: String, spec: Dictionary, local_xform: Transform3D, cosmeti
 static var _mat_hull: ShaderMaterial = null
 static var _mat_greeble: ShaderMaterial = null
 
+static func refresh_materials() -> void:
+	_mat_hull = null
+	_mat_greeble = null
+
+
+func restyle() -> void:
+	refresh_materials()
+	for part in _parts.values():
+		if is_instance_valid(part.node):
+			var mesh_inst: MeshInstance3D = part.node.get_node_or_null("Mesh")
+			if mesh_inst != null:
+				mesh_inst.material_override = _metal_material(part.cosmetic)
+
+
+## Bakes static structure parts into unified meshes for low draw calls on mobile.
+func bake_structure_meshes() -> void:
+	var st_hull := SurfaceTool.new()
+	st_hull.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var st_greeble := SurfaceTool.new()
+	st_greeble.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	var has_hull := false
+	var has_greeble := false
+
+	for part in _parts.values():
+		if not is_instance_valid(part.node) or part.mesh == null:
+			continue
+		var st := st_greeble if part.cosmetic else st_hull
+		if part.cosmetic:
+			has_greeble = true
+		else:
+			has_hull = true
+		var xform: Transform3D = part.node.transform
+		var arrays: Array = part.mesh.surface_get_arrays(0)
+		if arrays.is_empty():
+			continue
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+
+		if indices.is_empty():
+			for i in verts.size():
+				if not normals.is_empty():
+					st.set_normal((xform.basis * normals[i]).normalized())
+				st.add_vertex(xform * verts[i])
+		else:
+			for idx in indices:
+				if not normals.is_empty():
+					st.set_normal((xform.basis * normals[idx]).normalized())
+				st.add_vertex(xform * verts[idx])
+
+		# Hide individual mesh instances but keep the StaticBody3D collision intact
+		var mesh_inst: MeshInstance3D = part.node.get_node_or_null("Mesh")
+		if mesh_inst != null:
+			mesh_inst.visible = false
+
+	if has_hull:
+		var mi_hull := MeshInstance3D.new()
+		mi_hull.name = "BakedHullStructure"
+		mi_hull.mesh = st_hull.commit()
+		mi_hull.material_override = _metal_material(false)
+		mi_hull.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_parts_root.add_child(mi_hull)
+
+	if has_greeble:
+		var mi_greeble := MeshInstance3D.new()
+		mi_greeble.name = "BakedGreebleStructure"
+		mi_greeble.mesh = st_greeble.commit()
+		mi_greeble.material_override = _metal_material(true)
+		mi_greeble.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_parts_root.add_child(mi_greeble)
+
+
 func _metal_material(cosmetic: bool) -> ShaderMaterial:
 	if cosmetic:
 		if _mat_greeble == null:

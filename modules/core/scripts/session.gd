@@ -98,6 +98,12 @@ static var damping_mult := 1.0
 static var hud_reticle := true
 static var hud_markers := true
 static var hud_indicators := true
+
+## Mobile screen view fit: tighter camera framing (closer chase, focused FOV) and enlarged touch targets.
+static var mobile_view_fit := false
+
+## Mesh and collision baking: merge meshes for lower draw calls and pre-bake compound colliders.
+static var mesh_baking_enabled := false
 ## Whether the drift field (motes/streaks) and planet pointer come back on after
 ## a reload — they used to be ephemeral per-scene toggles.
 static var drift_field := true

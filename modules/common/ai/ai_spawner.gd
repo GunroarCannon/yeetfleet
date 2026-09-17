@@ -50,6 +50,7 @@ func _ready() -> void:
 	# ships spawned after it — the player flips the toggle and expects the belt to
 	# change with them.
 	StyleManager.instance().style_changed.connect(_on_style_changed)
+	StyleManager.instance().palette_changed.connect(_on_palette_changed)
 	print("AiSpawner: %d presets, %d parts" % [_library.presets.size(), _library.parts.size()])
 	# Deferred: the player ship is positioned in FlightRoot._ready, which runs
 	# after this node's _ready. Deferring lets the initial fleet spawn around the
@@ -74,6 +75,12 @@ func _spawn_initial_fleet() -> void:
 ## dials, so a shading-only change is a cache hit for every part and costs a
 ## handful of uniform writes per material rather than a rebuild.
 func _on_style_changed(_profile: StyleProfile) -> void:
+	for ship in _ships:
+		if is_instance_valid(ship):
+			ship.restyle()
+
+
+func _on_palette_changed(_palette: Palette) -> void:
 	for ship in _ships:
 		if is_instance_valid(ship):
 			ship.restyle()

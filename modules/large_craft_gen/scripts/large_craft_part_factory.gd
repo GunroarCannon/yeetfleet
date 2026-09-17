@@ -41,8 +41,15 @@ static func build(kind: String, spec: Dictionary) -> Built:
 		_: markers = _greeble_block(lp, spec)
 
 	var built := Built.new()
-	built.mesh = lp.commit(kind)
-	built.aabb = lp.bounds()
+	var mesh := lp.commit(kind)
+	var style := StyleManager.instance().current_profile
+	if style and (style.roundness > 0.0 or style.chunkiness > 0.0):
+		var rounding := MeshRounding.new()
+		rounding.roundness = style.roundness
+		rounding.chunkiness = style.chunkiness
+		mesh = rounding.apply(mesh) as ArrayMesh
+	built.mesh = mesh
+	built.aabb = mesh.get_aabb()
 	built.markers = markers
 	return built
 

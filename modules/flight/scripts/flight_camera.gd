@@ -319,6 +319,16 @@ func set_chase_scale(scale: float) -> void:
 	chase_scale = maxf(scale, 0.25)
 
 
+## Adapts camera framing for mobile screens: tighter chase distance and focused FOV.
+func set_mobile_view(enabled: bool) -> void:
+	if enabled:
+		set_chase_scale(0.72)
+		set_fov(62.0)
+	else:
+		set_chase_scale(1.0)
+		set_fov(72.0)
+
+
 ## Everything runs in _process, not _physics_process: the camera should be as
 ## smooth as the display, and it only ever reads the ship's state.
 func _process(delta: float) -> void:

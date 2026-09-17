@@ -206,6 +206,14 @@ func set_phys_world(world: PhysWorld) -> void:
 	if scale_multiplier > 1.0 and model._phys != null:
 		model._phys.mass *= scale_multiplier * scale_multiplier
 
+	# Big ships (carriers, motherships, heavy haulers) get dedicated part-level
+	# collision shapes so projectiles and small craft collide with specific parts.
+	if (is_mother or scale_multiplier >= 1.5) and _view != null:
+		_view.create_part_colliders(model)
+
+	if Session.mesh_baking_enabled and _view != null:
+		_view.enable_baked_mesh(true)
+
 
 ## Re-skin this ship for the current look and palette, and re-derive its collision
 ## hull from the geometry the new look produced. Called by [AiSpawner] when the

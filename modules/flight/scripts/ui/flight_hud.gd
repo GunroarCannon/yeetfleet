@@ -61,6 +61,16 @@ var _debug_panel: VBoxContainer = null
 var _debug_toggles: Dictionary = {}
 var _event_container: CenterContainer = null
 
+## Visual & Palette controls
+var _palette_chip: Button = null
+var _palette_preview_dots: HBoxContainer = null
+var _style_chip: Button = null
+var _mobile_chip: Button = null
+var _palette_drawer: PanelContainer = null
+var _swatches_grid: HFlowContainer = null
+var _palette_tabs_container: HBoxContainer = null
+var _swatch_section_label: Label = null
+
 
 func _ready() -> void:
 	_root = owner as FlightRoot
@@ -83,6 +93,7 @@ func _build() -> void:
 	add_child(_overlay)
 
 	_build_top_bar()
+	_build_palette_drawer()
 	_build_readouts()
 	_build_controls()
 	_build_event_container()
@@ -433,6 +444,27 @@ func _build_top_bar() -> void:
 	_menu.add_action_icon(ACTION_HANGAR, "flashlight.png", "Back to the hangar (Esc)", func() -> void: _root.return_to_hangar())
 	bar.add_child(_menu)
 
+	# Palette toggle & preview chip
+	_palette_chip = _chip("🎨 " + _get_active_palette_name(), "Color Palette (F10) — switch color palette & view swatches", func() -> void: toggle_palette_menu())
+	bar.add_child(_palette_chip)
+
+	# Mini-swatch strip showing key colors
+	_palette_preview_dots = HBoxContainer.new()
+	_palette_preview_dots.name = "PaletteDots"
+	_palette_preview_dots.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_palette_preview_dots.alignment = BoxContainer.ALIGNMENT_CENTER
+	_palette_preview_dots.add_theme_constant_override("separation", 3)
+	bar.add_child(_palette_preview_dots)
+	_update_palette_dots()
+
+	# Art style toggle chip
+	_style_chip = _chip(_get_style_chip_label(), "Art Style (F9) — toggle cartoony/rounded vs grounded look", func() -> void: toggle_art_style())
+	bar.add_child(_style_chip)
+
+	# Mobile view fit chip
+	_mobile_chip = _chip("📱 Mobile" if Session.mobile_view_fit else "🖥 Desktop", "Mobile View (F8) — fit view & UI for mobile screen", func() -> void: toggle_mobile_view())
+	bar.add_child(_mobile_chip)
+
 	_target_label = Label.new()
 	_target_label.name = "Target"
 	_target_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -447,6 +479,269 @@ func _build_top_bar() -> void:
 	bar.add_child(_view_chip)
 	_assist_chip = _chip("ASSIST", "Flight assist (Z)", func() -> void: _root.toggle_assist())
 	bar.add_child(_assist_chip)
+
+
+func _get_active_palette_name() -> String:
+	var pal := StyleManager.instance().current_palette
+	if pal != null:
+		return pal.display_name
+	return "Default"
+
+
+func _get_style_chip_label() -> String:
+	var prof := StyleManager.instance().current_profile
+	if prof != null and prof.id == "cartoony":
+		return "✨ Cartoony"
+	return "✨ Grounded"
+
+
+func _update_palette_dots() -> void:
+	if _palette_preview_dots == null:
+		return
+	for c in _palette_preview_dots.get_children():
+		c.queue_free()
+	var roles := ["background", "star", "hull_primary", "hull_accent", "ui_accent"]
+	for role in roles:
+		var col := Palette.color(role)
+		var rect := ColorRect.new()
+		rect.color = col
+		rect.custom_minimum_size = Vector2(8, 14)
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_palette_preview_dots.add_child(rect)
+
+
+func toggle_palette_menu() -> void:
+	if _palette_drawer == null:
+		return
+	_palette_drawer.visible = not _palette_drawer.visible
+	if _palette_drawer.visible:
+		_rebuild_palette_tabs()
+		_rebuild_swatches()
+
+
+func toggle_art_style() -> void:
+	var prof := StyleManager.instance().toggle_art_style()
+	if _style_chip != null:
+		_style_chip.text = _get_style_chip_label()
+	show_hint("Art Style: %s (%s, roundness %.2f)" % [
+		prof.display_name,
+		"cartoony & rounded" if prof.id == "cartoony" else "grounded & sharp",
+		prof.roundness
+	])
+
+
+func toggle_mobile_view() -> void:
+	var new_val := not Session.mobile_view_fit
+	if _root != null:
+		_root.set_mobile_view(new_val)
+	else:
+		Session.mobile_view_fit = new_val
+	update_mobile_view(Session.mobile_view_fit)
+	show_hint("Mobile View Fit: %s" % ("ENABLED (closer framing & responsive UI)" if Session.mobile_view_fit else "DESKTOP"))
+
+
+func toggle_mesh_baking() -> void:
+	Session.mesh_baking_enabled = not Session.mesh_baking_enabled
+	if _root != null and _root.view != null:
+		_root.view.enable_baked_mesh(Session.mesh_baking_enabled)
+	show_hint("Mesh Baking: %s" % ("ENABLED (consolidated draw calls)" if Session.mesh_baking_enabled else "OFF (individual parts)"))
+
+
+func update_mobile_view(enabled: bool) -> void:
+	if _mobile_chip != null:
+		_mobile_chip.text = "📱 Mobile" if enabled else "🖥 Desktop"
+	_layout_controls()
+
+
+func refresh_palette() -> void:
+	if _palette_chip != null:
+		_palette_chip.text = "🎨 " + _get_active_palette_name()
+	_update_palette_dots()
+	if _palette_drawer != null and _palette_drawer.visible:
+		_rebuild_palette_tabs()
+		_rebuild_swatches()
+
+
+func _build_palette_drawer() -> void:
+	_palette_drawer = PanelContainer.new()
+	_palette_drawer.name = "PaletteDrawer"
+	_palette_drawer.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_palette_drawer.offset_left = BuilderTheme.PAD
+	_palette_drawer.offset_right = -BuilderTheme.PAD
+	_palette_drawer.offset_top = BuilderTheme.TOUCH_MIN + BuilderTheme.PAD * 2
+	_palette_drawer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_palette_drawer.visible = false
+
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Palette.color("ui_bg_panel")
+	sb.border_color = Palette.color("ui_border_strong")
+	sb.border_width_bottom = 2
+	sb.border_width_left = 2
+	sb.border_width_right = 2
+	sb.border_width_top = 2
+	sb.corner_radius_bottom_left = 8
+	sb.corner_radius_bottom_right = 8
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 12
+	_palette_drawer.add_theme_stylebox_override("panel", sb)
+
+	var main_vbox := VBoxContainer.new()
+	main_vbox.add_theme_constant_override("separation", 8)
+	_palette_drawer.add_child(main_vbox)
+
+	# Header bar
+	var header := HBoxContainer.new()
+	var title := Label.new()
+	title.text = "🎨 COLOR PALETTE & VISUAL STYLE"
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Palette.color("ui_accent"))
+	header.add_child(title)
+
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(spacer)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕ Close"
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.pressed.connect(func() -> void: _palette_drawer.visible = false)
+	header.add_child(close_btn)
+	main_vbox.add_child(header)
+
+	# Palette tabs row
+	var pal_label := Label.new()
+	pal_label.text = "Choose Palette (applies to world void, stars, nebula, rocks, celestial bodies, ships & UI):"
+	pal_label.add_theme_font_size_override("font_size", 11)
+	pal_label.add_theme_color_override("font_color", Palette.color("ui_text_dim"))
+	main_vbox.add_child(pal_label)
+
+	_palette_tabs_container = HBoxContainer.new()
+	_palette_tabs_container.add_theme_constant_override("separation", 6)
+	main_vbox.add_child(_palette_tabs_container)
+	_rebuild_palette_tabs()
+
+	# Swatches section
+	_swatch_section_label = Label.new()
+	_swatch_section_label.text = "All Colors in Active Palette (%s):" % _get_active_palette_name()
+	_swatch_section_label.add_theme_font_size_override("font_size", 11)
+	_swatch_section_label.add_theme_color_override("font_color", Palette.color("ui_text_dim"))
+	main_vbox.add_child(_swatch_section_label)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 180)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	main_vbox.add_child(scroll)
+
+	_swatches_grid = HFlowContainer.new()
+	_swatches_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_swatches_grid.add_theme_constant_override("h_separation", 6)
+	_swatches_grid.add_theme_constant_override("v_separation", 6)
+	scroll.add_child(_swatches_grid)
+	_rebuild_swatches()
+
+	# Quick toggles row
+	var toggles_box := HBoxContainer.new()
+	toggles_box.add_theme_constant_override("separation", 10)
+
+	var style_toggle_btn := Button.new()
+	style_toggle_btn.text = "✨ Toggle Cartoony & Rounded"
+	style_toggle_btn.pressed.connect(toggle_art_style)
+	toggles_box.add_child(style_toggle_btn)
+
+	var mobile_toggle_btn := Button.new()
+	mobile_toggle_btn.text = "📱 Fit View for Mobile Screen"
+	mobile_toggle_btn.pressed.connect(toggle_mobile_view)
+	toggles_box.add_child(mobile_toggle_btn)
+
+	var bake_toggle_btn := Button.new()
+	bake_toggle_btn.text = "⚡ Bake Meshes & Collisions"
+	bake_toggle_btn.pressed.connect(toggle_mesh_baking)
+	toggles_box.add_child(bake_toggle_btn)
+
+	main_vbox.add_child(toggles_box)
+	add_child(_palette_drawer)
+
+
+func _rebuild_palette_tabs() -> void:
+	if _palette_tabs_container == null:
+		return
+	for c in _palette_tabs_container.get_children():
+		c.queue_free()
+
+	var all_palettes := Palette.all()
+	var current_p := StyleManager.instance().current_palette
+	var current_id := current_p.id if current_p != null else ""
+
+	for pal in all_palettes:
+		var btn := Button.new()
+		btn.text = ("● " if pal.id == current_id else "") + pal.display_name
+		btn.custom_minimum_size = Vector2(100, 32)
+		btn.focus_mode = Control.FOCUS_NONE
+		if pal.id == current_id:
+			btn.add_theme_color_override("font_color", Palette.color("ui_select"))
+		var target_pal := pal
+		btn.pressed.connect(func() -> void:
+			StyleManager.instance().set_palette(target_pal)
+			refresh_palette()
+			_rebuild_palette_tabs()
+			_rebuild_swatches()
+			show_hint("Color Palette: %s applied to world, ships & UI" % target_pal.display_name)
+		)
+		_palette_tabs_container.add_child(btn)
+
+
+func _rebuild_swatches() -> void:
+	if _swatches_grid == null:
+		return
+	for c in _swatches_grid.get_children():
+		c.queue_free()
+
+	if _swatch_section_label != null:
+		_swatch_section_label.text = "All Colors in Active Palette (%s):" % _get_active_palette_name()
+
+	var current_p := StyleManager.instance().current_palette
+	if current_p == null:
+		var all_p := Palette.all()
+		if not all_p.is_empty():
+			current_p = all_p[0]
+
+	if current_p == null:
+		return
+
+	for row in current_p.swatches():
+		var col: Color = row["color"]
+		var label_str: String = row["label"]
+		var key_str: String = row["key"]
+		var group_str: String = row.get("group", "")
+
+		var card := HBoxContainer.new()
+		card.custom_minimum_size = Vector2(155, 26)
+		card.tooltip_text = "%s (%s)\nRole: %s\nRGB: #%s" % [label_str, group_str, key_str, col.to_html(false)]
+
+		var color_rect := ColorRect.new()
+		color_rect.color = col
+		color_rect.custom_minimum_size = Vector2(22, 22)
+		color_rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		card.add_child(color_rect)
+
+		var info_box := VBoxContainer.new()
+		info_box.add_theme_constant_override("separation", 0)
+
+		var name_lbl := Label.new()
+		name_lbl.text = label_str
+		name_lbl.add_theme_font_size_override("font_size", 10)
+		info_box.add_child(name_lbl)
+
+		var hex_lbl := Label.new()
+		hex_lbl.text = "#" + col.to_html(false)
+		hex_lbl.add_theme_font_size_override("font_size", 9)
+		hex_lbl.add_theme_color_override("font_color", Palette.color("ui_text_dim"))
+		info_box.add_child(hex_lbl)
+
+		card.add_child(info_box)
+		_swatches_grid.add_child(card)
 
 
 func _chip(text: String, tooltip: String, action: Callable) -> Button:
@@ -542,16 +837,17 @@ func _hold_button(text: String, tooltip: String, tint: Color) -> Button:
 func _layout_controls() -> void:
 	if _stick == null:
 		return
+	var is_mob := Session.mobile_view_fit
 	var pad := float(BuilderTheme.PAD)
 	var short_edge := minf(size.x, size.y)
-	var stick_size := clampf(short_edge * 0.30, 110.0, 190.0)
-	var button_w := clampf(short_edge * 0.17, 76.0, 132.0)
-	var button_h := float(BuilderTheme.TOUCH_MIN + 8)
+	var stick_size := clampf(short_edge * 0.30, 110.0, 190.0) * (1.15 if is_mob else 1.0)
+	var button_w := clampf(short_edge * 0.17, 76.0, 132.0) * (1.2 if is_mob else 1.0)
+	var button_h := float(BuilderTheme.TOUCH_MIN + (16 if is_mob else 8))
 
 	_stick.size = Vector2(stick_size, stick_size)
 	_stick.position = size - _stick.size - Vector2(pad, pad)
 
-	_throttle.size = Vector2(clampf(short_edge * 0.10, 54.0, 78.0), stick_size)
+	_throttle.size = Vector2(clampf(short_edge * 0.10, 54.0, 78.0) * (1.15 if is_mob else 1.0), stick_size)
 	_throttle.position = Vector2(pad, size.y - _throttle.size.y - pad)
 
 	# The action buttons sit inboard of the stick, above the throttle: reachable
@@ -562,10 +858,15 @@ func _layout_controls() -> void:
 	_fire_button.size = Vector2(button_w, button_h)
 	_fire_button.position = Vector2(stack_x, size.y - button_h * 2.0 - pad * 2.0)
 
-	_speed_label.size = Vector2(160, 40)
-	_speed_label.position = Vector2(size.x - 160 - pad, size.y * 0.5 - 60)
-	_ground_speed_label.size = Vector2(160, 20)
-	_ground_speed_label.position = Vector2(size.x - 160 - pad, size.y * 0.5 - 22)
+	var spd_w := 200.0 if is_mob else 160.0
+	_speed_label.size = Vector2(spd_w, 48 if is_mob else 40)
+	_speed_label.position = Vector2(size.x - spd_w - pad, size.y * 0.5 - 60)
+	_speed_label.add_theme_font_size_override("font_size", 34 if is_mob else 26)
+
+	_ground_speed_label.size = Vector2(spd_w, 24 if is_mob else 20)
+	_ground_speed_label.position = Vector2(size.x - spd_w - pad, size.y * 0.5 - 18)
+	_ground_speed_label.add_theme_font_size_override("font_size", 16 if is_mob else 14)
+
 	_hint_label.size = Vector2(size.x * 0.6, 24)
 	_hint_label.position = Vector2(size.x * 0.2, size.y * 0.5 + RETICLE_RADIUS * 3.0)
 
@@ -630,6 +931,13 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_check_row("High contrast", BuilderTheme.high_contrast, func(_on: bool) -> void: _root.toggle_high_contrast())
 	popup.add_check_row("Test volume (restart)", not _root.location_is_space(), func(_on: bool) -> void: _root.toggle_location())
 	popup.add_check_row("Planet pointer (J)", _root.planet_pointer_on(), func(_on: bool) -> void: _root.toggle_planet_pointer())
+
+	# Visual & Palette Style
+	popup.add_section("Visual & Palette Style")
+	popup.add_action_row("Open Palette Menu & Swatches (F10)", func() -> void: toggle_palette_menu())
+	popup.add_check_row("Mobile View Fit (closer framing, responsive)", Session.mobile_view_fit, func(on: bool) -> void: toggle_mobile_view())
+	popup.add_check_row("Cartoony & Rounded Style", StyleManager.instance().current_profile != null and StyleManager.instance().current_profile.id == "cartoony", func(_on: bool) -> void: toggle_art_style())
+	popup.add_check_row("Bake Meshes (Draw call optimization)", Session.mesh_baking_enabled, func(_on: bool) -> void: toggle_mesh_baking())
 
 	# HUD clutter (persisted).
 	popup.add_section("HUD overlay")

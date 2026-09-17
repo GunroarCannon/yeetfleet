@@ -148,6 +148,7 @@ func _ready() -> void:
 	# built once at _ready like everything else in this scene, so a style change
 	# needs an explicit rebuild rather than a per-frame read.
 	StyleManager.instance().style_changed.connect(_on_style_changed)
+	StyleManager.instance().palette_changed.connect(_on_palette_changed)
 
 
 ## Called by FlightRoot to give the moon access to the gravity system.
@@ -444,6 +445,26 @@ func _on_style_changed(_profile: StyleProfile) -> void:
 			old.free()
 		_sky.add_child(_make_starfield())
 	_restyle_scenery()
+
+
+func _on_palette_changed(_palette: Palette) -> void:
+	if _sky != null:
+		var old_stars := _sky.get_node_or_null("Stars")
+		if old_stars != null:
+			_sky.remove_child(old_stars)
+			old_stars.free()
+		_sky.add_child(_make_starfield())
+
+		var old_nebula := _sky.get_node_or_null("Nebula")
+		if old_nebula != null:
+			_sky.remove_child(old_nebula)
+			old_nebula.free()
+		_sky.add_child(_make_nebula_band())
+	_restyle_scenery()
+	var env_node := get_node_or_null("Environment") as WorldEnvironment
+	if env_node != null and env_node.environment != null:
+		env_node.environment.background_color = Palette.color("background")
+		env_node.environment.ambient_light_color = Palette.color("ambient")
 
 
 ## The rock material family each rock variant is drawn with. Mirrors the choices

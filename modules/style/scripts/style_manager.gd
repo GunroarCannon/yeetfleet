@@ -79,6 +79,28 @@ func set_palette(palette: Palette, persist := true) -> void:
 	apply()
 
 
+## Switch to palette with id [param palette_id].
+func set_palette_by_id(palette_id: String) -> void:
+	var p := Palette.find_by_id(palette_id)
+	if p != null:
+		set_palette(p)
+
+
+## Switch to profile with id [param profile_id].
+func set_profile_by_id(profile_id: String) -> void:
+	var p := find_profile(profile_id)
+	if p != null:
+		set_profile(p)
+
+
+## Toggles the global art style between 'grounded' (realistic, sharp) and 'cartoony' (rounded, chunky, toon-shaded).
+func toggle_art_style() -> StyleProfile:
+	var is_cartoony := current_profile != null and current_profile.id == "cartoony"
+	var target_id := "grounded" if is_cartoony else "cartoony"
+	set_profile_by_id(target_id)
+	return current_profile
+
+
 ## Restore the look and palette the player last chose. Called once at boot, before
 ## any scene builds its materials.
 func load_saved() -> void:
@@ -135,7 +157,10 @@ func apply() -> void:
 ## shading dials (apply live, no mesh reload), so a [method Planet.refresh_appearance]
 ## is enough.
 func _push_to_planets(style: StyleProfile) -> void:
-	for node in Engine.get_main_loop().get_nodes_in_group("planets"):
+	var loop := Engine.get_main_loop()
+	if loop == null:
+		return
+	for node in loop.get_nodes_in_group("planets"):
 		if node is Planet and node.data != null:
 			node.data.detail_strength = style.planet_detail
 			node.data.band_count = lerpf(2.0, 20.0, style.planet_bands)

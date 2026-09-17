@@ -44,6 +44,15 @@ var aabb := AABB()
 ## Feeds [method collision_hull].
 var part_boxes: Array[AABB] = []
 
+## Individual part colliders for direct physical interaction, vital for big ships.
+var part_colliders: Array[CollisionShape3D] = []
+
+## Single merged ArrayMesh instance for high performance on mobile / large fleets.
+var baked_mesh_instance: MeshInstance3D = null
+
+## Cached baked compound collision hull.
+var _baked_hull: Array[Dictionary] = []
+
 ## Corner brackets drawn around the selected part. Built lazily and resized in
 ## place, because selection changes on every tap.
 var _selection_cage: MeshInstance3D = null
@@ -124,7 +133,9 @@ func rebuild_meshes() -> void:
 ## A whole new [ShipView] would also work, and is what a design change does, but
 ## that throws away selection, hover and socket state; a look switch is not a
 ## design change and should not feel like one.
-func restyle() -> void:
+func restyle(update_palette := true) -> void:
+	if update_palette and design != null:
+		design.refresh_palette()
 	rebuild_meshes()
 	for path: Variant in part_materials:
 		var mat := part_materials[path] as ShaderMaterial
@@ -133,6 +144,48 @@ func restyle() -> void:
 		var overrides: Dictionary = part_overrides.get(path, {})
 		ShipMaterials.apply_palette(mat, design, overrides)
 		ShipMaterials.apply_outline(mat)
+	_baked_hull.clear()
+	if baked_mesh_instance != null and is_instance_valid(baked_mesh_instance):
+		enable_baked_mesh(true)
+
+
+## Creates dedicated physical [CollisionShape3D] colliders for each part of the ship.
+## Essential for big ships (carriers, motherships, freighters) so each part has physical collision.
+func create_part_colliders(parent_node: Node3D = null) -> Array[CollisionShape3D]:
+	var target: Node3D = parent_node
+	if target == null:
+		target = parts_root if parts_root != null else root
+	if target == null:
+		return []
+
+	# Clear previous colliders
+	for col in part_colliders:
+		if is_instance_valid(col):
+			col.queue_free()
+	part_colliders.clear()
+
+	part_colliders = MeshBaker.create_part_colliders(self, target)
+	return part_colliders
+
+
+## Toggles single baked ArrayMesh mode for extreme mobile rendering efficiency.
+func enable_baked_mesh(enabled: bool) -> void:
+	if enabled:
+		if baked_mesh_instance == null or not is_instance_valid(baked_mesh_instance):
+			baked_mesh_instance = MeshBaker.bake_ship_mesh(self)
+			if baked_mesh_instance != null:
+				parts_root.add_child(baked_mesh_instance)
+		if baked_mesh_instance != null:
+			baked_mesh_instance.visible = true
+		for inst in part_meshes.values():
+			if is_instance_valid(inst):
+				inst.visible = false
+	else:
+		if baked_mesh_instance != null and is_instance_valid(baked_mesh_instance):
+			baked_mesh_instance.visible = false
+		for inst in part_meshes.values():
+			if is_instance_valid(inst):
+				inst.visible = true
 
 
 ## Re-derive the ship-space bounds and per-part boxes from the current meshes, and
@@ -209,10 +262,10 @@ func _scale_offsets(list: Array[Dictionary], s: float) -> void:
 ## [member PhysBody.hull] it produces, because large craft need the identical
 ## answer for their own parts.
 func collision_hull() -> Array[Dictionary]:
-	var hull: Array[Dictionary] = []
-	for box in part_boxes:
-		HullFit.append_box_spheres(box, hull)
-	return hull
+	if not _baked_hull.is_empty():
+		return _baked_hull
+	_baked_hull = MeshBaker.bake_compound_spheres(part_boxes)
+	return _baked_hull
 
 
 func material_for(path: String) -> ShaderMaterial:
