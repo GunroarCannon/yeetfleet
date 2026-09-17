@@ -118,6 +118,14 @@ const FREELOOK_YAW_LIMIT := 130.0
 const FREELOOK_PITCH_LIMIT := 70.0
 const FREELOOK_RETURN := 5.0
 
+## User camera FOV dial (degrees), Session-backed so it survives a restart. The
+## chase camera adds its boost dolly on top of this base; other modes use it as
+## the plain field of view.
+var base_fov := Session.camera_fov
+## Third-person chase-distance multiplier (1.0 = the default framing), from the
+## Settings/View menus.
+var chase_scale := Session.camera_chase
+
 var mode: int = Mode.CHASE
 
 var camera: Camera3D
@@ -179,7 +187,7 @@ func _ready() -> void:
 	# near few hundred metres.
 	camera.near = 0.2
 	camera.far = 30000.0
-	camera.fov = 72.0
+	camera.fov = base_fov
 	add_child(camera)
 	# The rig places itself in world space; being parented under anything that
 	# moves would double every motion.
@@ -298,6 +306,19 @@ func zoom(steps: float) -> void:
 		)
 
 
+## Dial the camera FOV, degrees. Writes [member base_fov]; the chase mode adds
+## its boost dolly on top of this base each frame, so no extra apply is needed.
+func set_fov(deg: float) -> void:
+	base_fov = clampf(deg, 50.0, 120.0)
+	if camera != null:
+		camera.fov = base_fov
+
+
+## Dial the third-person chase-distance multiplier (1.0 = default framing).
+func set_chase_scale(scale: float) -> void:
+	chase_scale = maxf(scale, 0.25)
+
+
 ## Everything runs in _process, not _physics_process: the camera should be as
 ## smooth as the display, and it only ever reads the ship's state.
 func _process(delta: float) -> void:
@@ -366,13 +387,13 @@ func _update_chase(delta: float) -> void:
 		_boost_dolly = 1.0
 	else:
 		_boost_dolly = lerpf(_boost_dolly, 1.0, clampf(delta * BOOST_DOLLY_SMOOTH, 0.0, 1.0))
-	camera.fov = BASE_FOV + BOOST_DOLLY_FOV * _boost_dolly
+	camera.fov = base_fov + BOOST_DOLLY_FOV * _boost_dolly
 
 	var back := (
 		hull_length * CHASE_BACK
 		+ hull_radius * (1.0 + speed_fraction * CHASE_SPEED_STRETCH)
 		+ hull_length * CHASE_BACK * BOOST_DOLLY_BACK * _boost_dolly
-	)
+	) * chase_scale
 	var up := hull_radius * CHASE_UP + 0.4
 	var wanted_pos := ship_x.origin + ship_x.basis * Vector3(0.0, up, back)
 

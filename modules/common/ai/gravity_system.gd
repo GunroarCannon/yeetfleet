@@ -74,6 +74,20 @@ class GravityBody:
 
 ## All registered gravitating bodies.
 var _bodies: Array[GravityBody] = []
+
+## Scratch for [method _scan_top], reused across calls so a per-body
+## acceleration scan allocates nothing. This matters more than it looks:
+## [method compute_gravity] runs once per gravitating body per integration
+## substep, so a solar system fast-forwarded to 60× calls it thousands of
+## times a frame — the dictionary-per-body array plus lambda sort this
+## replaces measured ~25 µs a call, which multiplied into a whole frame's
+## budget. [member _scan_accel] is parallel to [member _bodies] and resized
+## lazily in [method _scan_top]; the two top lists are sized to the requested
+## count there.
+var _scan_accel := PackedFloat64Array()
+var _top_bodies: Array[GravityBody] = []
+var _top_accels := PackedFloat64Array()
+var _top_weights := PackedFloat64Array()
 ## Current gravity mode.
 var mode: int = GravityMode.NORMAL
 ## Whether bodies attract things in ("pull"). When false, gravity is orbit-only:
@@ -145,78 +159,115 @@ func _accel_magnitude(body: GravityBody, pos: Vector3) -> float:
 	return g * body.mass / pow(effective_dist, falloff)
 
 
-## Find the top N bodies by acceleration at a given position.
-## Returns an Array of Dictionaries: [{body, accel, weight}, ...]
-## Weight is softmax-normalized so they sum to ~1.0.
-func find_dominant_bodies(pos: Vector3, n: int = BLEND_COUNT) -> Array[Dictionary]:
-	# First pass: compute acceleration for every body within its relevant range.
-	var candidates: Array[Dictionary] = []
-	for body in _bodies:
+## Fill [member _top_bodies] / [member _top_accels] / [member _top_weights] with
+## the [param count] strongest sources at [param pos], strongest first and
+## softmax-weighted, and return how many were found (0 when nothing is in
+## range). The allocation-free core behind [method compute_gravity],
+## [method find_dominant_body] and [method find_dominant_bodies] alike.
+##
+## Two passes over [member _bodies], not one. The "a source pulling under 5% as
+## hard as the strongest is not competing" rule (see [method
+## find_dominant_bodies]'s doc) can only be applied once the peak is known, and
+## re-reading the accelerations back out of [member _scan_accel] costs a memory
+## read where the single-pass version this replaces built an array of
+## dictionaries and lambda-sorted it.
+##
+## The returned entries live in this object's own scratch: read them before the
+## next call, and do not hold on to the arrays themselves.
+func _scan_top(pos: Vector3, count: int) -> int:
+	var n := _bodies.size()
+	if n == 0 or count <= 0:
+		return 0
+	if _scan_accel.size() != n:
+		_scan_accel.resize(n)
+	var range_mult := maxf(range_multiplier, 0.1)
+	# First pass: every body's acceleration at `pos`, and the strongest of them.
+	# Bodies that cannot reach here are stored as -1 so the second pass skips
+	# them without redoing the range test.
+	var peak := 0.0
+	for i in n:
+		var body := _bodies[i]
+		var accel := -1.0
 		var dist := pos.distance_to(body.position)
 		# Skip a body whose centre the query point is sitting on: a body must not
 		# pull itself toward its own centre (the clamped near-field term would
 		# otherwise read as a huge spurious force). This is what lets a body that
 		# is itself gravitating — the moon — integrate against the field it lives
 		# in without tearing its own orbit apart.
-		if dist < MIN_ORBIT_RADIUS:
+		# Reject anything outside its own relevant range, unless we are close
+		# enough to its surface that it still matters for collision.
+		if dist >= MIN_ORBIT_RADIUS \
+				and (dist <= body.relevant_range * range_mult or dist <= body.radius * 2.0):
+			var a := _accel_magnitude(body, pos)
+			if a >= RELEVANCE_EPSILON * 0.1:
+				accel = a
+				peak = maxf(peak, a)
+		_scan_accel[i] = accel
+	if peak <= 0.0:
+		return 0
+	# Second pass: keep the top `count` by bounded insertion, strongest first.
+	# `count` is 1 or 2 in every real call, so a hand-rolled insertion beats a
+	# sort — and `_top_accels` holding a body is exactly the "is it competing"
+	# test, since anything at or below the run's weakest slot is not.
+	var limit := mini(count, n)
+	if _top_bodies.size() != limit:
+		_top_bodies.resize(limit)
+		_top_accels.resize(limit)
+		_top_weights.resize(limit)
+	var threshold := peak * 0.05
+	var found := 0
+	for i in n:
+		var a := _scan_accel[i]
+		if a < threshold:
 			continue
-		# Quick reject: if we're outside the body's relevant range AND the
-		# range multiplier doesn't extend it, skip. But always include if
-		# we're very close (within 2× radius) — near surface, even weak
-		# bodies matter for collision.
-		if dist > body.relevant_range * maxf(range_multiplier, 0.1) and dist > body.radius * 2.0:
-			continue
-		var accel := _accel_magnitude(body, pos)
-		if accel < RELEVANCE_EPSILON * 0.1:
-			continue
-		candidates.append({"body": body, "accel": accel})
-
-	if candidates.is_empty():
-		return []
-
-	# A body that pulls under 5% as hard as the strongest is not competing for
-	# the orbit — it must not dilute the dominant body's pull in the softmax
-	# blend. Without this, a distant dwarf half a solar-system away would split
-	# Tarn's weight and every orbit would drift outward (the moon was climbing
-	# out because Glacius and Ashara at ~0.01 m/s² stole ~40% of the blend).
-	var peak := 0.0
-	for c in candidates:
-		peak = maxf(peak, float(c["accel"]))
-	var contenders: Array[Dictionary] = []
-	for c in candidates:
-		if float(c["accel"]) >= peak * 0.05:
-			contenders.append(c)
-	candidates = contenders
-
-	# Sort by acceleration descending.
-	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return a["accel"] > b["accel"]
-	)
-
-	# Take top n.
-	var top_n: Array[Dictionary] = []
-	for i in mini(n, candidates.size()):
-		top_n.append(candidates[i])
-
-	# Softmax weights from accelerations.
-	var max_accel: float = top_n[0]["accel"]
+		# Walk back to the insertion point, sliding everything weaker down one
+		# slot on the way.
+		var at := mini(found, limit)
+		while at > 0 and _top_accels[at - 1] < a:
+			if at < limit:
+				_top_accels[at] = _top_accels[at - 1]
+				_top_bodies[at] = _top_bodies[at - 1]
+			at -= 1
+		if at < limit:
+			_top_accels[at] = a
+			_top_bodies[at] = _bodies[i]
+		if found < limit:
+			found += 1
+	# Softmax weights from accelerations, normalized so they sum to 1.0.
+	var max_accel := _top_accels[0]
 	var total := 0.0
-	for c in top_n:
-		c["weight"] = exp((c["accel"] - max_accel) / BLEND_TEMPERATURE)
-		total += c["weight"]
-	# Normalize so weights sum to 1.0.
-	for c in top_n:
-		c["weight"] /= total
+	for i in found:
+		var w := exp((_top_accels[i] - max_accel) / BLEND_TEMPERATURE)
+		_top_weights[i] = w
+		total += w
+	if total > 0.0:
+		for i in found:
+			_top_weights[i] /= total
+	return found
 
-	return top_n
+
+## Find the top N bodies by acceleration at a given position.
+## Returns an Array of Dictionaries: [{body, accel, weight}, ...]
+## Weight is softmax-normalized so they sum to ~1.0.
+##
+## A body that pulls under 5% as hard as the strongest is not competing for
+## the orbit and is dropped rather than allowed to dilute the dominant body's
+## pull in the blend — without that, a distant dwarf half a solar-system away
+## would split Tarn's weight and every orbit would drift outward (the moon was
+## climbing out because Glacius and Ashara at ~0.01 m/s² stole ~40% of it).
+func find_dominant_bodies(pos: Vector3, n: int = BLEND_COUNT) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var found := _scan_top(pos, n)
+	for i in found:
+		out.append({"body": _top_bodies[i], "accel": _top_accels[i], "weight": _top_weights[i]})
+	return out
 
 
 ## Convenience: find the single dominant body at a position.
 func find_dominant_body(pos: Vector3) -> GravityBody:
-	var dominant := find_dominant_bodies(pos, 1)
-	if dominant.is_empty():
+	if _scan_top(pos, 1) == 0:
 		return null
-	return dominant[0]["body"] as GravityBody
+	return _top_bodies[0]
 
 
 # --- Force computation -------------------------------------------------------
@@ -229,18 +280,18 @@ func compute_gravity(object_position: Vector3) -> Vector3:
 		return Vector3.ZERO
 
 	var strength_mult := 2.0 if mode == GravityMode.HIGH else 1.0
-	var dominant := find_dominant_bodies(object_position, BLEND_COUNT)
-
-	if dominant.is_empty():
+	var found := _scan_top(object_position, BLEND_COUNT)
+	if found == 0:
 		return Vector3.ZERO
+	var range_mult := maxf(range_multiplier, 0.1)
 
 	var total_force := Vector3.ZERO
-	for entry in dominant:
-		var body: GravityBody = entry["body"]
-		var weight: float = entry["weight"]
+	for i in found:
+		var body := _top_bodies[i]
+		var weight := _top_weights[i]
 		var diff := body.position - object_position
 		var dist := maxf(diff.length(), MIN_ORBIT_RADIUS)
-		var effective_dist := dist / maxf(range_multiplier, 0.1)
+		var effective_dist := dist / range_mult
 		var accel_mag := g * body.mass / pow(effective_dist, falloff) * strength_mult
 		total_force += diff.normalized() * accel_mag * weight
 

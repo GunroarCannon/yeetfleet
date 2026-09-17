@@ -1,0 +1,39 @@
+[gd_resource type="Resource" script_class="Palette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/style/scripts/palette.gd" id="1_0oi5u"]
+
+[resource]
+script = ExtResource("1_0oi5u")
+id = "ice"
+display_name = "Ice Field"
+background = Color(0.015686275, 0.02745098, 0.05882353, 1)
+ambient = Color(0.14509805, 0.21960784, 0.30980393, 1)
+star = Color(0.91764706, 0.95686275, 1, 1)
+nebula_core = Color(0.56078434, 0.83137256, 1, 1)
+nebula_edge = Color(0.14117648, 0.22745098, 0.41960785, 1)
+hull_primary = Color(0.62352943, 0.7058824, 0.8, 1)
+hull_accent = Color(0.30980393, 0.7647059, 0.96862745, 1)
+hull_trim = Color(0.07058824, 0.1254902, 0.18039216, 1)
+rock_light = Color(0.7647059, 0.827451, 0.8784314, 1)
+rock_mid = Color(0.56078434, 0.6431373, 0.72156864, 1)
+rock_dark = Color(0.2901961, 0.36078432, 0.43137255, 1)
+rock_accent = Color(0.49803922, 0.72156864, 0.84705883, 1)
+metal_light = Color(0.9411765, 0.96862745, 1, 1)
+metal_mid = Color(0.6156863, 0.6901961, 0.76862746, 1)
+metal_dark = Color(0.105882354, 0.15686275, 0.21176471, 1)
+planet_primary = Color(0.56078434, 0.65882355, 0.7529412, 1)
+planet_secondary = Color(0.78431374, 0.84705883, 0.9098039, 1)
+planet_water = Color(0.11764706, 0.22745098, 0.36078432, 1)
+planet_ring = Color(0.8156863, 0.8784314, 0.9411765, 1)
+planet_cloud = Color(1, 1, 1, 1)
+planet_atmosphere = Color(0.49803922, 0.76862746, 1, 1)
+ui_accent = Color(0.30980393, 0.7647059, 0.96862745, 1)
+ui_accent_dim = Color(0.11764706, 0.41568628, 0.57254905, 1)
+ui_good = Color(0.43529412, 0.8784314, 0.7529412, 1)
+ui_warn = Color(1, 0.8156863, 0.47843137, 1)
+ui_bad = Color(1, 0.47843137, 0.5411765, 1)
+ui_select = Color(0.65882355, 0.8627451, 1, 1)
+valid = Color(0.30980393, 0.7647059, 0.96862745, 1)
+invalid = Color(1, 0.6039216, 0.36078432, 1)
+socket = Color(0.49019608, 0.5764706, 0.65882355, 1)
+beam = Color(0.65882355, 0.9411765, 1, 1)

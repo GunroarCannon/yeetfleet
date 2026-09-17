@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3 uid="UID://example_uid_1"]
+
+[ext_resource type="Script" path="res://modules/physics_lab/scripts/physics_lab_root.gd" id="1_physics_lab_root"]
+
+[node name="PhysicsLab" type="Node3D"]
+script = ExtResource("1_physics_lab_root")
+
+[node name="Ship" type="CharacterBody3D" parent="."]
+[node name="Planet" type="StaticBody3D" parent="."]
+[node name="Rock1" type="StaticBody3D" parent="."]
+[node name="Rock2" type="StaticBody3D" parent="."]
+[node name="Rock3" type="StaticBody3D" parent="."]
+
+# UI would go here in a real implementation
+# For now, this establishes the basic structure

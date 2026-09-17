@@ -25,6 +25,12 @@ enum Location {
 	## a real reason: judging a flight-model change wants nothing else in frame
 	## to mistake for the change itself.
 	TEST_VOLUME,
+	## A system handed off from the solar_system_gen lab's "Enter flight test"
+	## button (see [member Session.pending_solar_system]) — a real,
+	## [GravitySystem]-driven generated system instead of [SpaceScene]'s
+	## hand-authored one. Falls back to a fresh random system if nothing was
+	## handed off (this scene run directly, F6, or a stale flag).
+	GENERATED_SYSTEM,
 }
 
 ## Distance between motes in the drift lattice, in metres. Roughly a fifth of a
@@ -83,8 +89,12 @@ var location: Location = Location.SPACE
 ## (see [member FlightCamera.space]) to recentre the sky dome on itself; nothing
 ## else about the rig's transform is Juice's or the location's to touch.
 var space: SpaceScene = null
+## Non-null only in [constant Location.GENERATED_SYSTEM]. See [method
+## _build_generated_system].
+var generated_system: SolarSystemGenerator = null
 
 var _hud: FlightHud
+var incident_director: IncidentDirector = null
 var _coach: CoachOverlay
 var _ship_holder: Node3D
 var _motes: MultiMeshInstance3D
@@ -220,6 +230,10 @@ func _enter_tree() -> void:
 ## after [method _enter_tree] has run.
 func _ready() -> void:
 	_assemble()
+	# The player's own hull has to follow a global look and palette change, like the
+	# traffic and the scenery do — see [method AiSpawner._on_style_changed] and
+	# [method SpaceScene._on_style_changed].
+	StyleManager.instance().style_changed.connect(_on_style_changed)
 	# Apply the Settings panel's persisted far values now that the camera exists
 	# (it is created in FlightCamera._ready, so _enter_tree was too early).
 	camera_rig.set_far_clip(_far_clip)
@@ -247,6 +261,14 @@ func _ready() -> void:
 				# Face along the orbit direction so assist doesn't pull toward planet.
 				var look_ahead := spawn_pos + tangent * 100.0
 				model.global_transform.basis = Basis.looking_at(look_ahead - spawn_pos, Vector3.UP)
+	elif location == Location.GENERATED_SYSTEM:
+		var spawn := _generated_system_spawn(Session.pending_spawn_body_name)
+		if spawn["ok"]:
+			model.global_position = spawn["pos"]
+			model.velocity = spawn["vel"]
+			var vel: Vector3 = spawn["vel"]
+			if vel.length_squared() > 0.01:
+				model.global_transform.basis = Basis.looking_at(vel.normalized(), Vector3.UP)
 	_spawn = model.global_transform
 	# Feed asteroid positions into the model for collision detection. The
 	# SpaceScene populates its meta in its own _ready, which runs before this.
@@ -274,6 +296,19 @@ func _ready() -> void:
 	# survive in static state, but the trail nodes themselves were rebuilt.
 	set_trail_player(Session.trail_player)
 	set_trail_ships(Session.trail_ships)
+	# Persisted drift field and planet pointer: rebuild the overlays the menus
+	# left on. The drift flag also gates the streak update each frame.
+	_mote_field_on = Session.drift_field
+	if _motes != null:
+		_motes.visible = _mote_field_on
+	if Session.planet_pointer and gravity != null and model != null:
+		if _planet_pointer == null:
+			_planet_pointer = PlanetPointer.new()
+			_planet_pointer.name = "PlanetPointer"
+			_planet_pointer.setup(gravity, model)
+		if not _planet_pointer.is_showing():
+			add_child(_planet_pointer)
+			_planet_pointer.toggle()
 	_coach = %Coach as CoachOverlay
 	_coach.steps = FLIGHT_STEPS
 	_coach.walkthrough_id = "flight_walkthrough"
@@ -283,6 +318,7 @@ func _ready() -> void:
 	systems.fire_blocked.connect(func(reason: String) -> void: _hud.show_hint(reason))
 	model.assist_changed.connect(func(_on: bool) -> void: _hud.show_hint(_assist_hint()))
 	model.orbit_changed.connect(_on_orbit_changed)
+	_build_incident_director()
 
 	BuilderTheme.apply_density_scale(get_window())
 	get_viewport().size_changed.connect(
@@ -325,14 +361,86 @@ func _build_location() -> void:
 		_ai_spawner = AiSpawner.new()
 		_ai_spawner.name = "AiSpawner"
 		add_child(_ai_spawner)
+	elif location == Location.GENERATED_SYSTEM:
+		_build_generated_system()
+		_build_test_volume_environment()
 	else:
 		_build_test_volume_environment()
+
+
+## [constant Location.GENERATED_SYSTEM]: the solar_system_gen lab's own
+## [SolarSystemGenerator], rebuilt here from [member Session.pending_solar_system]
+## rather than reused live — a generator built in the lab scene does not
+## survive [method SceneTree.change_scene_to_file], so the lab hands off a
+## recipe, not a node (see [SolarSystemGenLabRoot._on_enter_flight_test_pressed]).
+## Params are applied before [method Node.add_child] so the generator's own
+## [method Node._ready] (which auto-generates once [member
+## SolarSystemGenerator.bodies] is empty and it enters the tree) uses them
+## directly instead of generating twice; manually-placed belts replay after,
+## since they need a generated system to attach to.
+func _build_generated_system() -> void:
+	generated_system = SolarSystemGenerator.new()
+	generated_system.name = "GeneratedSystem"
+	var recipe := Session.pending_solar_system as SolarSystemData
+	if recipe != null:
+		recipe.apply_params(generated_system)
+	else:
+		generated_system.system_seed = Session.seed if Session.seed != 0 else randi()
+	# The lab's fast-forward is an observation dial, not a property of the system
+	# — and it arrives here as one, because the recipe stores the generator's
+	# time_scale and Session keeps the last slider position. Left alone, a lab
+	# parked at 60× makes this scene run 48 N-body substeps over every body every
+	# physics frame, which measures ~170 ms a frame once belts are live: single
+	# digit FPS from a setting the player set to watch orbits drift, not to fly
+	# through. Flying a system is a 1× activity; the scene's own X2/X4/X10
+	# (see [method set_time_scale]) is how you speed it up here.
+	generated_system.time_scale = 1.0
+	# Belt rocks are scenery in this location, never simulated bodies — see
+	# [member SolarSystemGenerator.belts_simulate] for the measurement. Nothing
+	# here can collide with them (this location builds no [PhysWorld]), so LIVE
+	# rocks are pure cost.
+	generated_system.belts_simulate = false
+	add_child(generated_system)
+	if recipe != null:
+		recipe.spawn_manual_belts(generated_system)
+
+
+## Spawn transform for [constant Location.GENERATED_SYSTEM]: a clean orbit near
+## [param body_name] (or the first planet if it's empty or not found) — the
+## same placement [method SolarSystemGenLabRoot._spawn_test_ship] already
+## proved out in the lab. {"pos": Vector3, "vel": Vector3, "ok": bool}; ok is
+## false only when there is no generated system or no planet to spawn near.
+func _generated_system_spawn(body_name: String) -> Dictionary:
+	if generated_system == null:
+		return {"pos": Vector3.ZERO, "vel": Vector3.ZERO, "ok": false}
+	var entry := generated_system.find_body(body_name)
+	if entry.is_empty():
+		var planets := generated_system.pickable_bodies().filter(
+			func(e: Dictionary) -> bool: return e["kind"] == SolarSystemGenerator.BodyKind.PLANET
+		)
+		if planets.is_empty():
+			return {"pos": Vector3.ZERO, "vel": Vector3.ZERO, "ok": false}
+		entry = planets[0]
+	var body_node: Node3D = entry["node"]
+	var radius: float = entry["radius"]
+	var spawn_dist := radius * 3.0 + 400.0
+	var dir := Vector3(1.0, 0.15, 0.0).normalized()
+	var pos := body_node.global_position + dir * spawn_dist
+	var dominant := generated_system.gravity.find_dominant_body(pos)
+	var vel := generated_system._orbit_velocity_at(pos, dominant) if dominant != null else Vector3.ZERO
+	return {"pos": pos, "vel": vel, "ok": true}
 
 
 ## Create the gravity system and register all gravitating bodies from
 ## [SpaceScene]'s constants. Gravity is off by default — the player
 ## toggles it with the G key. In the test volume, gravity stays off.
 func _build_gravity() -> void:
+	if location == Location.GENERATED_SYSTEM and generated_system != null:
+		# Reuse the generator's own already-populated GravitySystem rather than
+		# re-registering every body — SPACE builds its own because SpaceScene
+		# exposes plain position/radius constants, not a live GravitySystem.
+		gravity = generated_system.gravity
+		return
 	gravity = GravitySystem.new()
 	if location != Location.SPACE or space == null:
 		gravity.mode = GravitySystem.GravityMode.OFF
@@ -437,10 +545,7 @@ func _build_phys_world() -> void:
 		phys_world.add(body)
 
 	# The player's own ship: a driven body that keeps its hand integration.
-	var hull_radius := 3.0
-	if view != null:
-		hull_radius = _ship_collision_radius(view.aabb)
-	model.set_phys_world(phys_world, hull_radius)
+	model.set_phys_world(phys_world, _ship_collision_radius(view), _ship_hull(view))
 
 
 ## Drop the physics layer: unbind the player's body, free the driver, clear the
@@ -456,6 +561,21 @@ func _teardown_phys_world() -> void:
 	phys_world = null
 	_phys_profile = null
 	_live_rock_bodies.clear()
+
+
+func _build_incident_director() -> void:
+	if incident_director != null:
+		incident_director.queue_free()
+	incident_director = IncidentDirector.new()
+	incident_director.name = "IncidentDirector"
+	var ctx := NebulaContext.new()
+	ctx.gravity = gravity
+	ctx.phys = phys_world
+	incident_director.context = ctx
+	incident_director.world_parent = self
+	if _hud != null:
+		incident_director.hud_container = _hud.get_event_container()
+	add_child(incident_director)
 
 
 ## Load every .tres profile in modules/physics/data/profiles, keyed by file base
@@ -530,7 +650,7 @@ func cycle_phys_profile() -> String:
 	return _phys_profile_id
 
 
-## The name of the live profile, for the HUD.
+## The name of the live profile, for the HUD and the Flight menu's readout.
 func phys_profile_id() -> String:
 	return _phys_profile_id
 
@@ -600,8 +720,40 @@ func _sweep_live_rocks() -> void:
 ## diagonal, i.e. the sphere that just contains the whole design. This replaces
 ## the old fixed +5/+3 standoffs (plan §3.1 #13) with a number that scales with
 ## the actual ship — a scout and a hauler no longer collide at the same size.
-func _ship_collision_radius(bounds: AABB) -> float:
-	return maxf(bounds.size.length() * 0.5, 3.0)
+##
+## This is the fallback shape, not the shape. [method _ship_hull] supersedes it
+## with a compound of hull sections wherever the design has geometry to build one
+## from; this single sphere is what a design that assembled to nothing collides
+## as, and what every reader that can only afford one sphere still sees.
+func _ship_collision_radius(view: ShipView) -> float:
+	if view == null:
+		return 3.0
+	return maxf(view.aabb.size.length() * 0.5, 3.0)
+
+
+## The ship's compound collision hull — see [method ShipView.collision_hull] —
+## or empty when there is no assembled geometry, so the single sphere stands.
+## Offsets are ship space, which is the space [PhysBody] reads them in: the
+## body's node *is* the [FlightModel], and the assembled [ShipView] hangs off it
+## through an untransformed holder, so the two spaces coincide.
+func _ship_hull(view: ShipView) -> Array[Dictionary]:
+	if view == null:
+		return []
+	return view.collision_hull()
+
+
+## Re-skin the player's hull for the new look and palette, and re-derive its
+## collision volume from the geometry that look produced.
+##
+## Uses [method FlightModel.refresh_hull] rather than re-binding the world, because
+## re-binding multiplies mass by the ship-size factor each call — a style change
+## must not make the player heavier.
+func _on_style_changed(_profile: StyleProfile) -> void:
+	if view == null:
+		return
+	view.restyle()
+	if model != null:
+		model.refresh_hull(_ship_collision_radius(view), _ship_hull(view))
 
 
 func _build_test_volume_environment() -> void:
@@ -779,6 +931,10 @@ func _update_mote_streaks(delta: float) -> void:
 func _build_ship() -> void:
 	model = FlightModel.new()
 	model.name = "Ship"
+	# The player's own speed dial, set before [method _assemble] configures the
+	# model: see [member FlightModel.speed_scale] for why the model does not read
+	# it from Session itself.
+	model.speed_scale = Session.player_speed_scale
 	add_child(model)
 
 	_ship_holder = Node3D.new()
@@ -806,7 +962,7 @@ func _assemble() -> void:
 	# The Ship-size setting scales the whole hull (and its offsets) at assembly.
 	view.apply_scale(Session.ship_scale)
 	_ship_holder.add_child(view.root)
-	model.configure(view.resolution.stats, systems, damage)
+	model.configure(view.resolution.stats, systems, damage, _ship_holder)
 	systems.bind(view, self)
 	damage.bind(view, model, _ship_holder)
 	damage.part_broken.connect(_on_part_broken)
@@ -895,6 +1051,11 @@ func _process(delta: float) -> void:
 		# Look in the direction the ship came from (behind).
 		var look_target := ship_xform.origin + ship_xform.basis.z * 100.0
 		_rear_camera.look_at(look_target, ship_xform.basis.y)
+	# Belt LOD (see SolarSystemGenerator.BeltState): the player ship is the
+	# only focus a generated system's belts promote near, matching the lab's
+	# own "only when a player exists" contract.
+	if generated_system != null and model != null:
+		generated_system.set_lod_focus(model.global_position, true)
 	# Update moon gravity body and landmark position so collision/gravity/markers
 	# match the visual orbit.
 	if gravity != null and space != null and space._moon_node != null:
@@ -914,6 +1075,10 @@ func _process(delta: float) -> void:
 	# of travel is readable at a glance. Toggled separately from the Trails menu.
 	_update_player_trail()
 	_update_ship_trails()
+	_update_aggro_indicators()
+	_update_large_craft_orbits(delta)
+	_update_large_craft_patrols(delta)
+	_update_large_craft_turrets(delta)
 	# Drift, spin and fade broken-off debris.
 	var still_alive: Array[Dictionary] = []
 	for d in _debris_list:
@@ -940,9 +1105,16 @@ func _process(delta: float) -> void:
 			still_alive.append(d)
 	_debris_list = still_alive
 
-
 func _physics_process(delta: float) -> void:
+	# Runs before PhysWorldDriver's own _physics_process (a child of this
+	# node, so it processes after its parent — the same ordering the world's
+	# own doc comment already leans on for "controllers write velocity, then
+	# the world steps") — a part freed this frame must be pruned from
+	# phys_world *before* it steps, or the freed PhysBody.node crashes
+	# PhysWorld's own scenery indexing on the very next step.
+	_prune_large_craft_collision()
 	_read_keyboard(delta)
+	_update_large_craft_docking(delta)
 	# Once a second, put knocked-loose rocks back to scenery when they drift away.
 	_rock_demote_timer -= delta
 	if _rock_demote_timer <= 0.0:
@@ -1336,6 +1508,428 @@ func delete_satellites() -> void:
 		_hud.show_hint("Satellites cleared")
 
 
+## Spawned large-craft structures (motherships, ring stations, etc — see
+## [LargeCraftGenerator]), tracked so they can be cleared together. A
+## one-directional dependency the same way [constant Location.GENERATED_SYSTEM]
+## depends on [SolarSystemGenerator]: large_craft_gen never reaches back into
+## flight.
+var _large_craft: Array[LargeCraftGenerator] = []
+const LARGE_CRAFT_SPAWN_DIST := 300.0
+
+## One spawned large craft's circular orbit around whichever [GravityBody]
+## dominates the spot it was dropped at — computed once at spawn from the
+## same [method GravitySystem.orbit_velocity]/tangent math [method _ready]
+## already uses to put the player in orbit, then just walked forward each
+## frame. Not real gravity integration (the craft has no mass to the physics
+## layer) — a stable circular rail is enough for "yes, it visibly orbits the
+## planet" and costs nothing at any structure scale.
+class _CraftOrbit extends RefCounted:
+	var gen: LargeCraftGenerator
+	var dominant: GravitySystem.GravityBody
+	var radius: float
+	var y_offset: float
+	var angle: float
+	var angular_speed: float
+
+var _craft_orbits: Array[_CraftOrbit] = []
+
+## Every [constant LargeCraftGenerator.RANDOMIZABLE] dial gets multiplied by a
+## random factor in this range at spawn, so mashing "Spawn: X" a few times
+## doesn't drop identical-looking structures — full manual control over the
+## exact dials stays the lab's job.
+const CRAFT_JITTER_RANGE := Vector2(0.75, 1.4)
+
+## Debug size presets for the flight-test spawner (Large craft menu), keyed
+## against [constant SpaceScene.PLANET_RADIUS] (1400m) and
+## [constant SolarSystemGenerator.STAR_RADIUS] (220m, ×10 max mult = 2200m) —
+## the two real yardsticks this game already has for "how big is that". These
+## set [member LargeCraftGenerator.scale_mult] directly (overriding its own
+## dial jitter, see [method spawn_large_craft]) rather than leaving size to
+## chance — a debug spawner should hit the size you asked for.
+enum CraftSize { SMALL, DEFAULT, PLANET, SUN }
+const CRAFT_SIZE_LABELS := {
+	CraftSize.SMALL: "Small (frigate-scale)",
+	CraftSize.DEFAULT: "Default (~quarter-planet)",
+	CraftSize.PLANET: "Planet-sized",
+	CraftSize.SUN: "Sun-sized",
+}
+## scale_mult targets — unscaled default extent is ~85m, so these land at
+## roughly 130m / 425m / 1400m / 3000m.
+const CRAFT_SIZE_SCALE := {
+	CraftSize.SMALL: 1.5,
+	CraftSize.DEFAULT: 5.0,
+	CraftSize.PLANET: 16.5,
+	CraftSize.SUN: 35.0,
+}
+## Selected in the Large craft HUD popup; read by [method spawn_large_craft].
+var craft_size_preset: int = CraftSize.DEFAULT
+
+## Hard floors for [method spawn_large_craft] to top up to after generating —
+## [constant CRAFT_SIZE_SCALE] targets an *average* extent, but the per-dial
+## jitter that runs first can hand back a smaller-than-usual unscaled
+## structure before scale_mult is even applied, and "quarter-planet" was an
+## explicit floor from the user ("these should be planet-sized... or at
+## LEAST 1/4 of a normal planet"), not a rough average. [constant CraftSize.SMALL]
+## has no entry — it's deliberately allowed to vary small.
+const CRAFT_SIZE_FLOOR := {
+	CraftSize.DEFAULT: 350.0,   # 1/4 of SpaceScene.PLANET_RADIUS (1400m)
+	CraftSize.PLANET: 1400.0,  # SpaceScene.PLANET_RADIUS
+	CraftSize.SUN: 2200.0,     # SolarSystemGenerator.STAR_RADIUS * its own 10x max mult
+}
+
+## Spawns a [LargeCraftGenerator] of the given archetype a short distance
+## ahead of whichever ship the player is flying, lightly jittering its dials
+## off the generator's own (deliberately large) defaults — full dial control
+## stays the lab's job; this is a quick "drop one in and go fly around it"
+## test spawn, the same scope as [method spawn_satellite]. Orbits the nearest
+## gravitating body if one dominates the spawn point (see [_CraftOrbit]).
+func spawn_large_craft(archetype: int) -> void:
+	var ship := active_ship_node()
+	if ship == null:
+		return
+	var gen := LargeCraftGenerator.new()
+	gen.name = "LargeCraft_%d" % _large_craft.size()
+	gen.archetype = archetype
+	gen.craft_seed = randi()
+	# Jitter before add_child: the generator's own _ready() auto-generates
+	# once it enters the tree, so dials must land before that or it builds
+	# twice (wasted work at this scale — hundreds of parts).
+	var rng := RandomNumberGenerator.new()
+	rng.seed = gen.craft_seed
+	for entry: Dictionary in LargeCraftGenerator.RANDOMIZABLE:
+		var key: String = entry["key"]
+		var jittered := float(gen.get(key)) * rng.randf_range(CRAFT_JITTER_RANGE.x, CRAFT_JITTER_RANGE.y)
+		var v := clampf(jittered, float(entry["min"]), float(entry["max"]))
+		gen.set(key, roundi(v) if bool(entry.get("is_int", false)) else v)
+	# The size preset overrides whatever the loop above just jittered
+	# scale_mult to — a debug spawner should reliably land on the size you
+	# picked, not "probably somewhere near it".
+	gen.scale_mult = float(CRAFT_SIZE_SCALE[craft_size_preset]) * rng.randf_range(0.85, 1.15)
+	add_child(gen)
+
+	# Top up to this preset's floor: the per-dial jitter above can hand back
+	# a smaller-than-usual unscaled structure before scale_mult even applies,
+	# and "quarter-planet" is a floor the user asked for explicitly, not an
+	# average to land near.
+	if CRAFT_SIZE_FLOOR.has(craft_size_preset):
+		var min_extent: float = CRAFT_SIZE_FLOOR[craft_size_preset]
+		var current_extent := gen.approx_extent()
+		if current_extent < min_extent:
+			gen.scale *= (min_extent / current_extent)
+
+	# Spawn distance and fan-out spacing both scale with the structure's own
+	# size — a fixed 300 m was fine for the old modest defaults but drops the
+	# ship inside (or right on top of) anything built at mega-structure scale.
+	var extent := gen.approx_extent()
+	var spawn_dist := maxf(LARGE_CRAFT_SPAWN_DIST, extent * 1.8)
+	var fwd := -ship.global_transform.basis.z
+	var side := ship.global_transform.basis.x
+	# Fan spawns out sideways so mashing several "Spawn: X" buttons in a row
+	# (testing archetypes back to back) doesn't stack them on top of each other.
+	var fan := side * float(_large_craft.size()) * spawn_dist * 0.9
+	gen.global_position = ship.global_position + fwd * spawn_dist + fan
+	_large_craft.append(gen)
+	_register_large_craft_collision(gen)
+	# Ships move under their own power; everything else (stations, gates,
+	# towers) is a fixture that at most orbits whatever it was dropped near.
+	if archetype == LargeCraftGenerator.Archetype.DREADNOUGHT:
+		_place_large_craft_patrol(gen)
+	else:
+		_place_large_craft_orbit(gen)
+	if _hud != null:
+		var label: String = LargeCraftGenerator.ARCHETYPE_NAMES.get(archetype, "Large craft")
+		_hud.show_hint("Spawned %s — %d parts, %d dock pads" % [label, gen.part_count(), gen.dock_pad_count()])
+
+
+## Debug bulk-spawn: drops [param count] large craft of random archetypes at
+## the current [member craft_size_preset] in one call, for quickly filling a
+## test flight with megastructures instead of clicking "Spawn: X" repeatedly.
+func spawn_large_craft_mix(count: int) -> void:
+	var kinds: Array = LargeCraftGenerator.ARCHETYPE_NAMES.keys()
+	for i in count:
+		spawn_large_craft(kinds[randi() % kinds.size()])
+
+
+## Every [PhysBody] registered for a spawned large craft's structural parts
+## (see [method LargeCraftGenerator.get_collision_spheres]), keyed by the
+## generator, so they can be torn down again in [method clear_large_craft]
+## or when a shot-off part frees its own body in [method
+## _on_large_craft_part_detached].
+var _craft_collision_bodies: Dictionary = {}  ## LargeCraftGenerator -> Array[PhysBody]
+
+## Registers one kinematic [PhysBody] per structural part so the player's
+## ship actually collides with a spawned large craft instead of flying
+## straight through it — [PhysWorld] is the flight model's own hand-rolled
+## collision layer, entirely separate from Godot's native physics that
+## [LargeCraftGenerator]'s [StaticBody3D] parts already sit in (which is why
+## [method LargeCraftGenerator.shoot_at]'s raycast and [DockingPad]'s Area3D
+## overlap already worked without this — those go through the engine's own
+## physics server, not [PhysWorld]). Only [constant Location.SPACE] builds a
+## [PhysWorld] at all (see [method _build_phys_world]); elsewhere this is a
+## a no-op, same as every other collider in the scene.
+##
+## Each body gets the part's fitted sphere chain rather than one enclosing ball,
+## so a long hull segment is collided with along its actual length — see
+## [method LargeCraftGenerator.get_collision_spheres] for what that replaced.
+func _register_large_craft_collision(gen: LargeCraftGenerator) -> void:
+	if phys_world == null:
+		return
+	var made: Array[PhysBody] = []
+	for entry: Dictionary in gen.get_collision_spheres():
+		# Radius is a placeholder: set_hull re-derives the enclosing radius from the
+		# compound it is handed.
+		var body := PhysBody.new(1.0, 1.0)
+		body.node = entry["node"]
+		var hull: Array[Dictionary] = entry.get("hull", [])
+		if hull.is_empty():
+			body.radius = float(entry.get("radius", 1.0))
+		else:
+			body.set_hull(hull)
+		body.layer = PhysBody.Layer.STATIC
+		body.kinematic = true
+		phys_world.add(body)
+		made.append(body)
+	_craft_collision_bodies[gen] = made
+
+
+## When a structural part is shot off, [method LargeCraftGenerator._detach_part]
+## frees its original [StaticBody3D] and [signal LargeCraftGenerator.part_detached]
+## hands back the *new* debris [RigidBody3D] instead — there is no direct way
+## to match that signal back to which [PhysBody] just lost its node. Simplest
+## correct fix: sweep for staleness instead of trying to catch the exact
+## event. Cheap (a handful of validity checks per spawned craft) and correct
+## regardless of exactly when Godot's deferred deletion actually runs.
+func _prune_large_craft_collision() -> void:
+	if phys_world == null or _craft_collision_bodies.is_empty():
+		return
+	var any_removed := false
+	for gen in _craft_collision_bodies.keys():
+		var bodies: Array = _craft_collision_bodies[gen]
+		var still: Array = []
+		for body: PhysBody in bodies:
+			if is_instance_valid(body.node):
+				still.append(body)
+			else:
+				phys_world.remove(body)
+				any_removed = true
+		_craft_collision_bodies[gen] = still
+	if any_removed:
+		phys_world.mark_scenery_dirty()
+
+
+## If a [GravityBody] dominates [param gen]'s spawn position, put it into a
+## circular orbit around that body at its current distance and height instead
+## of leaving it parked in open space — the original design called for large
+## craft that can "just orbit", and a mega-structure dropped near a planet
+## reading as motionless was the actual bug report.
+func _place_large_craft_orbit(gen: LargeCraftGenerator) -> void:
+	if gravity == null or gravity.mode == GravitySystem.GravityMode.OFF:
+		return
+	var dominant := gravity.find_dominant_body(gen.global_position)
+	if dominant == null:
+		return
+	var to_craft := gen.global_position - dominant.position
+	var flat := Vector3(to_craft.x, 0.0, to_craft.z)
+	if flat.length() < 1.0:
+		return
+	var orbit := _CraftOrbit.new()
+	orbit.gen = gen
+	orbit.dominant = dominant
+	orbit.radius = flat.length()
+	orbit.y_offset = to_craft.y
+	orbit.angle = atan2(flat.z, flat.x)
+	orbit.angular_speed = gravity.orbit_velocity(dominant, to_craft.length()) / maxf(orbit.radius, 1.0)
+	_craft_orbits.append(orbit)
+
+
+## Walk every tracked orbit forward. Purely kinematic (see [_CraftOrbit]) —
+## cheap enough to run every frame regardless of how many craft are orbiting.
+func _update_large_craft_orbits(delta: float) -> void:
+	if _craft_orbits.is_empty():
+		return
+	var still: Array[_CraftOrbit] = []
+	for orbit in _craft_orbits:
+		if not is_instance_valid(orbit.gen):
+			continue
+		orbit.angle += orbit.angular_speed * delta
+		var pos := orbit.dominant.position + Vector3(cos(orbit.angle), 0.0, sin(orbit.angle)) * orbit.radius
+		pos.y += orbit.y_offset
+		orbit.gen.global_position = pos
+		still.append(orbit)
+	_craft_orbits = still
+	# A body that moved into a new spatial-grid cell since PhysWorld last
+	# indexed its scenery stays collidable at its *old* cell until the index
+	# rebuilds — orbiting counts as "moved" every frame it's on, so keep it
+	# fresh. Cheap relative to a whole flight scene's rock count; only paid
+	# at all while something here is actually orbiting.
+	if phys_world != null:
+		phys_world.mark_scenery_dirty()
+
+
+## A [constant LargeCraftGenerator.Archetype.DREADNOUGHT]'s own movement:
+## cruises forward along its current facing and slowly turns to bring its
+## nose toward the player, the "moves under its own power like a real ship"
+## the user asked for. Deliberately simple — no steering/avoidance, no AI
+## module dependency — a big capital ship reads as "alive" from a slow turn
+## and a steady cruise alone, and a real behaviour tree is more than a debug
+## spawn-menu megastructure needs.
+class _CraftPatrol extends RefCounted:
+	var gen: LargeCraftGenerator
+	var speed: float
+	var turn_rate: float  ## 0..1 basis-slerp factor per second
+
+var _craft_patrols: Array[_CraftPatrol] = []
+const DREADNOUGHT_CRUISE_SPEED := 12.0
+const DREADNOUGHT_TURN_RATE := 0.12
+
+
+func _place_large_craft_patrol(gen: LargeCraftGenerator) -> void:
+	var patrol := _CraftPatrol.new()
+	patrol.gen = gen
+	# Cruise speed scales gently with size — a sun-scale dreadnought crawling
+	# forward at the same literal m/s as a frigate-scale one reads wrong at
+	# either end of the size dial, but a full linear scale would make the
+	# biggest ones absurdly fast, so this is clamped and sub-linear.
+	patrol.speed = DREADNOUGHT_CRUISE_SPEED * clampf(gen.scale_mult / 5.0, 0.6, 4.0)
+	patrol.turn_rate = DREADNOUGHT_TURN_RATE
+	_craft_patrols.append(patrol)
+
+
+## Turn each patrolling dreadnought toward the player and walk it forward
+## along its own (post-turn) facing — [member Node3D.scale] has to be
+## preserved explicitly here since [Basis.looking_at] hands back a bare
+## rotation, not this node's actual [member LargeCraftGenerator.scale_mult].
+func _update_large_craft_patrols(delta: float) -> void:
+	if _craft_patrols.is_empty() or model == null:
+		return
+	var still: Array[_CraftPatrol] = []
+	for patrol in _craft_patrols:
+		if not is_instance_valid(patrol.gen):
+			continue
+		var gen := patrol.gen
+		var t := gen.global_transform
+		var to_player := model.global_position - t.origin
+		if to_player.length_squared() > 1.0:
+			var wanted_fwd := to_player.normalized()
+			var cur_fwd := -t.basis.z.normalized()
+			var new_fwd := cur_fwd.slerp(wanted_fwd, clampf(patrol.turn_rate * delta, 0.0, 1.0))
+			if new_fwd.length_squared() > 0.001:
+				var up := Vector3.UP if absf(new_fwd.dot(Vector3.UP)) < 0.98 else Vector3.FORWARD
+				t.basis = Basis.looking_at(new_fwd, up).scaled(Vector3.ONE * gen.scale.x)
+		t.origin += (-t.basis.z.normalized()) * patrol.speed * delta
+		gen.global_transform = t
+		still.append(patrol)
+	_craft_patrols = still
+	if phys_world != null:
+		phys_world.mark_scenery_dirty()  # see the matching note in _update_large_craft_orbits
+
+
+## Visual-only weapon fire from [constant LargeCraftGenerator.Archetype.DREADNOUGHT]
+## turrets: a volley of glowing bolts travels in a straight line toward
+## wherever the player was at the moment of firing, then fades out. No damage
+## is applied — the user explicitly chose "looks and moves like it's
+## fighting" over full combat integration for this pass; real hull damage can
+## wire into [member damage] later without touching any of this.
+const TURRET_RANGE := 900.0
+const TURRET_COOLDOWN := 1.6
+const TURRET_BOLT_SPEED := 220.0
+const TURRET_BOLT_LIFE := 3.5
+
+var _turret_timers: Dictionary = {}  ## LargeCraftGenerator -> seconds to next volley
+var _turret_bolts: Array[Dictionary] = []  ## {node, velocity, life}
+
+
+func _update_large_craft_turrets(delta: float) -> void:
+	if model == null:
+		return
+	for gen in _large_craft:
+		if not is_instance_valid(gen) or gen.archetype != LargeCraftGenerator.Archetype.DREADNOUGHT:
+			continue
+		var cooldown: float = float(_turret_timers.get(gen, 0.0)) - delta
+		if cooldown > 0.0:
+			_turret_timers[gen] = cooldown
+			continue
+		if gen.global_position.distance_to(model.global_position) > TURRET_RANGE:
+			_turret_timers[gen] = 0.5  # cheap range re-check, not a full reload
+			continue
+		_turret_timers[gen] = TURRET_COOLDOWN
+		var target := model.global_position
+		for muzzle in gen.get_turret_points():
+			_spawn_turret_bolt(muzzle.origin, (target - muzzle.origin).normalized())
+	_update_turret_bolts(delta)
+
+
+func _spawn_turret_bolt(pos: Vector3, dir: Vector3) -> void:
+	if dir.length_squared() < 0.001:
+		return
+	var mesh_inst := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.5
+	sphere.height = 1.0
+	mesh_inst.mesh = sphere
+	mesh_inst.material_override = ShipMaterials.glow_material(Color("ff5a3c"))
+	mesh_inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mesh_inst)
+	mesh_inst.global_position = pos
+	_turret_bolts.append({"node": mesh_inst, "velocity": dir * TURRET_BOLT_SPEED, "life": TURRET_BOLT_LIFE})
+
+
+func _update_turret_bolts(delta: float) -> void:
+	if _turret_bolts.is_empty():
+		return
+	var still: Array[Dictionary] = []
+	for b: Dictionary in _turret_bolts:
+		var node: MeshInstance3D = b["node"]
+		if not is_instance_valid(node):
+			continue
+		node.global_position += (b["velocity"] as Vector3) * delta
+		var life: float = float(b["life"]) - delta
+		if life <= 0.0:
+			node.queue_free()
+		else:
+			b["life"] = life
+			still.append(b)
+	_turret_bolts = still
+
+
+## Magnetizes the player's own ship toward any spawned large craft's dock
+## pads. [DockingPad]'s own Area3D overlap path already handles debris and
+## the gen-lab's RigidBody3D test craft automatically; [FlightModel] has no
+## collider (see its own doc comment) so it never appears in
+## [method Area3D.get_overlapping_bodies] and has to be pulled explicitly.
+func _update_large_craft_docking(delta: float) -> void:
+	if model == null or _large_craft.is_empty():
+		return
+	for gen in _large_craft:
+		if not is_instance_valid(gen):
+			continue
+		for pad in gen.get_dock_pads():
+			model.velocity = pad.pull_point(model.global_position, model.velocity, delta, model)
+
+
+func clear_large_craft() -> void:
+	for gen in _large_craft:
+		if phys_world != null and _craft_collision_bodies.has(gen):
+			for body: PhysBody in _craft_collision_bodies[gen]:
+				phys_world.remove(body)
+		if is_instance_valid(gen):
+			gen.queue_free()
+	_craft_collision_bodies.clear()
+	if phys_world != null:
+		phys_world.mark_scenery_dirty()
+	_large_craft.clear()
+	_craft_orbits.clear()
+	_craft_patrols.clear()
+	_turret_timers.clear()
+	for b: Dictionary in _turret_bolts:
+		var node: Node = b["node"]
+		if is_instance_valid(node):
+			node.queue_free()
+	_turret_bolts.clear()
+	if _hud != null:
+		_hud.show_hint("Large craft cleared")
+
+
 ## The definitive orbit test: put the ship into the perfect circular orbit at its
 ## current position and release the throttle. If orbit works, the ship stays put;
 ## if it spirals in or out, the flight model is fighting the gravity.
@@ -1388,6 +1982,21 @@ func set_far_view_max(value: float) -> void:
 	if camera_rig != null:
 		camera_rig.set_far_view_max(_far_view_max)
 
+
+## Camera FOV dial, degrees. Persists in Session so it survives a restart, and
+## applies live to the current rig (chase mode adds its boost dolly each frame).
+func set_camera_fov(deg: float) -> void:
+	Session.camera_fov = deg
+	if camera_rig != null:
+		camera_rig.set_fov(deg)
+
+
+## Third-person chase-distance dial (×). Persists in Session; applies live.
+func set_camera_chase(scale: float) -> void:
+	Session.camera_chase = scale
+	if camera_rig != null:
+		camera_rig.set_chase_scale(scale)
+
 ## Toggle high-detail rendering. Does NOT resize the window (that just zoomed
 ## the stretch-scaled canvas); it raises the 3D render scale and rebuilds the
 ## procedural geometry — planets, nebula, rocks, sky — at higher segment counts
@@ -1403,6 +2012,34 @@ func toggle_high_contrast() -> void:
 	ShipMaterials.high_contrast = BuilderTheme.high_contrast
 	get_window().theme = BuilderTheme.build()
 	_assemble()
+
+
+## Set how fast the *player's* ship flies — the Settings dial behind [member
+## Session.player_speed_scale] — and push it onto the ship already in the scene,
+## so it takes effect as the slider moves rather than at the next respawn.
+##
+## Nothing here touches asteroids, debris or orbits: those are not
+## [FlightModel]s, which is exactly the boundary the dial is meant to have. The
+## AI population has its own dial, [method set_npc_speed_scale].
+func set_player_speed_scale(scale: float) -> void:
+	Session.player_speed_scale = maxf(scale, 0.05)
+	if model != null:
+		model.speed_scale = Session.player_speed_scale
+		model.rescale_speed(Session.player_speed_scale)
+
+
+## Set how fast every *other* ship flies — the AI population — and push it onto
+## all of them at once. Separate from [method set_player_speed_scale] so slowing
+## a fight down to make it readable and slowing the enemy down to make it winnable
+## are two different things, which one dial could not express.
+func set_npc_speed_scale(scale: float) -> void:
+	Session.npc_speed_scale = maxf(scale, 0.05)
+	if _ai_spawner == null:
+		return
+	for ship in _ai_spawner.ships():
+		if is_instance_valid(ship) and ship.model != null:
+			ship.model.speed_scale = Session.npc_speed_scale
+			ship.model.rescale_speed(Session.npc_speed_scale)
 
 
 ## Called by the damage system when a part breaks off. The damage system
@@ -1478,7 +2115,8 @@ func toggle_help() -> void:
 
 
 func toggle_drift_field() -> void:
-	_mote_field_on = not _mote_field_on
+	Session.drift_field = not Session.drift_field
+	_mote_field_on = Session.drift_field
 	_motes.visible = _mote_field_on
 	_hud.show_hint(
 		"Drift field on" if _mote_field_on else "Drift field off — empty space, no reference"
@@ -1534,6 +2172,12 @@ func toggle_gravity_chaos() -> void:
 		_hud.show_hint("Gravity chaos OFF")
 
 
+## True while the debug chaos law (key Y) is applied, so the Gravity menu row
+## can reflect the current state.
+func gravity_chaos_on() -> bool:
+	return _gravity_chaos
+
+
 ## True when gravity bodies attract things in ("pull"). Gravity menu toggle:
 ## off means orbit-only — bodies keep their own orbits and nothing falls in.
 func gravity_pull_on() -> bool:
@@ -1575,6 +2219,7 @@ func toggle_planet_pointer() -> void:
 		_planet_pointer.toggle()
 		if _planet_pointer.get_parent() != null:
 			remove_child(_planet_pointer)
+	Session.planet_pointer = _planet_pointer.is_showing()
 	_hud.show_hint("Planet pointer: %s" % ("ON" if _planet_pointer.is_showing() else "OFF"))
 
 
@@ -1629,23 +2274,53 @@ func set_trail_ships(on: bool) -> void:
 	_hud.show_hint("All-ships trail: %s" % ("on" if on else "off"))
 
 
+## Recreate the enabled trails so a Trail-length change (which Trail3D reads at
+## build time) takes effect immediately. Trails that are off stay off.
+func refresh_trails() -> void:
+	var player := trail_player_on()
+	var ships := trail_ships_on()
+	set_trail_player(false)
+	set_trail_ships(false)
+	if _player_trail != null:
+		_player_trail.queue_free()
+		_player_trail = null
+	for trail in _ship_trails.values():
+		if is_instance_valid(trail):
+			(trail as Trail3D).queue_free()
+	_ship_trails.clear()
+	if player:
+		set_trail_player(true)
+	if ships:
+		set_trail_ships(true)
+
+
 ## Keep the AI trails matched to the live roster: create one for each alive ship
 ## (or enable the existing), disable and free trails for ships that despawned.
+## Ships farther than this from the player stop rebuilding their trail mesh
+## every frame — an off-screen or far AI ship's trail was previously rebuilt
+## unconditionally each frame regardless of whether anyone could see it.
+const TRAIL_CULL_DIST := 1500.0
+
 func _update_ship_trails() -> void:
 	var keep: Dictionary = {}
+	var focus_pos := model.global_position if model != null else Vector3.ZERO
 	if _ai_spawner != null and Session.trail_ships:
 		for ship in _ai_spawner._ships:
 			if not is_instance_valid(ship) or not ship._alive:
 				continue
+			var near := ship.global_position.distance_to(focus_pos) <= TRAIL_CULL_DIST
 			var trail := _ship_trails.get(ship) as Trail3D
 			if trail == null:
+				if not near:
+					continue
 				trail = Trail3D.new()
 				trail.name = "ShipTrail_%s" % ship.name
 				add_child(trail)
 				trail.set_color(BuilderTheme.text_dim())
 				_ship_trails[ship] = trail
-			trail.set_enabled(true)
-			trail.add_point(ship.global_position)
+			trail.set_enabled(near)
+			if near:
+				trail.add_point(ship.global_position)
 			keep[ship] = true
 	# Free trails for ships that are gone.
 	for key in _ship_trails.keys():
@@ -1655,6 +2330,88 @@ func _update_ship_trails() -> void:
 				trail.set_enabled(false)
 				trail.queue_free()
 			_ship_trails.erase(key)
+
+
+# --- Aggro indicators ---------------------------------------------------------
+
+## One floating icon per AI ship currently coming for the player, keyed by ship.
+var _aggro_markers: Dictionary = {}
+const AGGRO_MARKER_ICON := "guns/delapouite/crosshair.png"
+## How far above the top of the hull the icon floats, in metres.
+const AGGRO_MARKER_MARGIN := 2.5
+## How wide the icon is in world metres — held constant regardless of how big the
+## ship under it is, so it reads as a label rather than as part of the vessel.
+const AGGRO_MARKER_SIZE := 4.0
+## Past this the icon is dropped: across a solar system it is clutter, not
+## information, and every marker is a node the renderer has to cull.
+const AGGRO_MARKER_RANGE := 6000.0
+
+
+## Float a billboarded icon over every AI ship currently aggroed onto the player.
+##
+## The HUD's lock bracket already answers "which ship am I after"; this answers
+## the question a pilot actually gets shot over — "which of these six are after
+## *me*". Shares the Markers toggle with the rest of the ship markings.
+func _update_aggro_indicators() -> void:
+	var keep: Dictionary = {}
+	var focus_pos := model.global_position if model != null else Vector3.ZERO
+	if _ai_spawner != null and Session.hud_markers:
+		for ship in _ai_spawner.ships():
+			if not is_instance_valid(ship) or not ship._alive:
+				continue
+			if not is_instance_valid(ship.model) or not ship.is_aggroed_to_player():
+				continue
+			var pos := ship.model.global_position
+			var dist := pos.distance_to(focus_pos)
+			if dist > AGGRO_MARKER_RANGE:
+				continue
+			var marker := _aggro_markers.get(ship) as Sprite3D
+			if marker == null:
+				marker = _make_aggro_marker()
+				add_child(marker)
+				_aggro_markers[ship] = marker
+			# Above the hull, along the *ship's* up: a rolled ship's icon rides
+			# with the roll instead of sliding off to one side.
+			var up: Vector3 = ship.model.global_transform.basis.y
+			marker.global_position = pos + up * ship.marker_height(AGGRO_MARKER_MARGIN)
+			# Fade out with range, so a distant melee is a hint rather than a wall
+			# of identical icons. Only the alpha moves — the red it was given at
+			# creation stays put. The floor stays high: a marker far enough away
+			# to be nearly invisible is exactly the one worth knowing about.
+			marker.modulate.a = clampf(1.0 - dist / AGGRO_MARKER_RANGE, 0.45, 1.0)
+			keep[ship] = true
+	for key in _aggro_markers.keys():
+		if not keep.has(key):
+			var gone := _aggro_markers[key] as Sprite3D
+			if gone != null:
+				gone.queue_free()
+			_aggro_markers.erase(key)
+
+
+## One indicator: a billboarded quad, so it faces the camera however the ship
+## under it rolls or banks.
+##
+## Tinted red rather than left as the icon's own art. The icon is drawn white —
+## it is a menu glyph — and white over a dark hull at range reads as a smudge of
+## scenery, which is the one thing a threat marker must not be. The tint is
+## [method BuilderTheme.bad], the same red the HUD already uses for the things
+## that are shooting at you, so the two agree and high-contrast mode carries
+## through to it.
+func _make_aggro_marker() -> Sprite3D:
+	var marker := Sprite3D.new()
+	marker.name = "AggroMarker"
+	var tex := load("res://assets/icons/" + AGGRO_MARKER_ICON) as Texture2D
+	marker.texture = tex
+	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	# Unshaded: a label lit by the scene's sun would go black on its dark side.
+	# It also means the tint below is the final colour, not a shade of it.
+	marker.shaded = false
+	marker.modulate = BuilderTheme.bad()
+	# Sized from the texture's own width so the icon lands at AGGRO_MARKER_SIZE
+	# metres across whatever resolution the art happens to be.
+	var width := float(tex.get_width()) if tex != null else 64.0
+	marker.pixel_size = AGGRO_MARKER_SIZE / maxf(width, 1.0)
+	return marker
 
 
 func _update_player_trail() -> void:
@@ -2058,6 +2815,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_6, KEY_KP_6:
 			# Debug/testing: drop a mother ship that launches fighters.
 			_hud.show_hint("Mother ship launched" if spawn_mother_ship() else "No room for a mother ship")
+		KEY_8, KEY_KP_8:
+			if incident_director != null:
+				var types := IncidentDirector.INCIDENT_TYPES
+				var t: String = types[randi() % types.size()]
+				var inc := incident_director.trigger_incident(t)
+				if inc != null:
+					_hud.show_hint("Incident: %s" % inc.title)
 		KEY_Y:
 			toggle_gravity_chaos()
 		KEY_TAB:
@@ -2078,6 +2842,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			idx = (idx + 1) % modes.size()
 			model.set_control_mode(modes[idx])
 			_hud.show_hint("Controls: %s" % mode_names[idx])
+		KEY_F4:
+			# Manual player-ship respawn: rebuild the ship into a fresh circular
+			# orbit around the current dominant body (debug helper, F4 is free).
+			if enable_manual_spawn:
+				var now := Time.get_ticks_msec() / 1000.0
+				if now - _last_spawn_time >= spawn_cooldown:
+					respawn_player_ship()
+					_last_spawn_time = now
 		KEY_F5:
 			restart_scene()
 		KEY_QUESTION, KEY_SLASH, KEY_F1:
@@ -2086,3 +2858,77 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			return_to_hangar()
 	if vp != null:
 		vp.set_input_as_handled()
+
+## Manual player-ship respawn (F4): rebuild the vessel into a fresh circular
+## orbit around the current dominant body, without reloading the whole scene.
+@export var enable_manual_spawn: bool = true
+var _last_spawn_time: float = 0.0
+var spawn_cooldown := 1.0  # Seconds between manual respawns
+
+## Rebuild the player ship and spawn it in orbit around the dominant body. A
+## manual respawn for flight testing: unlike [method respawn], which just resets
+## the existing ship in place, this replaces the vessel so a broken hull comes
+## back fresh — while AI traffic and scenery carry on.
+func respawn_player_ship() -> void:
+	# Tear down the current ship. Drop the physics body first so the world never
+	# steps a body pointing at a node that is about to be freed.
+	if model != null:
+		if location == Location.SPACE:
+			model.clear_phys_world()
+		model.queue_free()
+		model = null
+		if view != null:
+			view.destroy()
+			view = null
+		systems = null
+		damage = null  # DamageSystem is RefCounted; dropping it frees it.
+
+	# Rebuild from the current design, then re-wire what the root binds once per
+	# vessel: gravity, asteroid data, the physics body, and HUD feedback signals.
+	_build_ship()
+	_assemble()
+	if gravity != null:
+		model.gravity = gravity
+	if space != null and space.has_meta("asteroid_data"):
+		model._asteroid_data = space.get_meta("asteroid_data") as Array
+	if location == Location.SPACE and phys_world != null and view != null:
+		model.set_phys_world(phys_world, _ship_collision_radius(view), _ship_hull(view))
+	systems.state_changed.connect(_on_systems_state)
+	systems.fire_blocked.connect(func(reason: String) -> void: _hud.show_hint(reason))
+	model.assist_changed.connect(func(_on: bool) -> void: _hud.show_hint(_assist_hint()))
+	model.orbit_changed.connect(_on_orbit_changed)
+
+	# Position: a stable circular orbit around the current dominant body, or the
+	# origin when there is no space scene to orbit.
+	var spawn_pos := Vector3.ZERO
+	var spawn_velocity := Vector3.ZERO
+	var face_orbit := false
+	if space != null and location == Location.SPACE:
+		var spawn_dist := space.planet_radius * 2.857
+		spawn_pos = space.planet_centre + Vector3(spawn_dist, 0.0, 0.0)
+		if gravity != null:
+			var dominant := gravity.find_dominant_body(spawn_pos)
+			if dominant != null:
+				# Exact circular-orbit speed for this body: v = sqrt(G*M/r).
+				var v_orbit := gravity.orbit_velocity(dominant, spawn_dist)
+				var radial := (spawn_pos - dominant.position).normalized()
+				var tangent := Vector3(-radial.z, 0.0, radial.x).normalized()
+				spawn_velocity = tangent * v_orbit
+				face_orbit = true
+	elif location == Location.GENERATED_SYSTEM:
+		var spawn := _generated_system_spawn(Session.pending_spawn_body_name)
+		if spawn["ok"]:
+			spawn_pos = spawn["pos"]
+			spawn_velocity = spawn["vel"]
+			face_orbit = spawn_velocity.length_squared() > 0.01
+
+	model.global_position = spawn_pos
+	model.velocity = spawn_velocity
+	# Face along the orbit direction so flight assist doesn't pull toward the planet.
+	if face_orbit:
+		model.global_transform.basis = Basis.looking_at(spawn_velocity.normalized(), Vector3.UP)
+	else:
+		model.global_transform.basis = Basis()  # Reset rotation
+	if _hud != null:
+		_hud.show_hint("Player ship rebuilt into orbit")
+	print("Player ship respawned at position: %s" % spawn_pos)

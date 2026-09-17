@@ -35,6 +35,30 @@ const MODULES: Array[Dictionary] = [
 		"scene": "res://modules/arena/arena.tscn",
 		"tagline": "Watch factions fight, or take a ship over and fly it yourself.",
 	},
+	{
+		"id": "physics_lab",
+		"name": "Physics Lab",
+		"scene": "res://modules/physics_lab/physics_lab.tscn",
+		"tagline": "A/B collision tuning bench: impulse, restitution, spin, hitstop.",
+	},
+	{
+		"id": "style_lab",
+		"name": "Style Lab",
+		"scene": "res://modules/style_lab/style_lab.tscn",
+		"tagline": "Global look toggle & dials: grounded vs friendly, rounding, palettes.",
+	},
+	{
+		"id": "solar_system_gen",
+		"name": "Solar System Lab",
+		"scene": "res://modules/solar_system_gen/solar_system_gen_lab.tscn",
+		"tagline": "Procedural stellar systems: stars, planets, moons, asteroid belts.",
+	},
+	{
+		"id": "large_craft_gen",
+		"name": "Large Craft Lab",
+		"scene": "res://modules/large_craft_gen/large_craft_gen_lab.tscn",
+		"tagline": "Modular capital ships, carriers, stations, and docking pads.",
+	},
 ]
 
 

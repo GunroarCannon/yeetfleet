@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="StyleProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/style/scripts/style_profile.gd" id="1_cartoony_profile"]
+
+[resource]
+script = ExtResource("1_cartoony_profile")
+id = "cartoony"
+display_name = "Cartoony"
+roundness = 0.75
+chunkiness = 0.35
+rock_potato = 0.5
+shading_bands = 3
+outline_width = 0.05
+outline_color = Color(0.06, 0.07, 0.1, 1)
+spec_amount = 0.15
+rim_amount = 0.25
+palette_saturation = 1.35
+palette_lift = 0.22
+planet_detail = 0.15
+planet_bands = 0.85
+star_count = 220
+star_size = 3.0
+star_five_point = 1.0
+squash_enabled = true

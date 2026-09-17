@@ -82,6 +82,12 @@ const MOTHER_LAUNCH_INTERVAL := 5.0
 ## target is inside firing range; read by the HUD to bracket ships that are
 ## locked onto someone, mirroring the player's own lock bracket.
 var locked_enemy: Node3D = null
+## The enemy [method tick_ai] picked this frame — whatever [method _find_enemy]
+## settled on, which is the player's ship when nothing on a hostile team is
+## closer. Kept because "who is this ship after" is a question the scene asks
+## outside the AI tick, for the floating indicator over a ship coming for the
+## player (see [method is_aggroed_to_player]).
+var current_target: Node3D = null
 
 
 func _init() -> void:
@@ -107,6 +113,10 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 	# Create the FlightModel (this IS the ship — it owns the transform).
 	model = FlightModel.new()
 	model.name = "Model"
+	# The AI population's own speed dial, set before [method FlightModel.configure]
+	# runs a few lines down: see [member FlightModel.speed_scale] for why the
+	# model does not read it from Session itself.
+	model.speed_scale = Session.npc_speed_scale
 	# World-absolute: the AiShip node mirrors the model's transform in its own
 	# _physics_process, so the model must not be a child whose local offset
 	# compounds with that mirror every frame.
@@ -178,14 +188,35 @@ func set_phys_world(world: PhysWorld) -> void:
 		model.clear_phys_world()
 		return
 	var radius := 3.0
+	var hull: Array[Dictionary] = []
 	if _view != null:
 		radius = maxf(_view.aabb.size.length() * 0.5, 3.0)
-	model.set_phys_world(world, radius)
+		# A compound of hull sections rather than the one bounding sphere, so a
+		# long hull meets the player along the part that actually touched — see
+		# [method ShipView.collision_hull]. Ship space, which is the body's space:
+		# the view hangs off the model through an untransformed holder.
+		hull = _view.collision_hull()
+	model.set_phys_world(world, radius, hull)
 	# A bigger hull is a heavier hull (mass ~ scale^2), so a scaled-up hauler or
 	# mother reads as a wrecking ball instead of a balloon that every scout can
 	# shove around. Normal-size ships keep their design mass.
 	if scale_multiplier > 1.0 and model._phys != null:
 		model._phys.mass *= scale_multiplier * scale_multiplier
+
+
+## Re-skin this ship for the current look and palette, and re-derive its collision
+## hull from the geometry the new look produced. Called by [AiSpawner] when the
+## global style changes.
+##
+## The hull is refreshed rather than left alone because a geometry dial moves
+## vertices: a hull that just got fatter would otherwise keep colliding along its
+## old, thinner silhouette.
+func restyle() -> void:
+	if _view == null:
+		return
+	_view.restyle()
+	if model != null and model._phys != null:
+		model.refresh_hull(maxf(_view.aabb.size.length() * 0.5, 3.0), _view.collision_hull())
 
 
 ## Called by [AiSpawner] after spawning to assign faction archetype and
@@ -216,6 +247,7 @@ func tick_ai(delta: float) -> void:
 	# the player). In the arena ships fight each other; in space (no teams set)
 	# this falls back to hunting the player as before.
 	var target := _find_enemy()
+	current_target = target
 	if systems != null:
 		systems.target_ref = target
 	var target_pos := Vector3.ZERO
@@ -265,6 +297,34 @@ func tick_ai(delta: float) -> void:
 ## The nearest ship to engage: the closest live ship (or the player) on a team
 ## this ship is aggressive to. With no team warfare configured (aggressive_to
 ## empty — the pre-arena case), the player is always fair game.
+## Whether this ship is coming for the player right now: it has picked the
+## player's ship as its enemy *and* its behaviour is steering at it. Read by the
+## scene to float an indicator over the ships that are after you (see [method
+## FlightRoot._update_aggro_indicators]).
+##
+## Pursuit and investigate both count. Investigate is the "I saw something, going
+## to look" state and it steers at the last known player position, which for a
+## pilot on the receiving end is the same message as an attack run: that one has
+## noticed me and is closing. Everything else — patrol, formation, cruise, flee —
+## means the ship is doing its own thing.
+func is_aggroed_to_player() -> bool:
+	if not _alive or behaviour == null or player_ref == null:
+		return false
+	if not is_instance_valid(player_ref) or current_target != player_ref:
+		return false
+	return behaviour.state == AiBehaviour.State.PURSUIT \
+		or behaviour.state == AiBehaviour.State.INVESTIGATE
+
+
+## How far above this ship's own origin a floating marker has to sit to clear the
+## hull: the top of the assembled geometry plus [param margin]. Falls back to the
+## margin alone when the ship has no geometry to measure.
+func marker_height(margin: float) -> float:
+	if _view == null:
+		return margin
+	return _view.aabb.end.y + margin
+
+
 func _find_enemy() -> Node3D:
 	var best: Node3D = null
 	var best_d := INF

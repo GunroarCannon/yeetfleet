@@ -32,11 +32,32 @@ const MATERIAL_PRESETS := {
 	"industrial": {"roughness": 0.70, "metallic": 0.20, "specular": 0.30, "weathering": 0.40},
 }
 
-const DEFAULT_PALETTE := {
-	"primary": Color(0.29, 0.33, 0.40),
-	"accent": Color(0.87, 0.55, 0.16),
-	"trim": Color(0.09, 0.10, 0.13),
+## Channel -> the [Palette] role a fresh hull takes its paint from. A new design
+## is painted from the active palette until the player picks colours of their own,
+## at which point [member palette] holds explicit values and wins.
+const CHANNEL_ROLES := {
+	"primary": "hull_primary",
+	"accent": "hull_accent",
+	"trim": "hull_trim",
 }
+
+
+## The paint a fresh design starts on, read from the active palette.
+##
+## A function rather than a const because it follows the live palette: switching
+## palettes has to change what the next new ship is painted in, and a const is
+## baked at parse time.
+static func default_palette() -> Dictionary:
+	var out := {}
+	for channel in CHANNELS:
+		out[channel] = Palette.color(channel_role(channel))
+	return out
+
+
+## The palette role backing [param channel], defaulting to the hull primary for a
+## channel this module does not know about.
+static func channel_role(channel: String) -> String:
+	return String(CHANNEL_ROLES.get(channel, "hull_primary"))
 
 @export var design_name := "Untitled"
 ## The chassis and everything on it.
@@ -50,7 +71,7 @@ const DEFAULT_PALETTE := {
 
 func _init() -> void:
 	if palette.is_empty():
-		palette = DEFAULT_PALETTE.duplicate()
+		palette = default_palette()
 
 
 static func create(chassis_id: String) -> ShipDesign:
@@ -64,7 +85,7 @@ func chassis_id() -> String:
 
 
 func get_color(channel: String) -> Color:
-	return palette.get(channel, DEFAULT_PALETTE.get(channel, Color.MAGENTA))
+	return palette.get(channel, Palette.color(channel_role(channel)))
 
 
 func set_color(channel: String, color: Color) -> void:

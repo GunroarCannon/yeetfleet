@@ -26,14 +26,10 @@ var rng := RandomNumberGenerator.new()
 ## bodies, so null here means "no gravity", not "broken").
 var gravity: GravitySystem = null
 
-# The rest of the plan's modules attach their façade here as they land (M1/M3/
-# M4/M5). Declared as comments until the classes exist, so this file parses on
-# the day M0 ships:
-#
-#   var phys: PhysWorld          # modules/physics        (M1)
-#   var style: StyleProfile      # modules/style          (M3)
-#   var events: IncidentDirector # modules/events         (M4)
-#   var reputation: RepStore     # modules/reputation     (M5)
+var phys: PhysWorld = null
+var style: StyleProfile = null
+var events: IncidentDirector = null
+# var reputation: RepStore     # modules/reputation     (M5)
 
 
 func _init() -> void:

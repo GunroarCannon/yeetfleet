@@ -46,6 +46,10 @@ func _ready() -> void:
 	# Cache player and gravity references once — avoid tree walks every frame.
 	_cached_player = _find_player_node()
 	_cached_gravity = _find_gravity()
+	# A global look change has to reach traffic that is already flying, not only
+	# ships spawned after it — the player flips the toggle and expects the belt to
+	# change with them.
+	StyleManager.instance().style_changed.connect(_on_style_changed)
 	print("AiSpawner: %d presets, %d parts" % [_library.presets.size(), _library.parts.size()])
 	# Deferred: the player ship is positioned in FlightRoot._ready, which runs
 	# after this node's _ready. Deferring lets the initial fleet spawn around the
@@ -62,6 +66,17 @@ func _spawn_initial_fleet() -> void:
 	while _ships.size() < max_ships:
 		_spawn_group()
 	print("AiSpawner: spawned %d ships in %d groups" % [_ships.size(), _groups.size()])
+
+
+## Re-skin every ship in flight for the new look and palette.
+##
+## Geometry goes through [PartMeshFactory], whose cache is keyed by the geometry
+## dials, so a shading-only change is a cache hit for every part and costs a
+## handful of uniform writes per material rather than a rebuild.
+func _on_style_changed(_profile: StyleProfile) -> void:
+	for ship in _ships:
+		if is_instance_valid(ship):
+			ship.restyle()
 
 
 func _process(delta: float) -> void:
@@ -272,6 +287,14 @@ func live_count() -> int:
 		if is_instance_valid(ship) and ship._alive:
 			n += 1
 	return n
+
+
+## Every ship this spawner is currently tracking, live or not. Read-only for
+## callers that need to push a change across the whole population at once — a
+## [Session] setting the player moves, for instance (see
+## [method FlightRoot.set_npc_speed_scale]).
+func ships() -> Array[AiShip]:
+	return _ships
 
 
 ## Spawn a single ballistic probe in a circular orbit around the dominant body:

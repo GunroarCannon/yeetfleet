@@ -40,7 +40,21 @@ var node: Node3D = null
 ## decides how much even that matters.
 var mass := 1.0
 ## Collision sphere radius, metres, from the design's bounds or the rock's size.
+## For a body with a [member hull] this is the radius of the sphere that encloses
+## the whole hull — see [method set_hull].
 var radius := 1.0
+## Optional compound collision volume: extra spheres in this body's *own* space,
+## each `{offset: Vector3, radius: float}`. Empty — every rock, planet and piece
+## of scenery — means the body is the single sphere of [member radius] at its
+## node's origin, which is the only shape the solver needs for a roundish thing.
+##
+## A ship is not roundish. Its [member radius] is the sphere that contains the
+## whole design, so two hulls used to register a hit while still visibly apart
+## nose to tail, and the normal pointed between their centres instead of at the
+## parts that met. A handful of spheres down the length of the hull fixes both:
+## contact is tested where the geometry is, and the push is along the direction
+## the hulls actually met. See [method set_hull].
+var hull: Array[Dictionary] = []
 ## World velocity, m/s. The controller writes it; the solver modifies it; the
 ## world integrates it into [member node].
 var velocity := Vector3.ZERO
@@ -83,6 +97,27 @@ var last_pusher := -1
 func _init(mass := 1.0, radius := 1.0) -> void:
 	self.mass = mass
 	self.radius = radius
+
+
+## Give this body a compound collision volume: local-space spheres, each
+## `{offset: Vector3, radius: float}`, offset measured from the node's origin in
+## the body's own basis. An empty array restores the plain single sphere.
+##
+## [member radius] is set to the radius of the sphere that encloses the whole
+## hull. That is what keeps every reader that only knows about one sphere —
+## the broadphase's cell size, the CCD travel gate, the scenery reach test —
+## answering conservatively and correctly without having to learn about hulls.
+func set_hull(spheres: Array[Dictionary]) -> void:
+	hull = spheres
+	var outer := 0.0
+	for sphere in hull:
+		outer = maxf(outer, (sphere["offset"] as Vector3).length() + float(sphere["radius"]))
+	radius = maxf(outer, 0.001)
+
+
+## Whether this body collides as a compound of spheres rather than as one.
+func has_hull() -> bool:
+	return not hull.is_empty()
 
 
 ## 1/mass for the impulse equations; zero for kinematic bodies so they absorb

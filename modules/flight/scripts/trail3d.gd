@@ -17,6 +17,12 @@ const LIFETIME := 2.5
 ## is unshaded colour against black and the eye reads direction long before it
 ## needs width.
 
+## Trail length dial (Settings → Trails): read at construction, so a rebuilt
+## trail keeps more points that live longer. `Session.trail_length` 1.0 is the
+## classic length; the Flight HUD rebuilds enabled trails when the dial changes.
+var _max_points := int(MAX_POINTS * Session.trail_length)
+var _lifetime := LIFETIME * Session.trail_length
+
 var _points: Array = []  # [{pos: Vector3, age: float}]
 var _mesh: ImmediateMesh
 var _inst: MeshInstance3D
@@ -70,7 +76,7 @@ func add_point(world_pos: Vector3) -> void:
 	if not _enabled:
 		return
 	_points.append({"pos": world_pos, "age": 0.0})
-	if _points.size() > MAX_POINTS:
+	if _points.size() > _max_points:
 		_points.pop_front()
 
 
@@ -82,7 +88,7 @@ func _process(delta: float) -> void:
 		var alive: Array = []
 		for p in _points:
 			p["age"] = float(p["age"]) + delta
-			if float(p["age"]) < LIFETIME:
+			if float(p["age"]) < _lifetime:
 				alive.append(p)
 		_points = alive
 
@@ -93,7 +99,7 @@ func _process(delta: float) -> void:
 	_mesh.clear_surfaces()
 	_mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
 	for p in _points:
-		var t := 1.0 - clampf(float(p["age"]) / LIFETIME, 0.0, 1.0)
+		var t := 1.0 - clampf(float(p["age"]) / _lifetime, 0.0, 1.0)
 		_mesh.surface_set_color(Color(_tint.r, _tint.g, _tint.b, t))
 		_mesh.surface_add_vertex(p["pos"] as Vector3)
 	_mesh.surface_end()

@@ -114,7 +114,7 @@ func _y_for(v: float) -> float:
 func _draw() -> void:
 	var x := (size.x - TRACK_WIDTH) * 0.5
 	var track := Rect2(x, 0.0, TRACK_WIDTH, size.y)
-	draw_rect(track, Color(BuilderTheme.BG_DEEP, 0.5), true)
+	draw_rect(track, Color(BuilderTheme.bg_deep(), 0.5), true)
 	draw_rect(track, BuilderTheme.border(), false, 1.0)
 
 	var zero_y := _y_for(0.0)

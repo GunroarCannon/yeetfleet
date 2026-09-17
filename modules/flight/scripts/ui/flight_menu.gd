@@ -366,6 +366,52 @@ class DraggablePopup:
 		content.add_child(lbl)
 
 
+	## A dim section header row. Menus use it to group related rows.
+	func add_section(title: String) -> void:
+		var lbl := Label.new()
+		lbl.text = title
+		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.add_theme_color_override("font_color", BuilderTheme.accent())
+		content.add_child(lbl)
+
+
+	## A wrapped line of explanation under a control, in plain language.
+	##
+	## Separate from [method add_label_row] because that one does not wrap: it is
+	## a caption, one short line, and a sentence in it runs off the side of the
+	## popup. A settings list whose names nobody can decode is worse than no
+	## settings list, so the explanation has to fit.
+	func add_help_row(text: String) -> void:
+		var lbl := Label.new()
+		lbl.text = text
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		lbl.add_theme_font_size_override("font_size", 10)
+		lbl.add_theme_color_override("font_color", BuilderTheme.text_dim())
+		content.add_child(lbl)
+
+
+	## A name + value readout row, for live state (AI count, orbit status, the
+	## current feel profile) that the menu refreshes on every open. The value is
+	## right-aligned in the accent colour so it reads as a number, not a button.
+	func add_value_row(label: String, value: String) -> void:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", BuilderTheme.GAP)
+		var name_lbl := Label.new()
+		name_lbl.text = label
+		name_lbl.custom_minimum_size = Vector2(110, 0)
+		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_color_override("font_color", BuilderTheme.text_dim())
+		row.add_child(name_lbl)
+		var val_lbl := Label.new()
+		val_lbl.text = value
+		val_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		val_lbl.add_theme_font_size_override("font_size", 11)
+		val_lbl.add_theme_color_override("font_color", BuilderTheme.accent())
+		row.add_child(val_lbl)
+		content.add_child(row)
+
+
 	## A labelled dropdown row; [param on_selected] receives the chosen index.
 	func add_option_row(
 		label: String, choices: Array, initial: int, on_selected: Callable

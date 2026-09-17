@@ -87,6 +87,12 @@ extends Resource
 @export_range(0.5, 10.0) var gravity_g := 3.0
 @export_range(1.5, 2.0) var gravity_falloff := 2.0
 
+## Cartoony visual deformation on impact (M3 consumes it)
+## squash_amount: how much to squash on impact (0 = none, 1 = max)
+## squash_recovery: how quickly to unsquash after impact (seconds)
+@export_range(0.0, 2.0) var squash_amount := 0.0
+@export var squash_recovery := 0.5
+
 
 ## The bounciness of a contact between two layers: the average of the two
 ## sides' restitution values from this profile.

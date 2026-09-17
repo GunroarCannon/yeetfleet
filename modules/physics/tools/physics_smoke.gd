@@ -36,6 +36,9 @@ func _initialize() -> void:
 	await _check_scenery_never_pairs()
 	await _check_free_body_gravity()
 	await _check_pull_off_no_fall()
+	await _check_hull_clearance()
+	await _check_hull_contact_across_the_beam()
+	await _check_hull_fit()
 	_finish()
 
 
@@ -472,3 +475,125 @@ func _check_scenery_never_pairs() -> void:
 	_check(pairs.size() == 0, "kinematic rocks far from the ship produced %d pairs" % pairs.size())
 	_done("Kinematic scenery never pairs against itself")
 	_free_rig(rig)
+
+
+# --- Ship hulls ---------------------------------------------------------------
+
+## A 12 x 3 x 2 m hull: long and narrow, the shape that made one bounding sphere
+## a bad collision volume. The sphere that encloses it has a radius of ~6.3 m
+## while the hull is 3 m across, so two ships carrying it reported a hit at a
+## centre-to-centre distance of 12.5 m — over four times their real beam.
+const HULL_BOX := AABB(Vector3(-6.0, -1.5, -1.0), Vector3(12.0, 3.0, 2.0))
+
+
+## A ship-shaped body: the same compound [method ShipView.collision_hull] builds
+## in flight, one chain of spheres down the hull's length.
+func _hulled_body(rig: Node3D, pos: Vector3, vel: Vector3) -> PhysBody:
+	var b := _body(rig, pos, 10.0, 1.0, PhysBody.Layer.SHIP, vel)
+	var view := ShipView.new()
+	view.part_boxes.append(HULL_BOX)
+	b.set_hull(view.collision_hull())
+	return b
+
+
+## Two hulls flying past each other with a metre of clear air between them must
+## not touch. This is the whole reason for the compound: the single sphere these
+## ships used to collide as reaches 6.3 m, so a 4 m lateral offset — a metre of
+## daylight per side — registered as a deep overlap and shoved both ships apart
+## in mid-space.
+func _check_hull_clearance() -> void:
+	var rig := _rig()
+	var a := _hulled_body(rig, Vector3.ZERO, Vector3.ZERO)
+	var b := _hulled_body(rig, Vector3(0.0, 4.0, 0.0), Vector3.ZERO)
+	await _settle()
+	var world := PhysWorld.new()
+	_check(a.radius < 6.5,
+		"a 12 x 3 x 2 hull's enclosing radius is %.1f m, not the ~6.3 m it should be" % a.radius)
+	# The single sphere it replaced: proof the old shape would have collided here.
+	_check(a.radius + b.radius > 4.0,
+		"the old bounding spheres would not even have overlapped — the test proves nothing (%.1f m)" % (a.radius + b.radius))
+	var report := ImpulseSolver.resolve(a, b, 0.016, world.profile)
+	_check(not bool(report["resolved"]),
+		"two hulls 4 m apart with a metre of clearance between them registered a hit")
+	_done("Hulls with real clearance pass each other")
+	_free_rig(rig)
+
+
+## The same hulls, now genuinely overlapping across their beam, must collide —
+## and the normal must run across the beam, the direction the hulls actually
+## met on, not along the diagonal between their centres. The two ships sit 8 m
+## apart along X and 2 m apart in Y, so the old bounding-sphere normal pointed
+## mostly along X while the hulls overlap in Y.
+func _check_hull_contact_across_the_beam() -> void:
+	var rig := _rig()
+	var a := _hulled_body(rig, Vector3.ZERO, Vector3.ZERO)
+	var b := _hulled_body(rig, Vector3(8.0, 2.0, 0.0), Vector3.ZERO)
+	await _settle()
+	var world := PhysWorld.new()
+	world.profile.restitution_ship = 0.0
+	var report := ImpulseSolver.resolve(a, b, 0.016, world.profile)
+	_check(bool(report["resolved"]), "two overlapping hulls reported no contact")
+	var normal: Vector3 = report["normal"]
+	_check(absf(normal.y) > 0.9,
+		"the contact normal was %s — the hulls overlap across the beam, so it should run mostly in Y" % normal)
+	_check(absf(normal.x) < 0.3,
+		"the contact normal kept the centres' %.2f share of X, which is the bounding sphere talking" % absf(normal.x))
+	var y_gap := absf(a.position().y - b.position().y)
+	world.add(a)
+	world.add(b)
+	for i in 20:
+		world.step(0.016)
+	_check(absf(a.position().y - b.position().y) > y_gap,
+		"the world did not push the overlapping hulls apart across their beam")
+	_done("Hull contact resolves across the beam")
+	_free_rig(rig)
+
+
+## [method HullFit.spheres_for_box] directly, because it is now the one place ships
+## *and* large craft get their collision from, and the property that matters is not
+## visible in either caller's behaviour: the fit is derived from the box, not from
+## wherever the part's pivot happens to sit.
+##
+## The code this replaced sized each large-craft part as
+## `aabb.get_center().length() + aabb.size.length()*0.5` measured from the part
+## node's origin — so a part whose geometry sat off its own origin got a sphere
+## centred in the wrong place *and* inflated by the distance. A box offset from the
+## origin is exactly the case that catches it.
+func _check_hull_fit() -> void:
+	# Offset deliberately: this box's centre is 10 m from the origin, and a fit that
+	# read the origin would put its sphere there instead.
+	var offset_box := AABB(Vector3(8.0, 0.0, 0.0), Vector3(4.0, 2.0, 2.0))
+	var offset_fit := HullFit.spheres_for_box(offset_box)
+	_check(offset_fit.size() >= 1, "an offset box produced no hull sections")
+	for sphere in offset_fit:
+		var centre: Vector3 = sphere["offset"]
+		# Along the box's own span the chain may sit anywhere inboard; what must hold
+		# is that it is inboard of the box and not of the origin.
+		_check(centre.x > 6.0 and centre.x < 14.0,
+			"a section at x=%.2f is not on its box (which spans x 8..12)" % centre.x)
+	var enclosing := HullFit.spheres_for_box(offset_box)[0]["offset"] as Vector3
+	_check(absf(enclosing.x - 10.0) < 2.1,
+		"the fit is centred at %s, not on its box centre (10, 1, 1)" % enclosing)
+
+	# Long and thin: a chain, and every section inside the box it stands for.
+	var long_box := AABB(Vector3(-8.0, -0.5, -0.5), Vector3(16.0, 1.0, 1.0))
+	var long_fit := HullFit.spheres_for_box(long_box)
+	_check(long_fit.size() > 1, "a 16 x 1 x 1 box got %d section(s), not a chain" % long_fit.size())
+	_check(long_fit.size() <= HullFit.MAX_SPHERES_PER_PART,
+		"the chain ignored its own %d-section cap (%d)" % [HullFit.MAX_SPHERES_PER_PART, long_fit.size()])
+	var grown := long_box.grow(0.05)
+	for sphere in long_fit:
+		_check(grown.has_point(sphere["offset"] as Vector3),
+			"a chain section sits at %s, outside its own box" % sphere["offset"])
+
+	# Compact: one section, and it still has to be a usable radius — the solver
+	# divides by these.
+	var compact_fit := HullFit.spheres_for_box(AABB(Vector3(-0.5, -0.5, -0.5), Vector3.ONE))
+	_check(compact_fit.size() == 1, "a 1 m cube got %d sections" % compact_fit.size())
+	# Degenerate: no geometry at all still has to yield something positive, or the
+	# body divides by a zero radius.
+	var empty_fit := HullFit.spheres_for_box(AABB())
+	_check(not empty_fit.is_empty(), "an empty box produced no collision at all")
+	for sphere in empty_fit:
+		_check(float(sphere["radius"]) > 0.0, "a zero-radius section reached the solver")
+	_done("Hull fitting is box-centred and chained")

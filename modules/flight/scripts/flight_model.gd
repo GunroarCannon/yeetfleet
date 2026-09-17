@@ -98,6 +98,16 @@ var top_speed := 240.0
 var accel := 20.0
 ## Peak turn rate, rad/s.
 var turn_rate := 0.6
+## This ship's speed multiplier: top speed and acceleration both scale by it.
+##
+## Set by whoever owns the ship rather than read from [Session] here, because a
+## [FlightModel] genuinely does not know whether it is the player's — and now
+## that those are two separate dials (see [member Session.player_speed_scale] and
+## [member Session.npc_speed_scale]) it must not guess.
+var speed_scale := 1.0
+## The [member speed_scale] the two above were last derived with — see
+## [method rescale_speed], which moves a live ship to a new one by the ratio.
+var _speed_scale_at_configure := 1.0
 
 var boost_level := 0.0
 
@@ -131,6 +141,17 @@ const QUICK_TURN_TOTAL := PI
 var _damage: DamageSystem = null
 ## Asteroid positions for collision, set by FlightRoot after building the scene.
 var _asteroid_data: Array = []
+
+## The hull node an impact squash actually scales -- FlightRoot's "Hull" holder,
+## handed in through [method configure] since it is built one level above this
+## model (see FlightRoot._build_ship). Null is fine: squash is purely cosmetic,
+## so a model with no visual (AI traffic, a headless smoke) just skips it.
+var _visual: Node3D = null
+## Current squash scale, eased back to [constant Vector3.ONE] over
+## [member PhysProfile.squash_recovery] seconds. Kept separate from any scale
+## the design/Session apply so the two never fight over [member Node3D.scale].
+var _squash_scale := Vector3.ONE
+var _squash_recovery := 0.5
 
 ## Debug warp speed: held key multiplies effective thrust and speed ceiling.
 ## Not part of the flight model — purely a debug tool for exploring the
@@ -179,6 +200,12 @@ const IMPACT_DAMAGE_SPEED := 60.0
 signal orbit_changed(body_name: String, in_orbit: bool)
 var _in_orbit := false
 var _orbit_body_name := ""
+## The fast-orbit dial's multiplier, for as long as [method
+## _apply_orbital_assist] currently has this ship held in orbit — 1.0 whenever
+## it does not. Read by the gravity step, which turns it into the k² of extra
+## pull a k-times-faster circle needs; see [method _fast_orbit_factor].
+var _orbital_hold_boost := 1.0
+
 ## Hysteresis timers: how long the ship must stay in band to be declared
 ## "in orbit" and how long it must stay out of band before being declared
 ## "lost", so the HUD status doesn't flicker on a slightly-elliptical orbit.
@@ -187,13 +214,23 @@ const ORBIT_LOSE_TIME := 3.0
 ## How strongly the orbital assist pulls velocity toward the local circular-orbit
 ## velocity, per second. A lerp factor: 1.2/s catches you back into a circular
 ## orbit within about a second of coasting — a firm hold, so a stray nudge does
-## not lose the orbit.
-const ORBITAL_ASSIST_RATE := 1.8
-## The orbital assist engages when the ship is between these multiples of the
-## body's radius from its centre. Inside ~1.15× it's too late (collision handles
-## it); outside ~4× it's free flight.
+## not lose the orbit. Adjustable at runtime like [member gravity_strength].
+var orbital_assist_rate := 1.8
+const ORBITAL_ASSIST_RATE_STEPS := [0.5, 1.0, 1.8, 3.0, 6.0]
+## The orbital assist engages once past this multiple of the body's radius —
+## inside it, it's too late anyway (collision handles it). There is no outer
+## radius cap: the outer edge instead tracks [member GravityBody.relevant_range]
+## (the same mass-scaled "this body is dominant out to here" distance dominant-
+## body selection already uses), so a ship coasting anywhere the sun (or any
+## body) is the strongest pull gets caught — not just within a few body-radii.
+## A fixed few-radii cap was the bug: a planet-sized orbit around the sun sits
+## far outside 4× the sun's radius, so the old cap silently never engaged there.
 const ORBITAL_ASSIST_MIN_R := 1.15
-const ORBITAL_ASSIST_MAX_R := 4.0
+## Above this speed the assist stands down — a ship on a fast interplanetary
+## coast should sail through, not get snapped onto a local circular rail. Below
+## it (roughly a stock ship's top speed, see [member top_speed]) a coasting ship
+## is assumed to want to settle into orbit.
+const ORBITAL_ASSIST_MAX_SPEED := 300.0
 ## Throttle must pass this much before the ship is "really flying" under gravity.
 ## Below it the ship is treated as coasting and the orbital assist holds the
 ## orbit, so a light tap on the throttle does not kick you out of orbit — to
@@ -212,7 +249,7 @@ var _orbit_log_timer := 0.0
 ## DOGFIGHT is tuned for knife-fight range and pairs with [FlightRoot]'s nose-on
 ## assist: the ship is agile enough to stay pointed at a locked target.
 enum ControlMode { ARCADE, SIM, REALISTIC, DOGFIGHT }
-var control_mode: int = ControlMode.SIM
+var control_mode: int = ControlMode.ARCADE
 ## Multipliers applied on top of the design's own stats. `assist_autority` is how
 ## hard full-assist snaps velocity onto the nose, `damping` scales the damping
 ## authority, and `turn_spool` is how fast the ship reaches the commanded turn
@@ -254,10 +291,14 @@ const PRESET_DOGFIGHT := {
 
 ## Bind the model to a design's performance figures. Safe to call again when the
 ## player edits their ship and comes back.
-func configure(stats: ShipStats, systems: SystemsSim, damage: DamageSystem = null) -> void:
+func configure(
+	stats: ShipStats, systems: SystemsSim, damage: DamageSystem = null, visual: Node3D = null
+) -> void:
 	_stats = stats
 	_systems = systems
 	_damage = damage
+	if visual != null:
+		_visual = visual
 	if stats == null:
 		return
 	# Base stats from the design.
@@ -270,13 +311,16 @@ func configure(stats: ShipStats, systems: SystemsSim, damage: DamageSystem = nul
 		ControlMode.ARCADE: preset = PRESET_ARCADE
 		ControlMode.REALISTIC: preset = PRESET_REALISTIC
 		ControlMode.DOGFIGHT: preset = PRESET_DOGFIGHT
-	top_speed = base_speed * preset["speed_mult"]
-	accel = base_accel * preset["accel_mult"]
-	turn_rate = base_turn * preset["turn_mult"]
+	top_speed = base_speed * preset["speed_mult"] * speed_scale
+	accel = base_accel * preset["accel_mult"] * speed_scale
+	_speed_scale_at_configure = speed_scale
+	turn_rate = base_turn * preset["turn_mult"] * _arcade_pivot_mult()
 	# The preset's feel numbers — the authority, damping and spool that actually
 	# give each mode its character (this is what was declared-but-never-read).
-	assist_authority = float(preset.get("assist_autority", ASSIST_AUTHORITY))
-	damping_authority = DAMPING_AUTHORITY * float(preset.get("damping", 1.0))
+	# The Session multipliers let a persistent "feel" dial compose on top of the
+	# mode's own preset, so a change survives mode switches and respawns.
+	assist_authority = float(preset.get("assist_autority", ASSIST_AUTHORITY)) * Session.assist_mult
+	damping_authority = DAMPING_AUTHORITY * float(preset.get("damping", 1.0)) * Session.damping_mult
 	turn_spool = clampf(float(preset.get("turn_spool", ROTATION_SPOOL)), 0.02, 0.5)
 	# A design re-tune (control mode preset, damage-driven re-derive) changes the
 	# mass the physics layer resolves this ship with.
@@ -341,9 +385,38 @@ func halt() -> void:
 		_phys.angular = Vector3.ZERO
 	# Re-derive speed/turn from stats if we have them, undoing any damage.
 	if _stats != null:
-		top_speed = clampf(_stats.top_speed, SPEED_MIN, SPEED_MAX)
-		accel = maxf(_stats.accel, top_speed * 0.12)
-		turn_rate = deg_to_rad(clampf(_stats.agility, 6.0, 140.0))
+		var base := clampf(_stats.top_speed, SPEED_MIN, SPEED_MAX)
+		top_speed = base * speed_scale
+		accel = maxf(_stats.accel, base * 0.12) * speed_scale
+		_speed_scale_at_configure = speed_scale
+		turn_rate = deg_to_rad(clampf(_stats.agility, 6.0, 140.0)) * _arcade_pivot_mult()
+
+
+## Move this ship to a new [member speed_scale] without rebuilding it,
+## by the *ratio* to the scale it was configured with: whatever the ship is
+## doing right now — damage-shrunk engines, a preset's own multipliers, an AI's
+## tuning — is preserved and only the pace changes. This is what lets the
+## Settings dial reach ships already in flight, and reach them all rather than
+## only the one being rebuilt next.
+func rescale_speed(scale: float) -> void:
+	if is_equal_approx(scale, _speed_scale_at_configure) or _speed_scale_at_configure <= 0.0:
+		return
+	var ratio := scale / _speed_scale_at_configure
+	top_speed *= ratio
+	accel *= ratio
+	_speed_scale_at_configure = scale
+
+
+## [member Session.arcade_pivot] while flying arcade, 1.0 in every other mode.
+##
+## Applied to [member turn_rate] at both places it is derived, so a respawn keeps
+## the dial and a mode switch applies or drops it. Arcade's own [member
+## turn_spool] is already near-instant, so this really is "the nose is where you
+## pointed it" rather than a faster version of the same lag.
+func _arcade_pivot_mult() -> float:
+	if control_mode != ControlMode.ARCADE:
+		return 1.0
+	return maxf(Session.arcade_pivot, 0.01)
 
 
 func _physics_process(delta: float) -> void:
@@ -353,6 +426,7 @@ func _physics_process(delta: float) -> void:
 	_integrate_translation(delta)
 	_update_visual_roll(delta)
 	_update_quick_turn(delta)
+	_update_squash(delta)
 	# Collisions are the PhysWorld's job once this model is bound to one; the old
 	# distance-based tests are only a fallback for a model that never joined a
 	# world (the tuning test volume, a combat arena without physics).
@@ -478,8 +552,16 @@ func _integrate_translation(delta: float) -> void:
 	# ridiculous, not capped at a polite ceiling.
 	if gravity != null and gravity.mode != GravitySystem.GravityMode.OFF:
 		var grav_force := gravity.compute_gravity(global_position)
-		velocity += grav_force * gravity_strength * delta
-		var hard_ceiling := top_speed * 30.0
+		# The fast-orbit dial's pull, squared: a circle taken at k times the
+		# circular speed needs k² times the centripetal acceleration, so a ship
+		# the orbital assist is holding is given k² times the gravity to go with
+		# its k times the speed — and it is a real orbit rather than a fake one.
+		# One frame behind the assist, which sets it at the end of its own step;
+		# it is 1.0 for every ship that is not being held, so nothing else feels
+		# it. See [method _fast_orbit_factor].
+		var pull := gravity_strength * _orbital_hold_boost * _orbital_hold_boost
+		velocity += grav_force * pull * delta
+		var hard_ceiling := top_speed * 30.0 * _orbital_hold_boost
 		if velocity.length() > hard_ceiling:
 			velocity = velocity.normalized() * hard_ceiling
 	# Settle into orbit: the assist nudges a coasting ship toward the local
@@ -632,7 +714,13 @@ func _on_impact(impact_speed: float) -> void:
 ## mass is read from [ShipStats]. Once bound, collisions run through the world:
 ## this model writes its velocity each step and reads the solver's impulses and
 ## spin back, and the fallback [_method _check_collision] is disabled.
-func set_phys_world(world: PhysWorld, radius: float) -> void:
+##
+## [param hull], when given, is a compound of ship-space spheres (see
+## [method ShipView.collision_hull]) that replaces the single bounding sphere as
+## the collision shape — a ship is a long box, and the sphere containing it is
+## far too fat across the ship's short axes to collide believably. The radius
+## passed alongside is still what every single-sphere reader sees.
+func set_phys_world(world: PhysWorld, radius: float, hull: Array[Dictionary] = []) -> void:
 	if _phys == null:
 		_phys = PhysBody.new(_ship_mass(), radius)
 		_phys.node = self
@@ -641,6 +729,12 @@ func set_phys_world(world: PhysWorld, radius: float) -> void:
 		_phys.impacted.connect(_on_phys_impacted)
 	else:
 		_phys.radius = radius
+	# set_hull re-derives the enclosing radius from the compound, so it goes last
+	# of the two. An empty hull clears any previous one and leaves the radius.
+	if hull.is_empty():
+		_phys.hull.clear()
+	else:
+		_phys.set_hull(hull)
 	_phys.mass = _ship_mass()
 	_phys.velocity = velocity
 	phys_world = world
@@ -653,6 +747,27 @@ func clear_phys_world() -> void:
 	if phys_world != null and _phys != null:
 		phys_world.remove(_phys)
 	phys_world = null
+
+
+## Re-derive this body's collision volume from rebuilt geometry, without touching
+## the world binding or the mass.
+##
+## A look switch can move a hull's vertices (see [method StyleProfile.roundness],
+## [member StyleProfile.chunkiness]), which moves the compound spheres
+## [method ShipView.collision_hull] produces — so a body left holding the old ones
+## collides along a silhouette it no longer has.
+##
+## Deliberately not [method set_phys_world]: that one is a *binding* call and
+## multiplies mass by the scale factor every time it runs, so using it here would
+## make a ship heavier on every style change.
+func refresh_hull(radius: float, hull: Array[Dictionary]) -> void:
+	if _phys == null:
+		return
+	_phys.radius = radius
+	if hull.is_empty():
+		_phys.hull.clear()
+	else:
+		_phys.set_hull(hull)
 
 
 ## The mass the physics layer resolves this ship with: the fully-loaded mass the
@@ -691,6 +806,46 @@ func _on_phys_impacted(_other: PhysBody, _impulse: float, _point: Vector3, _norm
 		Juice.hitstop(seconds * profile.hitstop_scale, 0.15)
 	# A little shake so even a mid hit reads in the camera.
 	Juice.shake(clampf(closing * 0.002, 0.05, 0.35), 0.3)
+	_trigger_squash(profile, _normal, closing)
+
+
+## Cartoony impact deformation: flatten the hull along the hit normal and bulge
+## it along the other two axes, then let [method _update_squash] ease it back
+## to [constant Vector3.ONE] over [member PhysProfile.squash_recovery] seconds.
+## Consumes [member PhysProfile.squash_amount]/[member squash_recovery] and is
+## gated on [member StyleProfile.squash_enabled] — the style dial exists
+## precisely so this deformation can be turned off for a "grounded" look.
+func _trigger_squash(profile: PhysProfile, normal: Vector3, closing: float) -> void:
+	if _visual == null or profile == null or profile.squash_amount <= 0.0:
+		return
+	var style := StyleManager.instance().current_profile
+	if not style or not style.squash_enabled:
+		return
+	var local_normal := (global_transform.basis.inverse() * normal).normalized()
+	if local_normal.length_squared() < 0.001:
+		local_normal = Vector3.FORWARD
+	# How hard: scales with closing speed past the touch threshold, capped by the
+	# profile's own dial so a plinking hit barely dents while a slam maxes out.
+	var severity := clampf((closing - IMPACT_TOUCH_SPEED) / (IMPACT_DAMAGE_SPEED * 2.0), 0.0, 1.0)
+	var flat := 1.0 - profile.squash_amount * severity * 0.4
+	var bulge := 1.0 + profile.squash_amount * severity * 0.2
+	# Squash along the hit axis, bulge the other two — volume roughly preserved
+	# rather than the hull just shrinking on impact.
+	var axis := local_normal.abs()
+	_squash_scale = Vector3(
+		lerpf(bulge, flat, axis.x), lerpf(bulge, flat, axis.y), lerpf(bulge, flat, axis.z)
+	)
+	_squash_recovery = maxf(profile.squash_recovery, 0.05)
+	_visual.scale = _squash_scale
+
+
+## Eases [member Node3D.scale] on [member _visual] back toward
+## [constant Vector3.ONE] every frame after a squash. Cheap no-op once settled.
+func _update_squash(delta: float) -> void:
+	if _visual == null or _visual.scale.is_equal_approx(Vector3.ONE):
+		return
+	var rate := clampf(delta / _squash_recovery, 0.0, 1.0)
+	_visual.scale = _visual.scale.lerp(Vector3.ONE, rate)
 
 
 ## At the start of each physics step, take back what the solver did to this
@@ -733,6 +888,10 @@ func _active_profile() -> PhysProfile:
 ## into a stable orbit instead of spiralling in; pressing the throttle or
 ## boosting disengages it and the fly-by-wire accelerates you out of the orbit.
 func _apply_orbital_assist(delta: float) -> void:
+	# Assume this ship is not being held; every early return below leaves the
+	# fast-orbit pull switched off, which is what makes the dial apply to ships
+	# in orbit and to nothing else.
+	_orbital_hold_boost = 1.0
 	if assist_mode != 2:
 		return
 	if gravity == null or gravity.mode == GravitySystem.GravityMode.OFF:
@@ -751,13 +910,19 @@ func _apply_orbital_assist(delta: float) -> void:
 	# orbit holds.
 	if absf(command.throttle) > ORBIT_THROTTLE_DEADZONE or command.strafe != Vector3.ZERO or command.boost:
 		return
+	# The speed gate below is what tells "coasting in orbit" from "streaking past
+	# on a fly-by", and a fast orbit is legitimately several times the circular
+	# speed — so it has to be measured against the same dial the target is.
+	var boost := _fast_orbit_factor()
+	if velocity.length() > ORBITAL_ASSIST_MAX_SPEED * boost:
+		return
 	var body := gravity.find_dominant_body(global_position)
 	if body == null:
 		return
 	var to_body := body.position - global_position
 	var dist := to_body.length()
 	var min_r := body.radius * ORBITAL_ASSIST_MIN_R
-	var max_r := body.radius * ORBITAL_ASSIST_MAX_R
+	var max_r := body.relevant_range * maxf(gravity.range_multiplier, 0.1)
 	if dist < min_r or dist > max_r:
 		return
 
@@ -779,9 +944,25 @@ func _apply_orbital_assist(delta: float) -> void:
 			return
 		tangent = fallback.normalized()
 
-	var target := tangent * v_orbit
-	var rate := clampf(delta * ORBITAL_ASSIST_RATE, 0.0, 1.0)
+	var target := tangent * (v_orbit * boost)
+	var rate := clampf(delta * orbital_assist_rate, 0.0, 1.0)
+	# Tell the gravity step above how hard to pull: the dial's k², for as long as
+	# this ship is actually being held (see the pull in [method
+	# _integrate_translation]). Only read back while the assist keeps holding, so
+	# a fast orbit that gets flown out of returns to ordinary gravity at once.
+	_orbital_hold_boost = boost
 	velocity = velocity.lerp(target, rate)
+
+
+## The fast-orbit dial's multiplier for this ship right now — 1.0, a true
+## circular orbit, unless the player has switched it on (see [member
+## Session.fast_orbits]). Read by [method _apply_orbital_assist] for the orbit's
+## speed and by [method _check_orbit] to judge the orbit in the gravity system's
+## own frame rather than the boosted one.
+func _fast_orbit_factor() -> float:
+	if not Session.fast_orbits:
+		return 1.0
+	return maxf(Session.orbit_speed_scale, 1.0)
 
 
 ## Check if the ship is in a stable orbit around any gravitating body.
@@ -807,9 +988,9 @@ func _check_orbit() -> void:
 			_orbit_body_name = ""
 		return
 
-	var in_orbit_now := gravity.is_in_orbit(best_body, global_position, velocity)
+	var in_orbit_now := gravity.is_in_orbit(best_body, global_position, velocity / _fast_orbit_factor())
 	var dist_to_body := global_position.distance_to(best_body.position)
-	var speed := velocity.length()
+	var speed := velocity.length() / _fast_orbit_factor()
 	var v_orbit := gravity.orbit_velocity(best_body, dist_to_body)
 	var v_diff := absf(speed - v_orbit)
 	var pct_off := (v_diff / v_orbit * 100.0) if v_orbit > 0.0 else 0.0

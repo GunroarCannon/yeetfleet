@@ -10,7 +10,7 @@ extends Resource
 
 enum PlanetType { GAS_GIANT, ROCKY }
 
-const FORMAT_VERSION := 3
+const FORMAT_VERSION := 4
 
 ## Default palette — a warm rocky world.
 const DEFAULT_PRIMARY := Color(0.45, 0.32, 0.22)
@@ -67,7 +67,24 @@ const DEFAULT_RING_B := Color(0.55, 0.48, 0.38)
 @export_range(0.0, 10.0, 0.1) var swirl_scale := 3.0
 @export_range(2.0, 20.0, 0.5) var band_count := 8.0
 @export_range(0.0, 1.0, 0.01) var detail_strength := 0.12
+## Axial spin. See [method Planet._process] — the mesh actually turns at this
+## times [constant Planet.SPIN_MULT] rad/s, so "axis rotation speed" is a real
+## per-planet dial rather than a shared constant.
 @export_range(0.0, 1.0, 0.01) var rotation_speed := 0.02
+
+# --- Orbit ---
+## Multiplier on this body's gravity-source strength — how hard *it* pulls its
+## own moons/asteroids/neighbours — independent of [member gravity_mass], which
+## is the player-facing surface pull used for landing/flight feel. A generator
+## placing this body into a live [GravitySystem] scales the mass it registers
+## by this, so two visually identical planets can hold their orbiters with
+## different authority.
+@export_range(0.1, 3.0, 0.05) var orbit_strength := 1.0
+## Multiplier applied to the computed circular-orbit speed when this body is
+## placed into orbit around a parent. 1.0 is a clean circular orbit; higher
+## overshoots into a faster, more eccentric path, lower undershoots into one
+## that dips closer to its parent each pass.
+@export_range(0.2, 3.0, 0.05) var orbit_speed := 1.0
 
 # --- Terrain ---
 # What the seed actually drives. Fed to the two [FastNoiseLite] layers that
@@ -148,6 +165,8 @@ func to_dict() -> Dictionary:
 		"band_count": band_count,
 		"detail": detail_strength,
 		"rotation": rotation_speed,
+		"orbit_strength": orbit_strength,
+		"orbit_speed": orbit_speed,
 		"resolution": sphere_resolution,
 		"radius": planet_radius,
 		"terrain_height": terrain_height,
@@ -190,6 +209,11 @@ static func from_dict(d: Dictionary) -> PlanetData:
 	p.band_count = float(d.get("band_count", 8.0))
 	p.detail_strength = float(d.get("detail", 0.12))
 	p.rotation_speed = float(d.get("rotation", 0.02))
+	# Format 3 and earlier predate these two — default to "plain circular orbit,
+	# ordinary gravitational authority" so an old file's bodies behave exactly
+	# as they always did.
+	p.orbit_strength = float(d.get("orbit_strength", 1.0))
+	p.orbit_speed = float(d.get("orbit_speed", 1.0))
 	p.sphere_resolution = int(d.get("resolution", 48))
 	p.planet_radius = float(d.get("radius", 5.0))
 	# Format 1 predates terrain entirely, so those files load with the defaults.

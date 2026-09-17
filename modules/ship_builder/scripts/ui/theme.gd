@@ -12,25 +12,6 @@ extends RefCounted
 # Dark, low-saturation greys so the ship and its accent colours are the only
 # saturated things on screen.
 
-const BG_DEEP := Color("0b0e13")
-const BG_PANEL := Color("141922")
-const BG_PANEL_ALT := Color("1b2230")
-const BG_FIELD := Color("0e131b")
-const BG_HOVER := Color("232c3d")
-const BORDER := Color("2b3546")
-const BORDER_STRONG := Color("3f4c63")
-
-const TEXT := Color("d7dee8")
-const TEXT_DIM := Color("8b97a8")
-const TEXT_STRONG := Color("f2f6fb")
-
-const ACCENT := Color("39c0ff")
-const ACCENT_DIM := Color("1d6f96")
-const GOOD := Color("5ddba0")
-const WARN := Color("ffc65c")
-const BAD := Color("ff7a6b")
-const SELECT := Color("ffd84d")
-
 # High-contrast overrides. Not a separate theme: only the values that fail a
 # contrast check are replaced, so the layout never shifts when the toggle flips.
 const HC_BG_PANEL := Color("000000")
@@ -56,6 +37,15 @@ const TOUCH_MIN := 44
 const GAP := 6
 const PAD := 10
 
+## The interface's colours come from the active [Palette]'s "Interface" roles, so
+## switching palettes restyles the whole UI along with the world. The `HC_*`
+## constants above override it outright when high contrast is on: that toggle
+## exists to guarantee legibility, which is not something a palette gets a vote on.
+##
+## Metrics (TOUCH_MIN, GAP, PAD) stay constants. They are the ergonomics of the
+## interface, not its look, and a palette has no business changing how big a
+## thumb target is.
+##
 ## Reference resolution, matching the project's stretch settings. The scale the
 ## stretch system has already applied has to be divided back out before a density
 ## correction can be applied on top of it.
@@ -111,47 +101,62 @@ static func density_scale(window_px: Vector2) -> float:
 
 
 static func text() -> Color:
-	return HC_TEXT if high_contrast else TEXT
+	return HC_TEXT if high_contrast else Palette.color("ui_text")
 
 
 static func text_dim() -> Color:
-	return HC_TEXT_DIM if high_contrast else TEXT_DIM
+	return HC_TEXT_DIM if high_contrast else Palette.color("ui_text_dim")
 
 
 static func accent() -> Color:
-	return HC_ACCENT if high_contrast else ACCENT
+	return HC_ACCENT if high_contrast else Palette.color("ui_accent")
 
 
 static func good() -> Color:
-	return HC_GOOD if high_contrast else GOOD
+	return HC_GOOD if high_contrast else Palette.color("ui_good")
 
 
 static func warn() -> Color:
-	return HC_WARN if high_contrast else WARN
+	return HC_WARN if high_contrast else Palette.color("ui_warn")
 
 
 static func bad() -> Color:
-	return HC_BAD if high_contrast else BAD
+	return HC_BAD if high_contrast else Palette.color("ui_bad")
+
+
+static func select() -> Color:
+	return Color.WHITE if high_contrast else Palette.color("ui_select")
 
 
 static func panel_bg() -> Color:
-	return HC_BG_PANEL if high_contrast else BG_PANEL
+	return HC_BG_PANEL if high_contrast else Palette.color("ui_bg_panel")
 
 
 static func panel_alt_bg() -> Color:
-	return HC_BG_PANEL_ALT if high_contrast else BG_PANEL_ALT
+	return HC_BG_PANEL_ALT if high_contrast else Palette.color("ui_bg_panel_alt")
 
 
 static func field_bg() -> Color:
-	return HC_BG_FIELD if high_contrast else BG_FIELD
+	return HC_BG_FIELD if high_contrast else Palette.color("ui_bg_field")
+
+
+## The panel colour at full strength — the void behind the whole interface. Panels
+## sit on it, so it is darker than any of them.
+static func bg_deep() -> Color:
+	return Color.BLACK if high_contrast else Palette.color("ui_bg_deep")
+
+
+## Background for a control the cursor is over.
+static func hover_bg() -> Color:
+	return HC_BG_PANEL_ALT if high_contrast else Palette.color("ui_bg_hover")
 
 
 static func border() -> Color:
-	return HC_BORDER if high_contrast else BORDER
+	return HC_BORDER if high_contrast else Palette.color("ui_border")
 
 
 static func border_strong() -> Color:
-	return HC_BORDER_STRONG if high_contrast else BORDER_STRONG
+	return HC_BORDER_STRONG if high_contrast else Palette.color("ui_border_strong")
 
 
 ## Colour for a stat's delta: green when the change is an improvement.
@@ -220,7 +225,7 @@ static func build() -> Theme:
 	# Buttons. The focus style is a bright outline rather than a subtle tint,
 	# because keyboard users need to see where they are at a glance.
 	var btn := flat(panel_alt_bg(), border(), 4)
-	var btn_hover := flat(HC_BG_PANEL_ALT if high_contrast else BG_HOVER, border_strong(), 4)
+	var btn_hover := flat(hover_bg(), border_strong(), 4)
 	var btn_pressed := flat(accent().darkened(0.55), accent(), 4)
 	var btn_disabled := flat(panel_bg(), border().darkened(0.4), 4)
 	var btn_focus := flat(Color.TRANSPARENT, accent(), 4, 2)
@@ -248,10 +253,10 @@ static func build() -> Theme:
 
 	t.set_stylebox("panel", "Tree", flat(field_bg(), border(), 4))
 	t.set_color("font_color", "Tree", text())
-	t.set_color("font_selected_color", "Tree", BG_DEEP if not high_contrast else Color.BLACK)
+	t.set_color("font_selected_color", "Tree", bg_deep() if not high_contrast else Color.BLACK)
 	t.set_stylebox("selected", "Tree", flat(accent().darkened(0.2), Color.TRANSPARENT, 3))
 	t.set_stylebox("selected_focus", "Tree", flat(accent(), Color.TRANSPARENT, 3))
-	t.set_stylebox("hovered", "Tree", flat(BG_HOVER, Color.TRANSPARENT, 3))
+	t.set_stylebox("hovered", "Tree", flat(hover_bg(), Color.TRANSPARENT, 3))
 	t.set_stylebox("focus", "Tree", flat(Color.TRANSPARENT, accent(), 4, 2))
 	t.set_constant("v_separation", "Tree", 5)
 	t.set_color("guide_color", "Tree", border())
@@ -260,7 +265,7 @@ static func build() -> Theme:
 	t.set_stylebox("panel", "ScrollContainer", empty())
 	t.set_stylebox("tab_selected", "TabContainer", flat(panel_alt_bg(), accent(), 4))
 	t.set_stylebox("tab_unselected", "TabContainer", flat(panel_bg(), border(), 4))
-	t.set_stylebox("tab_hovered", "TabContainer", flat(BG_HOVER, border_strong(), 4))
+	t.set_stylebox("tab_hovered", "TabContainer", flat(hover_bg(), border_strong(), 4))
 	t.set_stylebox("panel", "TabContainer", flat(panel_bg(), border(), 4))
 	t.set_color("font_selected_color", "TabContainer", text_strong_color())
 	t.set_color("font_unselected_color", "TabContainer", text_dim())
@@ -278,7 +283,7 @@ static func build() -> Theme:
 	t.set_color("font_hover_color", "PopupMenu", text_strong_color())
 	t.set_constant("v_separation", "PopupMenu", 4)
 
-	t.set_stylebox("panel", "TooltipPanel", flat(BG_DEEP, accent(), 4))
+	t.set_stylebox("panel", "TooltipPanel", flat(bg_deep(), accent(), 4))
 	t.set_color("font_color", "TooltipLabel", text())
 
 	t.set_constant("separation", "VBoxContainer", GAP)
@@ -287,11 +292,11 @@ static func build() -> Theme:
 
 
 static func text_strong_color() -> Color:
-	return Color.WHITE if high_contrast else TEXT_STRONG
+	return Color.WHITE if high_contrast else Palette.color("ui_text_strong")
 
 
 static func accent_dim_color() -> Color:
-	return HC_ACCENT.darkened(0.4) if high_contrast else ACCENT_DIM
+	return HC_ACCENT.darkened(0.4) if high_contrast else Palette.color("ui_accent_dim")
 
 
 ## A small coloured square used as a legend swatch, built as an icon so it can sit

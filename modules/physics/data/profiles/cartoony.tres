@@ -17,3 +17,5 @@ assist_lockout_on_impact = 0.35
 hitstop_scale = 1.2
 hitstop_max = 0.09
 gravity_falloff = 1.75
+squash_amount = 1.5
+squash_recovery = 0.3

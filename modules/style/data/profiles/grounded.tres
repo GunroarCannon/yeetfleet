@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="StyleProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/style/scripts/style_profile.gd" id="1_grounded_profile"]
+
+[resource]
+script = ExtResource("1_grounded_profile")
+id = "grounded"
+display_name = "Grounded"
+roundness = 0.0
+chunkiness = 0.0
+rock_potato = 0.0
+shading_bands = 0
+outline_width = 0.0
+outline_color = Color(0, 0, 0, 1)
+spec_amount = 1.0
+rim_amount = 1.0
+palette_saturation = 1.0
+palette_lift = 0.0
+planet_detail = 1.0
+planet_bands = 0.0
+star_count = 900
+star_size = 1.0
+squash_enabled = false

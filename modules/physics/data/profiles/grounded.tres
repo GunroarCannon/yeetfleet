@@ -4,3 +4,18 @@
 
 [resource]
 script = ExtResource("1_6g88l")
+restitution_ship = 0.4
+restitution_rock = 0.25
+restitution_planet = 0.6
+knock_transfer = 1.0
+impulse_to_spin = 0.3
+friction = 0.25
+position_correction = 0.2
+spin_damp_induced = 1.5
+spin_damp_assist = 4.0
+assist_lockout_on_impact = 0.6
+hitstop_scale = 0.8
+hitstop_max = 0.04
+gravity_falloff = 2.0
+squash_amount = 0.0
+squash_recovery = 0.5

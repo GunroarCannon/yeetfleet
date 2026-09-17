@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3 uid="UID://example_uid_2"]
+
+[ext_resource type="Script" path="res://modules/style_lab/scripts/style_lab_root.gd" id="1_style_lab_root"]
+
+[node name="StyleLab" type="Node3D"]
+script = ExtResource("1_style_lab_root")
+
+[node name="ShipPreview" type="CharacterBody3D" parent="."]
+[node name="PlanetPreview" type="StaticBody3D" parent="."]
+
+# UI would go here in a real implementation
+# For now, this establishes the basic structure

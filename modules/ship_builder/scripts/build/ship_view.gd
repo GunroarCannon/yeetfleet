@@ -12,6 +12,10 @@ var parts_root: Node3D = null
 var sockets_root: Node3D = null
 var resolution: DesignResolution = null
 
+## The design this view was built from. Kept so [method restyle] can re-derive
+## part colours without its caller having to hold the design alongside the view.
+var design: ShipDesign = null
+
 ## placement path -> node
 var part_nodes: Dictionary = {}
 var part_meshes: Dictionary = {}
@@ -35,6 +39,10 @@ var eyes: Array[Dictionary] = []
 
 ## Ship-space bounds of all part geometry.
 var aabb := AABB()
+## Ship-space bounds of each placement's geometry, in the same space as
+## [member aabb] and in the same order as [member resolution]'s placements.
+## Feeds [method collision_hull].
+var part_boxes: Array[AABB] = []
 
 ## Corner brackets drawn around the selected part. Built lazily and resized in
 ## place, because selection changes on every tap.
@@ -45,6 +53,11 @@ var _hovered_path := ""
 var _emphasised_socket := ""
 var _filter_part: ShipPart = null
 var _sockets_visible := false
+
+## The uniform scale [method apply_scale] was last called with. Kept so
+## [method _recompute_bounds] can re-derive ship-space bounds at the size the ship
+## is actually drawn at, instead of at the unit scale the meshes are built in.
+var _scale := 1.0
 
 
 ## Node names cannot contain "/", placement paths can, so keep them separate.
@@ -62,21 +75,144 @@ func has_path(path: String) -> bool:
 ## scales by the same factor. That way camera framing, collision radius, plumes
 ## and shots all agree with the bigger visuals without any of them knowing a
 ## scale exists. A no-op at the default scale of 1.
+##
+## Remembered on [member _scale] so that a later [method rebuild_meshes] re-derives
+## the bounds at the same size rather than snapping the ship back to unit scale.
 func apply_scale(s: float) -> void:
 	if is_equal_approx(s, 1.0):
 		return
+	_scale = s
 	root.scale = Vector3.ONE * s
 	aabb.position *= s
 	aabb.size *= s
+	var scaled_boxes: Array[AABB] = []
+	for box in part_boxes:
+		scaled_boxes.append(AABB(box.position * s, box.size * s))
+	part_boxes = scaled_boxes
 	_scale_offsets(muzzles, s)
 	_scale_offsets(exhausts, s)
 	_scale_offsets(eyes, s)
+
+
+## Re-ask [PartMeshFactory] for every part's mesh and swap it in place.
+##
+## A geometry style dial changes the mesh a part resolves to, but a ship already in
+## the scene is holding the old one — its [MeshInstance3D]s point at meshes built
+## under the previous look. This replaces the geometry without rebuilding the node
+## tree, so parts keep their colour overrides, selection state and markers.
+##
+## The factory's cache is keyed by the look, so every part already built under this
+## look is a hit and only the first switch to a look pays for the geometry.
+func rebuild_meshes() -> void:
+	for placement in resolution.placements:
+		var inst := part_meshes.get(placement.path) as MeshInstance3D
+		if inst == null:
+			continue
+		inst.mesh = PartMeshFactory.build(placement.part, placement.mirrored).mesh
+	_recompute_bounds()
+
+
+## Bring this ship fully up to date with the current look and palette: new geometry
+## where a geometry dial moved, and refreshed shader uniforms and outline
+## everywhere.
+##
+## One call rather than two because the halves have to happen together — a switch
+## that replaced geometry but left the previous outline pass attached is
+## half-applied, and every consumer that owns a [ShipView] would otherwise have to
+## remember to do both.
+##
+## A whole new [ShipView] would also work, and is what a design change does, but
+## that throws away selection, hover and socket state; a look switch is not a
+## design change and should not feel like one.
+func restyle() -> void:
+	rebuild_meshes()
+	for path: Variant in part_materials:
+		var mat := part_materials[path] as ShaderMaterial
+		if mat == null:
+			continue
+		var overrides: Dictionary = part_overrides.get(path, {})
+		ShipMaterials.apply_palette(mat, design, overrides)
+		ShipMaterials.apply_outline(mat)
+
+
+## Re-derive the ship-space bounds and per-part boxes from the current meshes, and
+## resize the pick areas to match.
+##
+## Chunkiness moves vertices, so a look switch that fattens or slims a hull also
+## moves every number derived from its geometry: the box the camera frames, the
+## per-part boxes the collision hull is built from, and the pick areas that decide
+## what a tap on the hull actually hits.
+func _recompute_bounds() -> void:
+	var boxes: Array[AABB] = []
+	var bounds := AABB()
+	var first := true
+	for placement in resolution.placements:
+		var built := PartMeshFactory.build(placement.part, placement.mirrored)
+		var box: AABB = placement.xform * built.aabb
+		if not is_equal_approx(_scale, 1.0):
+			box = AABB(box.position * _scale, box.size * _scale)
+		boxes.append(box)
+		if first:
+			bounds = box
+			first = false
+		else:
+			bounds = bounds.merge(box)
+	part_boxes = boxes
+	aabb = AABB(Vector3(-1, -0.5, -1), Vector3(2, 1, 2)) if first else bounds
+	_resize_pick_areas()
+
+
+## Match each part's pick box to its current bounds. A hull that grew under the new
+## look would otherwise have dead patches where the geometry now reaches past its
+## old collider — most visible on the builder's tap-to-select, which would stop
+## responding on exactly the parts that just got fatter.
+func _resize_pick_areas() -> void:
+	for i in resolution.placements.size():
+		var placement := resolution.placements[i]
+		var holder := part_nodes.get(placement.path) as Node3D
+		if holder == null:
+			continue
+		var area := holder.get_node_or_null("Pick") as Area3D
+		if area == null or area.get_child_count() == 0:
+			continue
+		var shape := area.get_child(0) as CollisionShape3D
+		if shape == null or not (shape.shape is BoxShape3D):
+			continue
+		var box: AABB = part_boxes[i]
+		(shape.shape as BoxShape3D).size = Vector3(
+			maxf(box.size.x, ShipAssembler.MIN_PICK_SIZE.x),
+			maxf(box.size.y, ShipAssembler.MIN_PICK_SIZE.y),
+			maxf(box.size.z, ShipAssembler.MIN_PICK_SIZE.z)
+		)
+		shape.position = box.get_center()
 
 
 func _scale_offsets(list: Array[Dictionary], s: float) -> void:
 	for entry in list:
 		if entry.has("xform"):
 			(entry["xform"] as Transform3D).origin *= s
+
+
+## The ship's collision hull in ship space, for [PhysBody.set_hull]: one
+## `{offset: Vector3, radius: float}` per hull section. Empty when the design
+## built no geometry at all, in which case the caller's single sphere stands.
+##
+## A ship is not a sphere. Its bounds describe a long box, and the one sphere
+## that encloses that box is enormous across the ship's short axes — two ships
+## passing with two metres of clearance used to collide, because each was
+## carrying a five-metre ball. Here each part's bounds become a chain of spheres
+## down its longest axis, sized to that part's own cross-section, so contact
+## happens where the geometry is and the separating push runs along the
+## direction the hulls actually met.
+##
+## The fitting itself lives in [method HullFit.append_box_spheres], next to the
+## [member PhysBody.hull] it produces, because large craft need the identical
+## answer for their own parts.
+func collision_hull() -> Array[Dictionary]:
+	var hull: Array[Dictionary] = []
+	for box in part_boxes:
+		HullFit.append_box_spheres(box, hull)
+	return hull
 
 
 func material_for(path: String) -> ShaderMaterial:
@@ -155,7 +291,7 @@ func _refresh_highlights() -> void:
 			amount = 1.0
 		elif owner_path == _hovered_path:
 			amount = 0.45
-			color = ShipMaterials.COL_HOVER
+			color = ShipMaterials.hover_color()
 		ShipMaterials.set_highlight(mat, amount, color)
 		# Only dim when something is selected, and never dim the selection or the
 		# thing under the cursor.

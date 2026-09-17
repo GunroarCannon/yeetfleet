@@ -22,9 +22,17 @@ class Built extends RefCounted:
 		return markers.get(key, [])
 
 
-## Keyed "part_id|mirror". Meshes are immutable once built and shared between
-## every instance of that part, so a fifty-part ship still holds a handful of
-## meshes.
+## Keyed "part_id|mirror|style". Meshes are immutable once built and shared
+## between every instance of that part, so a fifty-part ship still holds a handful
+## of meshes.
+##
+## The style token is part of the key rather than a reason to throw the cache away.
+## The geometry dials (roundness, chunkiness, rock_potato) change the mesh a part
+## resolves to, so a look switch has to hand back different geometry — but keying
+## on the look means switching to cartoony and back to grounded are both cache
+## hits after the first time, instead of rebuilding every hull on every flip. The
+## cost is one mesh per part per look actually used, which is nothing next to
+## regenerating the geometry each switch.
 static var _cache: Dictionary = {}
 
 
@@ -32,8 +40,21 @@ static func clear_cache() -> void:
 	_cache.clear()
 
 
+## The current geometry look, for the cache key.
+##
+## Only dials that change mesh *topology* belong here. A shading dial — bands,
+## outline width, specular — is a uniform on a material and has no business
+## invalidating geometry, so it deliberately earns no token: dragging the toon
+## ramp slider must not rebuild a single hull.
+static func style_token() -> String:
+	var style := StyleManager.instance().current_profile
+	if style == null:
+		return "default"
+	return "%.3f_%.3f_%.3f" % [style.roundness, style.chunkiness, style.rock_potato]
+
+
 static func build(part: ShipPart, mirrored := false) -> Built:
-	var key := "%s|%d" % [part.id, 1 if mirrored else 0]
+	var key := "%s|%d|%s" % [part.id, 1 if mirrored else 0, style_token()]
 	if _cache.has(key):
 		return _cache[key]
 	var built := _generate(part, mirrored)
@@ -60,8 +81,17 @@ static func _generate(part: ShipPart, mirrored: bool) -> Built:
 		_: markers = _box(lp, spec)
 
 	var built := Built.new()
-	built.mesh = lp.commit(part.id)
-	built.aabb = lp.bounds()
+	var mesh := lp.commit(part.id)
+	var style := StyleManager.instance().current_profile
+	if style and (style.roundness > 0.0 or style.chunkiness > 0.0):
+		var rounding := MeshRounding.new()
+		rounding.roundness = style.roundness
+		rounding.chunkiness = style.chunkiness
+		mesh = rounding.apply(mesh) as ArrayMesh
+	built.mesh = mesh
+	# Chunkiness moves vertices, so the cached AABB is read back off the final
+	# mesh rather than off [LowPoly]'s pre-rounding bounds.
+	built.aabb = mesh.get_aabb()
 	built.markers = _mirror_markers(markers, mirrored)
 	return built
 

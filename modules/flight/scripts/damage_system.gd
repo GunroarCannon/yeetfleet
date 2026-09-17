@@ -15,6 +15,14 @@ class_name DamageSystem
 extends RefCounted
 
 
+## The slowest a [constant EffectType.SPEED_PENALTY] may leave a ship, so a
+## wrecked engine cripples it without stopping it dead. Scaled by the ship's own
+## speed — see [member FlightModel.speed_scale] at the one place this is read: a
+## floor fixed at 60 m/s would sit *above* the top speed of a ship the player had
+## already slowed, and the penalty would silently stop doing anything at all.
+const SPEED_PENALTY_FLOOR := 60.0
+
+
 ## Available effect types. Each one is a named modifier to the flight model.
 ## Adding a new effect here is the first step; the handler in [method
 ## _apply_effect] does the rest.
@@ -235,7 +243,9 @@ func _apply_effect(effect: DamageEffect) -> void:
 				_model.accel = _model.top_speed * 0.05
 		EffectType.SPEED_PENALTY:
 			_model.top_speed *= (1.0 - effect.strength)
-			_model.top_speed = maxf(_model.top_speed, 60.0)
+			_model.top_speed = maxf(
+				_model.top_speed, SPEED_PENALTY_FLOOR * _model.speed_scale
+			)
 		EffectType.CONTROL_LOSS:
 			_model.turn_rate *= (1.0 - effect.strength)
 			_model.turn_rate = maxf(_model.turn_rate, 0.1)

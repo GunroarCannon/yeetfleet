@@ -1,0 +1,40 @@
+[gd_resource type="Resource" script_class="Palette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/style/scripts/palette.gd" id="1_rkhf7"]
+
+[resource]
+script = ExtResource("1_rkhf7")
+id = "mono"
+display_name = "Mono"
+background = Color(0.039215688, 0.039215688, 0.039215688, 1)
+ambient = Color(0.2, 0.2, 0.2, 1)
+star = Color(0.9490196, 0.9490196, 0.9490196, 1)
+nebula_core = Color(0.54901963, 0.54901963, 0.54901963, 1)
+nebula_edge = Color(0.18039216, 0.18039216, 0.18039216, 1)
+hull_primary = Color(0.4509804, 0.4509804, 0.4509804, 1)
+hull_accent = Color(0.72156864, 0.72156864, 0.72156864, 1)
+hull_trim = Color(0.12156863, 0.12156863, 0.12156863, 1)
+rock_light = Color(0.6509804, 0.6509804, 0.6509804, 1)
+rock_mid = Color(0.47843137, 0.47843137, 0.47843137, 1)
+rock_dark = Color(0.27058825, 0.27058825, 0.27058825, 1)
+rock_accent = Color(0.7882353, 0.7882353, 0.7882353, 1)
+metal_light = Color(0.8509804, 0.8509804, 0.8509804, 1)
+metal_mid = Color(0.54901963, 0.54901963, 0.54901963, 1)
+metal_dark = Color(0.14901961, 0.14901961, 0.14901961, 1)
+planet_primary = Color(0.47843137, 0.47843137, 0.47843137, 1)
+planet_secondary = Color(0.6784314, 0.6784314, 0.6784314, 1)
+planet_water = Color(0.23921569, 0.23921569, 0.23921569, 1)
+planet_ring = Color(0.7490196, 0.7490196, 0.7490196, 1)
+planet_cloud = Color(0.92941177, 0.92941177, 0.92941177, 1)
+planet_atmosphere = Color(0.61960787, 0.61960787, 0.61960787, 1)
+ui_accent = Color(0.8156863, 0.8156863, 0.8156863, 1)
+ui_accent_dim = Color(0.43137255, 0.43137255, 0.43137255, 1)
+ui_good = Color(0.76862746, 0.76862746, 0.76862746, 1)
+ui_warn = Color(0.9098039, 0.9098039, 0.9098039, 1)
+ui_bad = Color(0.6039216, 0.6039216, 0.6039216, 1)
+ui_select = Color(0.9490196, 0.9490196, 0.9490196, 1)
+valid = Color(0.8156863, 0.8156863, 0.8156863, 1)
+invalid = Color(0.56078434, 0.56078434, 0.56078434, 1)
+socket = Color(0.5411765, 0.5411765, 0.5411765, 1)
+grid = Color(0.55, 0.55, 0.55, 0.35)
+beam = Color(0.8784314, 0.8784314, 0.8784314, 1)

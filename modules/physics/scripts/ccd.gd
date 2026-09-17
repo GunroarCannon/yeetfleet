@@ -18,6 +18,11 @@ extends RefCounted
 ## a quadratic for a body that barely moved invites floating-point noise.
 const STATIC_EPSILON := 1e-9
 
+## [method impact_time]'s two non-answers: the pair never touches within the
+## step, or they start the step already touching.
+const NO_HIT := INF
+const ALREADY_OVERLAPPING := -1.0
+
 
 ## Where, if anywhere, A's swept sphere hits B's during a step of `delta`
 ## seconds. Returns a Dictionary with:
@@ -30,6 +35,27 @@ static func hit_info(
 	b_pos: Vector3, b_vel: Vector3, b_radius: float,
 	delta: float
 ) -> Dictionary:
+	var t := impact_time(a_pos, a_vel, a_radius, b_pos, b_vel, b_radius, delta)
+	if t == NO_HIT:
+		return _miss()
+	var at := maxf(t, 0.0)
+	var normal := normal_at(a_pos, a_vel, b_pos, b_vel, delta, at)
+	return {"hit": true, "t": at, "normal": normal, "point": b_pos - normal * b_radius}
+
+
+## When A's swept sphere first touches B's, as a time in [0, 1] along the step —
+## [constant NO_HIT] if it never does, [constant ALREADY_OVERLAPPING] if the pair
+## starts the step touching.
+##
+## The same maths [method hit_info] does, split out so a caller sweeping many
+## sphere pairs against each other can find the earliest one without building a
+## Dictionary per pair: a ship's hull is dozens of spheres, and the pair scan an
+## allocation each ran into milliseconds.
+static func impact_time(
+	a_pos: Vector3, a_vel: Vector3, a_radius: float,
+	b_pos: Vector3, b_vel: Vector3, b_radius: float,
+	delta: float
+) -> float:
 	# A's motion relative to B. Treating B as still and A as sweeping keeps the
 	# maths one quadratic instead of two moving spheres.
 	var move := (a_vel - b_vel) * delta
@@ -38,38 +64,35 @@ static func hit_info(
 
 	var move_len2 := move.length_squared()
 	if move_len2 <= STATIC_EPSILON:
-		var d2 := f.length_squared()
-		if d2 < radius * radius:
-			return _hit(0.0, -f, b_pos, b_radius)
-		return _miss()
+		if f.length_squared() < radius * radius:
+			return ALREADY_OVERLAPPING
+		return NO_HIT
 
 	# |f + move·t|² = radius²  →  a·t² + 2b·t + c = 0
-	var a_coef := move_len2
 	var b_coef := f.dot(move)
 	var c_coef := f.length_squared() - radius * radius
 	if c_coef <= 0.0:
 		# Already overlapping at the start of the step.
-		return _hit(0.0, -f, b_pos, b_radius)
+		return ALREADY_OVERLAPPING
 
-	var disc := b_coef * b_coef - a_coef * c_coef
+	var disc := b_coef * b_coef - move_len2 * c_coef
 	if disc < 0.0:
-		return _miss()
-	var t := (-b_coef - sqrt(disc)) / a_coef
+		return NO_HIT
+	var t := (-b_coef - sqrt(disc)) / move_len2
 	if t < 0.0 or t > 1.0:
 		# Second root: first contact is behind us (t<0) or after the step (t>1).
-		return _miss()
-	var impact := a_pos + move * t
-	return _hit(t, b_pos - impact, b_pos, b_radius)
+		return NO_HIT
+	return t
 
 
-static func _hit(t: float, toward_b: Vector3, b_pos: Vector3, b_radius: float) -> Dictionary:
-	var normal := _normal_or(toward_b, Vector3.UP)
-	return {
-		"hit": true,
-		"t": t,
-		"normal": normal,
-		"point": b_pos - normal * b_radius,
-	}
+## The unit normal from A's centre toward B's at contact, for an impact found at
+## [param t] by [method impact_time] — the two must be given the same arguments.
+static func normal_at(
+	a_pos: Vector3, a_vel: Vector3, b_pos: Vector3, b_vel: Vector3, delta: float, t: float
+) -> Vector3:
+	var move := (a_vel - b_vel) * delta
+	var impact := a_pos + move * maxf(t, 0.0)
+	return _normal_or(b_pos - impact, Vector3.UP)
 
 
 static func _miss() -> Dictionary:

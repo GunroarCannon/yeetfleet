@@ -20,6 +20,13 @@ extends Node3D
 const SKY_RADIUS := 14000.0
 const STAR_COUNT := 900
 
+## Points on a cartoony star. Five — the shape everyone draws.
+const STAR_POINTS := 5
+## How far in a star's valleys sit at full depth, as a fraction of its tip radius.
+## Valleys at 0.45 of the tips is about what a drawn cartoon star uses — shallower
+## than that and the points read as soft blobs rather than points.
+const STAR_VALLEY_DEPTH := 0.55
+
 ## The asteroid belt the player flies through, in metres from the origin.
 const BELT_INNER := 900.0
 const BELT_OUTER := 2600.0
@@ -40,6 +47,11 @@ const PLANET2_RADIUS := 600.0
 const PLANET3_CENTRE := Vector3(-3000.0, 5500.0, -7500.0)
 const PLANET3_RADIUS := 220.0
 
+## Asteroid spawning
+const FLOATING_ASTEROID_COUNT := 50  # Number of floating asteroids to spawn
+const FLOATING_ASTEROID_MIN_DIST := 5000.0  # Minimum distance from origin
+const FLOATING_ASTEROID_MAX_DIST := 15000.0  # Maximum distance from origin
+
 ## Direction of the star, and the direction the key light comes from, so the lit
 ## side of a ship always faces the visible sun.
 const SUN_DIR := Vector3(0.42, 0.28, 0.86)
@@ -57,6 +69,7 @@ var planet2_radius := PLANET2_RADIUS
 var planet3_centre := PLANET3_CENTRE
 var planet3_radius := PLANET3_RADIUS
 
+var corona
 
 func _enter_tree() -> void:
 	var size_scale := Session.planet_scale
@@ -82,6 +95,10 @@ var _rng := RandomNumberGenerator.new()
 var asteroid_data: Array[Dictionary] = []
 ## Per-asteroid rotation speed (rad/s), seeded from the same RNG.
 var _asteroid_spin: Array[float] = []
+
+## Floating asteroids (not in belts) for dynamic spawning
+var floating_asteroid_data: Array[Dictionary] = []
+var _floating_asteroid_spin: Array[float] = []
 ## The three belt MultiMesh instances, for per-frame tumbling updates.
 var _belt_multimeshes: Array[MultiMeshInstance3D] = []
 ## Near-field close-pass rocks: small, close, the speed cue.
@@ -123,8 +140,14 @@ func _ready() -> void:
 	_build_extra_planets()
 	_build_station()
 	_build_belt()
+	_build_floating_asteroids()
 	# Expose asteroid positions for collision in FlightModel.
 	set_meta("asteroid_data", asteroid_data)
+	set_meta("floating_asteroid_data", floating_asteroid_data)
+	# star_count/star_size are shading dials (apply live); the starfield mesh is
+	# built once at _ready like everything else in this scene, so a style change
+	# needs an explicit rebuild rather than a per-frame read.
+	StyleManager.instance().style_changed.connect(_on_style_changed)
 
 
 ## Called by FlightRoot to give the moon access to the gravity system.
@@ -284,6 +307,22 @@ func _process(delta: float) -> void:
 		mm.multimesh.set_instance_transform(int(body.node.get_meta("j")), body.node.global_transform)
 
 
+# Floating asteroids tumble.
+	if floating_asteroid_data.size() > 0:
+		for i in floating_asteroid_data.size():
+			var anchor: Node3D = floating_asteroid_data[i]["node"]
+			if anchor == null:
+				continue
+			var spin_speed: float = _floating_asteroid_spin[i]
+			var t: Transform3D = anchor.transform
+			var spin := Basis(Vector3(
+				sin(float(i) * 1.7),
+				cos(float(i) * 2.3),
+				sin(float(i) * 3.1)
+			).normalized(), spin_speed * delta)
+			t.basis = (spin * t.basis).orthonormalized()
+			anchor.transform = t
+
 ## The dome and the starfield have no parallax, so they must ride with the camera
 ## or the player flies out of the sky. Called by the camera rig each frame.
 func recentre(camera_position: Vector3) -> void:
@@ -296,13 +335,13 @@ func recentre(camera_position: Vector3) -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("03050a")
+	env.background_color = Palette.color("background")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	# Space has no bounce light, but a pitch-black shadow side turns a ship into
 	# a featureless silhouette — and any camera pointed at the night side (the
 	# rear view, a chase view into shadow) goes completely dark. A cold, fairly
 	# strong ambient keeps geometry readable from every angle.
-	env.ambient_light_color = Color("2a3448")
+	env.ambient_light_color = Palette.color("ambient")
 	env.ambient_light_energy = 0.85
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	# Lower than the flight test volume's 4.0: refs 3 and 4 both clip bright
@@ -326,7 +365,10 @@ func _build_environment() -> void:
 	var key := DirectionalLight3D.new()
 	key.name = "SunLight"
 	key.light_energy = 1.5
-	key.light_color = Color("fff2dd")
+	# The palette's star colour, pulled most of the way to white: this is the
+	# light the star *casts*, not the star's own disc, and a saturated light
+	# tints every hull in the system.
+	key.light_color = Palette.color("star").lerp(Color.WHITE, 0.5)
 	key.shadow_enabled = false
 	key.look_at_from_position(Vector3.ZERO, -SUN_DIR, Vector3.UP)
 	add_child(key)
@@ -336,10 +378,45 @@ func _build_environment() -> void:
 	var fill := DirectionalLight3D.new()
 	fill.name = "PlanetFill"
 	fill.light_energy = 0.32
-	fill.light_color = Color("5f7fbf")
+	fill.light_color = Palette.color("ambient").lightened(0.35)
 	fill.shadow_enabled = false
 	fill.look_at_from_position(Vector3.ZERO, planet_centre.normalized(), Vector3.UP)
 	add_child(fill)
+
+	# Enhanced background: solar corona, a distant galaxy and nebula dust. A
+	# per-session toggle (Settings → Quality) so it can be switched off for a
+	# plain starfield; changed dials apply on the next scene restart.
+	if Session.render_backdrop:
+		# Solar corona - extended glow around the sun
+		corona = _make_glow_sphere(800.0, Color(Palette.color("star"), 0.1), 3)
+		corona.name = "SolarCorona"
+		corona.position = Vector3.ZERO
+		corona.scale = Vector3.ONE * 2.0
+		add_child(corona)
+
+		# Inner corona - brighter and more compact
+		var inner_corona := _make_glow_sphere(
+			400.0, Color(Palette.color("star").lerp(Color.WHITE, 0.35), 0.2), 2
+		)
+		inner_corona.name = "InnerSolarCorona"
+		inner_corona.position = Vector3.ZERO
+		add_child(inner_corona)
+
+		# Space clouds - additional nebula layers for depth
+		var deep_space := Node3D.new()
+		deep_space.name = "DeepSpace"
+		add_child(deep_space)
+
+		# Distant galaxy simulation (as a faint, large nebula)
+		var galaxy := _make_distant_galaxy()
+		galaxy.name = "DistantGalaxy"
+		galaxy.scale = Vector3.ONE * 10.0
+		deep_space.add_child(galaxy)
+
+		# Floating space dust clouds
+		var dust_clouds := _make_space_dust_clouds()
+		dust_clouds.name = "SpaceDustClouds"
+		deep_space.add_child(dust_clouds)
 
 
 # --- Sky --------------------------------------------------------------------
@@ -352,17 +429,99 @@ func _build_sky() -> void:
 	_sky.add_child(_make_nebula_band())
 
 
+## Apply a look change to the sky and the scenery.
+##
+## The starfield is rebuilt rather than the whole sky, since the nebula bands read
+## neither [member StyleProfile.star_count] nor [member StyleProfile.star_size].
+## Rocks are re-skinned in place: [method _make_rock] is deterministic per variant,
+## so the new meshes are the same rock at the new look rather than a reshuffled
+## field, and the existing MultiMesh transforms keep the belt where it was.
+func _on_style_changed(_profile: StyleProfile) -> void:
+	if _sky != null:
+		var old := _sky.get_node_or_null("Stars")
+		if old != null:
+			_sky.remove_child(old)
+			old.free()
+		_sky.add_child(_make_starfield())
+	_restyle_scenery()
+
+
+## The rock material family each rock variant is drawn with. Mirrors the choices
+## [method _build_belt], [method _build_nearfield] and
+## [method _build_floating_asteroids] make: the three belt variants deliberately
+## share one family so a belt reads as one field of stone, while the near-field and
+## floating rocks are a different family each so they do not read as belt strays.
+const ROCK_VARIANT_FAMILY := {0: 1, 1: 1, 2: 1, 3: 3, 4: 2}
+
+
+## Rebuild every rock's geometry for the current look and re-apply the scenery
+## materials, leaving instance transforms and rock positions untouched.
+##
+## [method _make_rock] is deterministic per variant, so these are the same rocks at
+## the new look rather than a reshuffled field — a rock_potato change must not move
+## a single asteroid the player was flying towards.
+func _restyle_scenery() -> void:
+	var variant_meshes := {}
+	for node in get_children():
+		var inst := node as MultiMeshInstance3D
+		if inst == null or inst.multimesh == null:
+			continue
+		if not inst.has_meta("rock_variant"):
+			continue
+		var variant := int(inst.get_meta("rock_variant"))
+		if not variant_meshes.has(variant):
+			variant_meshes[variant] = _make_rock(variant)
+		inst.multimesh.mesh = variant_meshes[variant]
+		inst.material_override = _rock_material(int(ROCK_VARIANT_FAMILY.get(variant, 1)))
+	_restyle_tagged_scenery(self)
+
+
+## Recolour any scenery node tagged with a `scenery` meta. Walks the whole tree
+## because the station hangs off its own holder rather than being a direct child,
+## and the tag is what makes it findable without this function knowing the shape of
+## the scene it is walking.
+func _restyle_tagged_scenery(node: Node) -> void:
+	for child in node.get_children():
+		var inst := child as MeshInstance3D
+		if inst != null and inst.has_meta("scenery"):
+			if String(inst.get_meta("scenery")) == "station":
+				inst.material_override = _station_material()
+		_restyle_tagged_scenery(child)
+
+
 ## Stars as small discs rather than quads: GL Compatibility point-size support
 ## is unreliable across mobile drivers, and triangle-fan discs look round from
 ## every angle.
+##
+## [member StyleProfile.star_five_point] bends the disc into a five-pointed cartoon
+## star. The silhouette comes from one radius function rather than a second mesh:
+## the outline radius alternates between the star's outer and inner radius on a
+## raised-cosine pulse, so a depth of 0 is a plain circle and a depth of 1 is a
+## star whose tips and valleys are both filleted. A cosine pulse is what makes it
+## read as *rounded* — a sharp star would need a sawtooth in the same place.
 func _make_starfield() -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var detail := _detail()
 	# Twice the stars and rounder discs at high detail, so the denser sky keeps
-	# its depth instead of going sparse at the higher render scale.
-	var star_seg := 8 * detail
-	for i in STAR_COUNT * detail:
+	# its depth instead of going sparse at the higher render scale. The user star
+	# density dial (Settings → Quality) scales the count; it applies on restart.
+	#
+	# StyleProfile.star_count/star_size override the base count and per-star
+	# size: "900 small -> few big soft" is the intended range, so a low count
+	# with a large size_mult is the friendly-look end of the dial.
+	var style := StyleManager.instance().current_profile
+	var base_count := STAR_COUNT
+	var size_mult := 1.0
+	var star_depth := 0.0
+	if style:
+		base_count = style.star_count
+		size_mult = style.star_size
+		star_depth = style.star_five_point
+	# A star needs enough segments to resolve ten corners; a disc does not, and at
+	# 900 stars the difference is real.
+	var star_seg := (14 if star_depth > 0.0 else 8) * detail
+	for i in int(base_count * detail * Session.star_density):
 		var dir := _random_direction()
 		# Mostly faint, a few bright. A uniform field looks like television
 		# static; a weighted one looks like a sky.
@@ -370,26 +529,29 @@ func _make_starfield() -> MeshInstance3D:
 		# Small dots: a starfield is points, not blotches. Large discs read as
 		# noise and, piled up at the same depth, are the first thing to z-fight
 		# when the camera moves — smaller dots keep the sky crisp.
-		var size: float = SKY_RADIUS * (0.0006 + bright * 0.0016)
+		var size: float = SKY_RADIUS * (0.0006 + bright * 0.0016) * size_mult
 		var centre := dir * SKY_RADIUS
 		var right := dir.cross(Vector3.UP)
 		if right.length() < 0.001:
 			right = Vector3.RIGHT
 		right = right.normalized() * size
 		var up := dir.cross(right).normalized() * size
-		# Build a triangle-fan disc centred on `dir * SKY_RADIUS`.
+		# Build a triangle-fan centred on `dir * SKY_RADIUS`, its radius modulated
+		# into a star when the look asks for one.
 		for s in star_seg:
 			var a0 := TAU * float(s) / float(star_seg)
 			var a1 := TAU * float(s + 1) / float(star_seg)
 			st.add_vertex(centre)
-			st.add_vertex(centre + right * cos(a0) + up * sin(a0))
-			st.add_vertex(centre + right * cos(a1) + up * sin(a1))
+			st.add_vertex(centre + right * cos(a0) * _star_radius(a0, star_depth)
+				+ up * sin(a0) * _star_radius(a0, star_depth))
+			st.add_vertex(centre + right * cos(a1) * _star_radius(a1, star_depth)
+				+ up * sin(a1) * _star_radius(a1, star_depth))
 	var inst := MeshInstance3D.new()
 	inst.name = "Stars"
 	inst.mesh = st.commit()
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.86, 0.90, 1.0)
+	mat.albedo_color = Palette.color("star").lerp(Color.WHITE, 0.45)
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	# The dome rides with the camera, so stars are always at the same depth.
 	# Disabling the depth test stops them z-fighting each other at 14 km — the
@@ -404,6 +566,24 @@ func _make_starfield() -> MeshInstance3D:
 	return inst
 
 
+## The star silhouette's radius multiplier at [param angle], for a look of
+## [param depth].
+##
+## Depth 0 is a plain circle of radius 1. As depth rises, the radius is pulled in
+## on a raised-cosine pulse with five lobes: the tips stay where the circle was and
+## the valleys between them are carved inward. Because the pulse is a cosine rather
+## than a sawtooth, both the tips and the inner corners come out filleted — which
+## is the whole difference between a cartoon star and the sharp one this
+## deliberately is not.
+func _star_radius(angle: float, depth: float) -> float:
+	if depth <= 0.0:
+		return 1.0
+	# Five lobes over a full turn, peaking at angle 0.
+	var phase := fmod(angle * STAR_POINTS / TAU, 1.0)
+	var pulse := 0.5 * (1.0 + cos(TAU * phase))
+	return 1.0 - depth * STAR_VALLEY_DEPTH * (1.0 - pulse)
+
+
 ## Two crossed gradient bands — ref 3's nebula wash — rather than one thin
 ## stripe. Each ribbon fades from transparent at its edges to a saturated core,
 ## which needs a per-vertex colour a flat [BaseMaterial3D.albedo_color] cannot
@@ -416,15 +596,14 @@ func _make_nebula_band() -> MeshInstance3D:
 	# Three crossed washes rather than two: the extra tilt breaks up the
 	# symmetric X that two bands make, and the brighter cores give the sky a
 	# banded depth instead of a flat tint.
-	_add_nebula_ribbon(
-		st, deg_to_rad(22.0), Color(0.14, 0.55, 0.46, 0.0), Color(0.30, 0.85, 0.62, 0.22)
-	)
-	_add_nebula_ribbon(
-		st, deg_to_rad(-33.0), Color(0.28, 0.20, 0.62, 0.0), Color(0.48, 0.38, 0.98, 0.20)
-	)
-	_add_nebula_ribbon(
-		st, deg_to_rad(71.0), Color(0.55, 0.22, 0.42, 0.0), Color(0.85, 0.40, 0.68, 0.14)
-	)
+	#
+	# Each wash takes the palette's nebula pair at its own hue offset, so a palette
+	# gets a sky that reads as one cloud rather than three unrelated stripes —
+	# the old hardcoded trio were three fixed hues that happened to sit near each
+	# other, which is a thing a palette cannot reproduce and should not have to.
+	_add_nebula_ribbon(st, deg_to_rad(22.0), _nebula_wash(0, 0.22))
+	_add_nebula_ribbon(st, deg_to_rad(-33.0), _nebula_wash(1, 0.20))
+	_add_nebula_ribbon(st, deg_to_rad(71.0), _nebula_wash(2, 0.14))
 	var inst := MeshInstance3D.new()
 	inst.name = "Nebula"
 	inst.mesh = st.commit()
@@ -441,13 +620,25 @@ func _make_nebula_band() -> MeshInstance3D:
 	return inst
 
 
+## One crossed wash's two colours, from the palette's nebula pair, with the
+## centreline opacity this ribbon wants. The hue relationships live on
+## [method Palette.nebula_wash] so the sky and the background gas clouds agree.
+func _nebula_wash(index: int, core_alpha: float) -> Dictionary:
+	var wash := Palette.nebula_wash(index)
+	var outer: Color = wash["edge"]
+	outer.a = 0.0
+	var inner: Color = wash["core"]
+	inner.a = core_alpha
+	return {"edge": outer, "core": inner}
+
+
 ## Symmetric fade — transparent at both edges, peaking at the centreline —
 ## rather than a one-sided ramp: a ribbon that goes straight from nothing to
 ## fully saturated has a hard mesh-boundary line on its bright side, which
 ## reads as a glass panel rather than a wash of gas.
-func _add_nebula_ribbon(
-	st: SurfaceTool, tilt_deg: float, edge_color: Color, core_color: Color
-) -> void:
+func _add_nebula_ribbon(st: SurfaceTool, tilt_deg: float, wash: Dictionary) -> void:
+	var edge_color: Color = wash["edge"]
+	var core_color: Color = wash["core"]
 	# High detail doubles the ribbon segments so the band edge stops looking
 	# faceted when the camera is close.
 	var segments := 64 * _detail()
@@ -756,9 +947,11 @@ func _build_station() -> void:
 	var inst := MeshInstance3D.new()
 	inst.name = "Hull"
 	inst.mesh = lp.commit("station")
-	inst.material_override = _rock_material(Color("8d97a6"), Color("d0a24a"), Color("5b6472"))
+	inst.material_override = _station_material()
 	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	inst.extra_cull_margin = STATION_RADIUS
+	# Tagged so a look change can recolour it along with the rocks.
+	inst.set_meta("scenery", "station")
 	station.add_child(inst)
 
 	# Approach lights: a ring of beacons the player can pick out at range.
@@ -784,7 +977,7 @@ func _build_station() -> void:
 ## flight speed.
 func _build_belt() -> void:
 	var shapes: Array[ArrayMesh] = [_make_rock(0), _make_rock(1), _make_rock(2)]
-	var material := _rock_material(Color("6a6257"), Color("8a7f6c"), Color("3d3831"))
+	var material := _rock_material(1)
 	var buckets: Array[Array] = [[], [], []]
 
 	# One invisible anchor per rock, for the PhysWorld (M1b). See _rock_holder.
@@ -828,6 +1021,9 @@ func _build_belt() -> void:
 		inst.material_override = material
 		inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		inst.set_meta("bucket_start", i * (ASTEROID_COUNT / 3))
+		# Which rock variant this instance draws, so a look change can rebuild its
+		# geometry from [method _make_rock] without regenerating the belt layout.
+		inst.set_meta("rock_variant", i)
 		add_child(inst)
 		_belt_multimeshes.append(inst)
 
@@ -854,6 +1050,61 @@ func _bind_rock_visuals() -> void:
 			anchor.set_meta("j", g - ASTEROID_COUNT)
 
 
+## Floating asteroids for dynamic spawning
+func _build_floating_asteroids() -> void:
+	var shape := _make_rock(4)  # A fifth rock variant for floating asteroids
+	var material := _rock_material(2)
+
+	# Physics anchor holder for floating asteroids
+	var floating_rock_holder := Node3D.new()
+	floating_rock_holder.name = "FloatingPhysRocks"
+	add_child(floating_rock_holder)
+
+	# The distant-asteroid density dial (Settings → Quality) scales the count;
+	# at 0 they disappear entirely. Applies on the next scene restart.
+	var float_count := maxi(0, int(FLOATING_ASTEROID_COUNT * Session.asteroid_density))
+	for i in float_count:
+		var angle := _rng.randf() * TAU
+		var radius := _rng.randf_range(FLOATING_ASTEROID_MIN_DIST, FLOATING_ASTEROID_MAX_DIST)
+		var height := _rng.randfn(-1000.0, 1000.0)  # Full 3D distribution
+		var pos := Vector3(cos(angle) * radius, height, sin(angle) * radius)
+
+		# Floating asteroids have more varied sizes
+		var size: float = lerpf(3.0, 50.0, pow(_rng.randf(), 2.5))
+		var basis := Basis.from_euler(Vector3(
+			_rng.randf() * TAU, _rng.randf() * TAU, _rng.randf() * TAU
+		)).scaled(Vector3.ONE * size)
+
+		var anchor := Node3D.new()
+		anchor.name = "FloatingRock%d" % i
+		anchor.position = pos
+		floating_rock_holder.add_child(anchor)
+		floating_asteroid_data.append({"position": pos, "radius": size, "node": anchor})
+		# Tumble speed: varied for floating asteroids
+		_floating_asteroid_spin.append(_rng.randf_range(0.02, 0.15))
+
+	# Create MultiMesh instances for rendering (one for simplicity since count is low)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = shape
+	mm.instance_count = floating_asteroid_data.size()
+	for j in floating_asteroid_data.size():
+		mm.set_instance_transform(j, floating_asteroid_data[j]["node"].transform)
+	var inst := MultiMeshInstance3D.new()
+	inst.name = "FloatingAsteroids"
+	inst.multimesh = mm
+	inst.material_override = material
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	inst.set_meta("rock_variant", 4)
+	add_child(inst)
+
+	# Remember which MultiMesh instance draws each rock for physics synchronization
+	for g in floating_asteroid_data.size():
+		var anchor: Node3D = floating_asteroid_data[g]["node"]
+		anchor.set_meta("mm", inst)
+		anchor.set_meta("j", g)
+
+
 ## Add or remove a rock from the live set: its MultiMesh instance is then written
 ## from its PhysBody node every frame instead of tumbling in place.
 func set_rock_visual_live(body: PhysBody, live: bool) -> void:
@@ -875,7 +1126,7 @@ func set_rock_visual_live(body: PhysBody, live: bool) -> void:
 ## main belt. They are the speed reference that makes cruise feel fast.
 func _build_nearfield() -> void:
 	var shape := _make_rock(3)  # A fourth rock variant, unique seed.
-	var material := _rock_material(Color("5a5550"), Color("7a756c"), Color("33302b"))
+	var material := _rock_material(3)
 	var count := 12
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -902,6 +1153,7 @@ func _build_nearfield() -> void:
 	_nearfield_mesh.multimesh = mm
 	_nearfield_mesh.material_override = material
 	_nearfield_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_nearfield_mesh.set_meta("rock_variant", 3)
 	add_child(_nearfield_mesh)
 
 
@@ -933,7 +1185,14 @@ func _make_rock(variant: int) -> ArrayMesh:
 		rings.append(ring)
 	lp.add_loft(rings, LowPoly.CH_PRIMARY, true, true)
 	lp.end_shape()
-	return lp.commit("rock%d" % variant)
+	var mesh := lp.commit("rock%d" % variant)
+	var style := StyleManager.instance().current_profile
+	if style and style.rock_potato > 0.0:
+		var rounding := MeshRounding.new()
+		rounding.is_asteroid = true
+		rounding.rock_potato = style.rock_potato
+		mesh = rounding.apply(mesh) as ArrayMesh
+	return mesh
 
 
 # --- Small builders ---------------------------------------------------------
@@ -966,12 +1225,12 @@ func _make_glow_sphere(radius: float, color: Color, detail: int) -> MeshInstance
 ## Scenery reuses the ship part shader so rocks, hulls and stations share one
 ## lighting model. The three colours map to the three vertex channels [LowPoly]
 ## writes.
-func _rock_material(primary: Color, accent: Color, trim: Color) -> ShaderMaterial:
+func _scenery_material(primary: Color, accent: Color, trim: Color) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = ShipMaterials.part_shader()
-	mat.set_shader_parameter("primary_color", primary)
-	mat.set_shader_parameter("accent_color", accent)
-	mat.set_shader_parameter("trim_color", trim)
+	mat.set_shader_parameter("primary_color", Palette.get_sat_lifted_color(primary))
+	mat.set_shader_parameter("accent_color", Palette.get_sat_lifted_color(accent))
+	mat.set_shader_parameter("trim_color", Palette.get_sat_lifted_color(trim))
 	mat.set_shader_parameter("metallic_amount", 0.12)
 	mat.set_shader_parameter("roughness_amount", 0.9)
 	mat.set_shader_parameter("specular_amount", 0.14)
@@ -983,7 +1242,23 @@ func _rock_material(primary: Color, accent: Color, trim: Color) -> ShaderMateria
 	# Higher solidity so rocks read as solid against the near-black void
 	# rather than blending into it — the see-through problem.
 	mat.set_shader_parameter("solidity", 0.65)
+	ShipMaterials.apply_style_dials(mat)
+	ShipMaterials.apply_outline(mat)
 	return mat
+
+
+## A rock's material: one of [constant Palette.ROCK_FAMILIES] tone triples.
+func _rock_material(family: int) -> ShaderMaterial:
+	var tones := Palette.rock_family(family)
+	return _scenery_material(tones["primary"], tones["accent"], tones["trim"])
+
+
+## The station's material: the palette's metal tones rather than a rock family, so
+## a built structure does not read as a very tidy asteroid.
+func _station_material() -> ShaderMaterial:
+	return _scenery_material(
+		Palette.color("metal_light"), Palette.color("rock_accent"), Palette.color("metal_dark")
+	)
 
 
 func _random_direction() -> Vector3:
@@ -993,3 +1268,143 @@ func _random_direction() -> Vector3:
 	var a := _rng.randf() * TAU
 	var r := sqrt(maxf(1.0 - z * z, 0.0))
 	return Vector3(cos(a) * r, z, sin(a) * r)
+
+
+## Create a faint, distant galaxy effect for background depth.
+func _make_distant_galaxy() -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	# Create a spiral galaxy-like structure with scattered points
+	var detail := _detail() * 4
+	var point_count := 300 * detail
+	
+	for i in point_count:
+		# Spiral galaxy distribution
+		var t := float(i) / float(point_count)
+		var radius := lerpf(500.0, 2000.0, pow(t, 0.5))  # Concentrated center
+		var angle := t * TAU * 8.0 + sin(t * 10.0) * 0.5  # Spiral with noise
+		var height := (_rng.randf() - 0.5) * 200.0 * sin(t * TAU * 4.0)  # Warped disk
+		
+		var pos := Vector3(
+			cos(angle) * radius,
+			height,
+			sin(angle) * radius
+		)
+		
+		# Create small quads for each point (better than points for GL compatibility)
+		var size := lerpf(2.0, 8.0, _rng.randf())
+		var angle_var := _rng.randf() * TAU
+		var dx := cos(angle_var) * size * 0.5
+		var dy := sin(angle_var) * size * 0.5
+		
+		# Create a quad facing roughly toward camera (simplified)
+		st.add_vertex(pos + Vector3(-dx, -dy, 0))
+		st.add_vertex(pos + Vector3(dx, -dy, 0))
+		st.add_vertex(pos + Vector3(dx, dy, 0))
+		
+		st.add_vertex(pos + Vector3(-dx, -dy, 0))
+		st.add_vertex(pos + Vector3(dx, dy, 0))
+		st.add_vertex(pos + Vector3(-dx, dy, 0))
+	
+	var inst := MeshInstance3D.new()
+	inst.mesh = st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = false
+	mat.albedo_color = Color(0.8, 0.7, 1.0, 0.02)  # Very faint bluish
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.render_priority = -20  # Behind everything
+	inst.material_override = mat
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return inst
+
+## Create floating space dust clouds for ambient texture.
+func _make_space_dust_clouds() -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	var detail := _detail() * 2
+	var cloud_count := 150 * detail
+	
+	for i in cloud_count:
+		# Distributed throughout a large volume
+		var pos := Vector3(
+			(_rng.randf() - 0.5) * 10000.0,
+			(_rng.randf() - 0.5) * 6000.0,
+			(_rng.randf() - 0.5) * 10000.0
+		)
+
+		# Cloud density varies - denser regions form nebula-like patches
+		var density := pow(_rng.randf(), 3.0)  # Mostly sparse with dense clumps
+		var size := lerpf(10.0, 100.0, density)
+
+		# Create a simple sphere-ish cloud
+		var segments := maxi(4, int(8.0 * density))
+		var rings := maxi(3, int(6.0 * density))
+		
+		if segments < 3 or rings < 2:
+			# Just create a few points for very sparse dust
+			var point_size := size * 0.1
+			st.add_vertex(pos + Vector3(-point_size, 0, 0))
+			st.add_vertex(pos + Vector3(point_size, 0, 0))
+			st.add_vertex(pos + Vector3(0, point_size, 0))
+			
+			st.add_vertex(pos + Vector3(point_size, 0, 0))
+			st.add_vertex(pos + Vector3(0, -point_size, 0))
+			st.add_vertex(pos + Vector3(0, point_size, 0))
+		else:
+			# Create a simple lathe-based cloud
+			var point_step := TAU / float(segments)
+			var ring_step := 1.0 / float(rings)
+			
+			for ring_idx in rings:
+				var v0 := float(ring_idx) * ring_step
+				var v1 := v0 + ring_step
+				var y0 := cos(v0 * PI) * size * 0.5
+				var y1 := cos(v1 * PI) * size * 0.5
+				var r0 := sin(v0 * PI) * size * 0.5
+				var r1 := sin(v1 * PI) * size * 0.5
+				
+				if r0 < 0.1 or r1 < 0.1:
+					continue
+				
+				for seg_idx in segments:
+					var a0 := float(seg_idx) * point_step
+					var a1 := a0 + point_step
+					
+					var x0 := cos(a0) * r0
+					var z0 := sin(a0) * r0
+					var x1 := cos(a1) * r0
+					var z1 := sin(a1) * r0
+					var x2 := cos(a1) * r1
+					var z2 := sin(a1) * r1
+					var x3 := cos(a0) * r1
+					var z3 := sin(a0) * r1
+					
+					# Create two triangles per quad
+					st.add_vertex(Vector3(x0, y0, z0))
+					st.add_vertex(Vector3(x1, y0, z1))
+					st.add_vertex(Vector3(x2, y1, z2))
+					
+					st.add_vertex(Vector3(x0, y0, z0))
+					st.add_vertex(Vector3(x2, y1, z2))
+					st.add_vertex(Vector3(x3, y1, z3))
+	
+	var inst := MeshInstance3D.new()
+	inst.mesh = st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = false
+	mat.albedo_color = Color(0.9, 0.8, 1.0, 0.01)  # Extremely faint
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.render_priority = -25  # Even further back
+	inst.material_override = mat
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return inst

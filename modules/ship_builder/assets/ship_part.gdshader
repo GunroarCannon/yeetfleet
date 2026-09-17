@@ -53,6 +53,21 @@ uniform vec4 rim_color : source_color = vec4(0.55, 0.75, 1.0, 1.0);
 uniform float rim_strength : hint_range(0.0, 2.0) = 0.16;
 uniform float rim_power : hint_range(0.5, 12.0) = 7.0;
 
+// Cartoony shading step, driven by StyleProfile.shading_bands. 0 leaves the
+// smooth hemisphere gradient alone; 2-3 quantizes it into a friendly toon ramp.
+// Stepping the occlusion term rather than a real N-dot-L only works because
+// this shader has no real light() override to band -- see the comment above
+// `sky` in fragment() for why occlusion carries the shape here anyway.
+uniform float shading_bands : hint_range(0.0, 5.0) = 0.0;
+
+// StyleProfile.spec_amount/rim_amount, as multipliers rather than a script-side
+// rewrite of specular_amount/rim_strength. Kept separate so any number of style
+// pushes stay idempotent -- setting these twice with the same profile always
+// lands on the same look, where multiplying the base uniform in place would
+// compound each time apply_style_dials() ran.
+uniform float spec_mult : hint_range(0.0, 2.0) = 1.0;
+uniform float rim_mult : hint_range(0.0, 2.0) = 1.0;
+
 // Selection / hover feedback, driven per part instance by the builder.
 uniform vec4 highlight_color : source_color = vec4(1.0, 0.86, 0.25, 1.0);
 uniform float highlight : hint_range(0.0, 1.0) = 0.0;
@@ -90,6 +105,12 @@ void fragment() {
 	// Hemisphere occlusion. Up-facing plate: full ambient. Down-facing: shaded,
 	// as if the hull below it were blocking the sky.
 	float sky = world_normal.y * 0.5 + 0.5;
+	if (shading_bands > 0.5) {
+		// Quantize into flat steps before the square falloff, so the toon ramp
+		// reads as bands of shade rather than the smooth hemisphere gradient.
+		sky = floor(sky * shading_bands) / max(shading_bands - 1.0, 1.0);
+		sky = clamp(sky, 0.0, 1.0);
+	}
 	float ao = mix(1.0 - ao_strength, 1.0, sky * sky);
 	base *= ao;
 
@@ -98,7 +119,7 @@ void fragment() {
 	ALBEDO = base;
 	ROUGHNESS = clamp(roughness_amount + weathering * 0.12, 0.06, 1.0);
 	METALLIC = metallic_amount;
-	SPECULAR = specular_amount * ao;
+	SPECULAR = specular_amount * ao * spec_mult;
 
 	// Rim: a thin edge sliver only, biased to the upper half of the hull so it
 	// reads as a light source above the ship rather than a glass shell.
@@ -122,6 +143,6 @@ void fragment() {
 	// selection gold rather than its own paint. The brackets and the dimming of
 	// everything else carry the rest of the message.
 	EMISSION = base * solidity * (1.0 - dim * 0.5)
-		+ rim_color.rgb * rim * rim_strength * (1.0 - dim * 0.6)
+		+ rim_color.rgb * rim * rim_strength * rim_mult * (1.0 - dim * 0.6)
 		+ highlight_color.rgb * highlight * (0.12 + 0.9 * fresnel);
 }

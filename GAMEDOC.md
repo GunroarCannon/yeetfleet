@@ -371,7 +371,7 @@ is on feel, and feel is found by dragging sliders, not by reasoning.
                ↓
         SEE SOMETHING
                ↓
-       "what happens if..."
+	   "what happens if..."
                ↓
       BUMP / SHOOT / BOOST
                ↓
@@ -379,7 +379,7 @@ is on feel, and feel is found by dragging sliders, not by reasoning.
                ↓
          CONSEQUENCE
                ↓
-      "OH SHIT THAT'S COOL"
+	  "OH SHIT THAT'S COOL"
                ↓
               FLY
 ```

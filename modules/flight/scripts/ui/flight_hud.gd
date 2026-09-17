@@ -24,6 +24,7 @@ const CAT_ORBIT := 5
 const CAT_SETTINGS := 6
 const CAT_HELP := 7
 const CAT_TRAILS := 8
+const CAT_CRAFT := 9
 ## Direct-action toolbar buttons (no popup).
 const ACTION_HANGAR := 90
 
@@ -58,8 +59,7 @@ var _heat := 0.0
 ## Debug toggles — small checkboxes on the right edge to isolate rendering issues.
 var _debug_panel: VBoxContainer = null
 var _debug_toggles: Dictionary = {}
-var _debug_reticle := true
-var _debug_markers := true
+var _event_container: CenterContainer = null
 
 
 func _ready() -> void:
@@ -85,8 +85,23 @@ func _build() -> void:
 	_build_top_bar()
 	_build_readouts()
 	_build_controls()
+	_build_event_container()
 	_build_debug_panel()
 	_build_rear_view_display()
+
+
+func _build_event_container() -> void:
+	_event_container = CenterContainer.new()
+	_event_container.name = "EventBubbleContainer"
+	_event_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_event_container.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_event_container.offset_top = BuilderTheme.TOUCH_MIN + BuilderTheme.PAD * 2
+	_event_container.custom_minimum_size = Vector2(0.0, 60.0)
+	add_child(_event_container)
+
+
+func get_event_container() -> Control:
+	return _event_container
 
 
 func _build_debug_panel() -> void:
@@ -120,8 +135,8 @@ func _build_debug_panel() -> void:
 	_add_debug_toggle("Sun", true)
 	_add_debug_toggle("Asteroids", true)
 	_add_debug_toggle("Drift", true)
-	_add_debug_toggle("Reticle", true)
-	_add_debug_toggle("Markers", true)
+	_add_debug_toggle("Reticle", Session.hud_reticle)
+	_add_debug_toggle("Markers", Session.hud_markers)
 	_add_debug_toggle("ShipGeo", true)
 	_add_debug_toggle("!!! ALL !!!", true)
 
@@ -160,8 +175,8 @@ func _on_debug_toggle(label: String, on: bool) -> void:
 		"!!! ALL !!!": _root.set_debug_visible("everything", on)
 		"Asteroids": _root.set_debug_visible("asteroids", on)
 		"Drift": _root.set_debug_visible("drift", on)
-		"Reticle": _debug_reticle = on
-		"Markers": _debug_markers = on
+		"Reticle": Session.hud_reticle = on
+		"Markers": Session.hud_markers = on
 
 
 func toggle_debug_panel() -> void:
@@ -214,6 +229,25 @@ func _fill_settings_popup(popup: FlightMenu.DraggablePopup) -> void:
 			func() -> void: _apply_planet_preset(p)
 		)
 	popup.add_action_row("Restart with this scale", func() -> void: _root.restart_scene())
+
+	# World-build quality dials: read while the scene builds, so changing them
+	# needs a restart (the scale presets above set the precedent).
+	popup.add_section("Quality (restart to apply)")
+	popup.add_slider_row(
+		"Star density", 0.25, 2.0, 0.25, Session.star_density,
+		func(v: float) -> void: Session.star_density = v, "×%.2f"
+	)
+	popup.add_slider_row(
+		"Distant rocks", 0.0, 2.0, 0.25, Session.asteroid_density,
+		func(v: float) -> void: Session.asteroid_density = v, "×%.2f"
+	)
+	popup.add_check_row("Backdrop (corona, galaxy, dust)", Session.render_backdrop,
+		func(on: bool) -> void: Session.render_backdrop = on)
+	popup.add_action_row("Apply quality & restart", func() -> void:
+		show_hint("Applying quality…")
+		_root.restart_scene())
+	popup.add_separator()
+	popup.add_action_row("Reset all settings", func() -> void: _reset_all_settings())
 
 
 func _apply_planet_preset(preset: Array) -> void:
@@ -268,6 +302,102 @@ func _team_short(team: int) -> String:
 		_: return "None"
 
 
+## Set a feel multiplier and re-apply it to the ship. configure() recomputes the
+## control mode's preset numbers and multiplies by the Session dials, so forcing
+## a re-configure with the current mode picks the new multiplier up live.
+func _apply_feel_mult(damping: bool, mult: float) -> void:
+	if damping:
+		Session.damping_mult = mult
+	else:
+		Session.assist_mult = mult
+	if _root.model != null:
+		_root.model.set_control_mode(_root.model.control_mode)
+	show_hint("%s ×%.2f" % ["Damping" if damping else "Assist authority", mult])
+
+
+## Set the player's speed dial — see [method FlightRoot.set_player_speed_scale].
+## The hint reads back the ceiling the ship actually ends up with, because
+## "×0.25" on its own says nothing about whether the ship in front of you is now
+## a 60 m/s hauler or a 300 m/s interceptor.
+func _apply_player_speed(scale: float) -> void:
+	_root.set_player_speed_scale(scale)
+	var tops := _root.model.top_speed if _root.model != null else 0.0
+	show_hint("Your ship ×%.2f — tops out at %.0f m/s" % [scale, tops])
+
+
+## Set the AI population's speed dial — see [method
+## FlightRoot.set_npc_speed_scale]. Named for what the row is called: the point
+## of this dial is that it does not move *your* ship, so the hint says whose
+## speed just changed rather than just reporting a number.
+func _apply_npc_speed(scale: float) -> void:
+	_root.set_npc_speed_scale(scale)
+	show_hint("Other ships ×%.2f — yours unchanged" % scale)
+
+
+## One short line for the Flight menu: which assist mode the Z key has landed on.
+## The full explanation sits under it in a help row.
+func _assist_short() -> String:
+	var m := _root.model
+	if m == null:
+		return "—"
+	match m.assist_mode:
+		0: return "Off — thrust lever, nothing slows you"
+		1: return "Damping — thrust, and drift bleeds off"
+		_: return "Full — motion follows the nose"
+
+
+## The active feel profile for the Flight menu's readout.
+func _profile_display() -> String:
+	var id := _root.phys_profile_id()
+	return id if id != "" else "—"
+
+## Set the arcade pivot multiplier and re-apply it. Same trick as the feel dials:
+## [method FlightModel.configure] recomputes the mode's preset, so re-selecting
+## the current mode picks the new multiplier up live instead of at the next
+## respawn. The hint reads the turn rate back in degrees per second, because
+## "×3" means nothing without knowing what it is three times.
+func _apply_arcade_pivot(mult: float) -> void:
+	Session.arcade_pivot = mult
+	if _root.model == null:
+		return
+	_root.model.set_control_mode(_root.model.control_mode)
+	show_hint("Arcade pivot ×%.2f — %.0f°/s" % [mult, rad_to_deg(_root.model.turn_rate)])
+
+
+## Toggle the fast-orbit dial. Read live by the flight model, so ships already
+## orbiting change speed the moment it flips.
+func _set_fast_orbits(on: bool) -> void:
+	Session.fast_orbits = on
+	show_hint("Fast orbits: %s" % ("ON" if on else "OFF"))
+
+
+## How much faster than a real circular orbit the fast-orbit dial flies a held
+## ship. The flight model pairs it with the matching k² of pull, so the orbit
+## stays the same circle — just taken sooner.
+func _set_orbit_speed(scale: float) -> void:
+	Session.orbit_speed_scale = maxf(scale, 1.0)
+	show_hint("Orbit speed ×%.0f" % Session.orbit_speed_scale)
+
+
+## One-line orbit state for the Orbit & time menu, from the model's tracking.
+func _orbit_readout() -> String:
+	var m := _root.model
+	if m == null:
+		return "no ship"
+	var body := String(m._orbit_body_name)
+	if m._in_orbit:
+		return "stable around %s" % body if body != "" else "stable"
+	return ("approaching %s" % body) if body != "" else "no dominant body"
+
+
+## Reset every persisted setting, then restart so the world, ships and HUD all
+## rebuild at the shipped defaults.
+func _reset_all_settings() -> void:
+	Session.reset_to_defaults()
+	show_hint("All settings reset to defaults — restarting…")
+	_root.restart_scene()
+
+
 func _build_rear_view_display() -> void:
 	# The rear view TextureRect is created by FlightRoot._build_rear_view()
 	# and added to the HUD. We just need to add it as a child here.
@@ -299,6 +429,7 @@ func _build_top_bar() -> void:
 	_menu.add_category(CAT_SETTINGS, "batteries.png", "Settings — render distance, world scale")
 	_menu.add_category(CAT_HELP, "hands/john-redman/paper.png", "Help — controls card")
 	_menu.add_category(CAT_TRAILS, "shoes/lorc/footprint.png", "Trails — see which way things are moving")
+	_menu.add_category(CAT_CRAFT, "guns/lorc/cannon.png", "Large craft — spawn motherships, stations, gates to fly around")
 	_menu.add_action_icon(ACTION_HANGAR, "flashlight.png", "Back to the hangar (Esc)", func() -> void: _root.return_to_hangar())
 	bar.add_child(_menu)
 
@@ -460,6 +591,7 @@ func _on_category(id: int) -> void:
 		CAT_SETTINGS: _fill_settings_popup(popup)
 		CAT_HELP: _fill_help_popup(popup)
 		CAT_TRAILS: _fill_trails_popup(popup)
+		CAT_CRAFT: _fill_craft_popup(popup)
 	_menu.recentre_open()
 
 
@@ -479,18 +611,47 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 			String(entry[0]), mode == int(entry[1]), int(entry[1]),
 			func(v: int) -> void: _root.set_view(v)
 		)
-	popup.add_separator()
+	# Camera dials (live, persisted).
+	popup.add_section("Camera")
+	popup.add_slider_row(
+		"Field of view", 50.0, 120.0, 1.0, Session.camera_fov,
+		func(v: float) -> void: _root.set_camera_fov(v), "%.0f°"
+	)
+	popup.add_slider_row(
+		"Chase distance", 0.5, 2.0, 0.05, Session.camera_chase,
+		func(v: float) -> void: _root.set_camera_chase(v), "×%.2f"
+	)
+
+	# Render toggles.
+	popup.add_section("Render")
 	popup.add_check_row("Drift field", _root.drift_field_on(), func(_on: bool) -> void: _root.toggle_drift_field())
 	popup.add_check_row("Rear view (B)", _root._rear_view_on, func(_on: bool) -> void: _root.toggle_rear_view())
-	popup.add_check_row("Test volume", not _root.location_is_space(), func(_on: bool) -> void: _root.toggle_location())
-	popup.add_check_row("High res", _root.high_res_on(), func(_on: bool) -> void: _root.toggle_high_res())
+	popup.add_check_row("High res (restart)", _root.high_res_on(), func(_on: bool) -> void: _root.toggle_high_res())
 	popup.add_check_row("High contrast", BuilderTheme.high_contrast, func(_on: bool) -> void: _root.toggle_high_contrast())
+	popup.add_check_row("Test volume (restart)", not _root.location_is_space(), func(_on: bool) -> void: _root.toggle_location())
 	popup.add_check_row("Planet pointer (J)", _root.planet_pointer_on(), func(_on: bool) -> void: _root.toggle_planet_pointer())
+
+	# HUD clutter (persisted).
+	popup.add_section("HUD overlay")
+	popup.add_check_row("Reticle", Session.hud_reticle, func(on: bool) -> void: Session.hud_reticle = on)
+	popup.add_check_row("Markers & brackets", Session.hud_markers, func(on: bool) -> void: Session.hud_markers = on)
+	popup.add_check_row("Player indicator", Session.hud_indicators, func(on: bool) -> void: Session.hud_indicators = on)
 
 
 func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Flight"
 	popup.add_action_row("Cycle assist (Z)", func() -> void: _root.toggle_assist())
+	popup.add_value_row("Assist now", _assist_short())
+	popup.add_help_row(
+		"How your motion follows your nose. Off: the throttle is a thrust lever and nothing ever slows you down. "
+		+ "Damping: thrust as usual, but sideways drift bleeds away. "
+		+ "Full: the computer flies your velocity onto wherever you point."
+	)
+
+	# Handling master, then the two dials that tune it. The presets were a bare
+	# list of four words before; nothing on screen said what any of them bundled.
+	popup.add_separator()
+	popup.add_section("Handling preset")
 	var ctrl := _root.model.control_mode if _root.model != null else FlightModel.ControlMode.SIM
 	for entry: Array in [
 		["Arcade", FlightModel.ControlMode.ARCADE],
@@ -502,13 +663,90 @@ func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 			String(entry[0]), ctrl == int(entry[1]), int(entry[1]),
 			func(v: int) -> void: _root.model.set_control_mode(v)
 		)
+	popup.add_help_row(
+		"One preset bundles turn rate, top speed, and how snappy the assist is. "
+		+ "The dials below multiply it, so you tune a preset rather than replace it."
+	)
+	# Arcade pivot sits directly under the modes it applies to, because it is a
+	# property of arcade rather than a global dial: crank it and arcade stops
+	# being "responsive" and starts being an FPS — point the nose and be pointing
+	# there. Nothing happens on the other three modes, which is the point.
+	popup.add_slider_row(
+		"Arcade pivot", 1.0, 6.0, 0.25, Session.arcade_pivot,
+		func(v: float) -> void: _apply_arcade_pivot(v), "×%.2f"
+	)
+	popup.add_help_row(
+		"Arcade preset only. How much faster than its own tuning the nose swings "
+		+ "round — at the top the ship points where you flick it, like an FPS."
+	)
+
+	# The two assist dials, named for what they do to the ship rather than for
+	# the variable they happen to scale.
 	popup.add_separator()
+	popup.add_section("Assist tuning (× the preset)")
+	popup.add_slider_row(
+		"Nose grip", 0.5, 5.0, 0.05, Session.assist_mult,
+		func(v: float) -> void: _apply_feel_mult(false, v), "×%.2f"
+	)
+	popup.add_help_row(
+		"Full assist only. How hard the ship drags its motion around onto the "
+		+ "nose. Low and it slides on like ice; high and it goes where you point."
+	)
+	popup.add_slider_row(
+		"Drift bleed-off", 0.25, 2.0, 0.05, Session.damping_mult,
+		func(v: float) -> void: _apply_feel_mult(true, v), "×%.2f"
+	)
+	popup.add_help_row(
+		"Damping mode only. How quickly leftover sideways drift dies away once "
+		+ "you stop turning."
+	)
+
+	# Two speed dials rather than one: slowing a fight down so it is readable and
+	# slowing the enemy down so it is winnable are different requests.
+	popup.add_separator()
+	popup.add_section("Speed (ships only)")
+	popup.add_slider_row(
+		"Your ship", 0.1, 2.0, 0.05, Session.player_speed_scale,
+		func(v: float) -> void: _apply_player_speed(v), "×%.2f"
+	)
+	popup.add_help_row("Your top speed and acceleration. Nothing else is affected.")
+	popup.add_slider_row(
+		"Other ships", 0.1, 2.0, 0.05, Session.npc_speed_scale,
+		func(v: float) -> void: _apply_npc_speed(v), "×%.2f"
+	)
+	popup.add_help_row(
+		"Every AI ship's top speed and acceleration. Your ship is unaffected. "
+		+ "Rocks, debris and planet orbits are never affected by either dial."
+	)
+
+	# Collision feel: what the old "feel profile" row actually is.
+	popup.add_separator()
+	popup.add_section("Collision feel")
+	popup.add_value_row("Profile", _profile_display())
+	popup.add_action_row("Cycle collision profile (K)", func() -> void:
+		var id := _root.cycle_phys_profile()
+		if id != "":
+			show_hint("Collision profile: %s" % id))
+	popup.add_help_row(
+		"How the world's impacts feel — bounciness, friction, and how much a hit "
+		+ "spins you. 'cartoony' and 'grounded' are the two shipped profiles."
+	)
+
+	# Ship & scene actions.
+	popup.add_separator()
+	popup.add_check_row("Warp (X)", _root.model != null and _root.model.warp_active, func(on: bool) -> void:
+		if _root.model != null:
+			_root.model.warp_active = on
+			show_hint("Warp %s — 8× speed" % ("ON" if on else "OFF")))
+	popup.add_separator()
+	popup.add_action_row("Rebuild ship in orbit (F4)", func() -> void: _root.respawn_player_ship())
 	popup.add_action_row("Return to start point (R)", func() -> void: _root.respawn())
 	popup.add_action_row("Restart scene (F5)", func() -> void: _root.restart_scene())
 
 
 func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Combat"
+	popup.add_value_row("AI ships alive", str(_root.ai_live_count()))
 	popup.add_action_row(
 		"Lock nearest ship (T)" if _root.locked_target == null else "Release lock (T)",
 		func() -> void: _root.toggle_lock()
@@ -518,6 +756,7 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_action_row("Spawn 1 AI ship", func() -> void: _spawn_quick(1))
 	popup.add_action_row("Spawn 3 AI ships", func() -> void: _spawn_quick(3))
 	popup.add_action_row("Spawn 6 AI ships", func() -> void: _spawn_quick(6))
+	popup.add_action_row("Spawn random wave", func() -> void: _spawn_quick(3 + randi() % 6))
 	popup.add_action_row("Spawn mother ship (6)", func() -> void:
 		var ok := _root.spawn_mother_ship()
 		show_hint("Mother ship launched" if ok else "No room for a mother ship"))
@@ -545,6 +784,35 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 		func(v: float) -> void: _spawn_count = int(v), "%.0f"
 	)
 	popup.add_action_row("Spawn group", func() -> void: _on_spawn_pressed())
+
+	# Dynamic In-World Incidents (M4)
+	popup.add_separator()
+	popup.add_section("Dynamic incidents (M4)")
+	popup.add_action_row("Trigger Distress Call (🚨)", func() -> void:
+		_trigger_incident("distress_call"))
+	popup.add_action_row("Trigger Pirate Raid (🎯)", func() -> void:
+		_trigger_incident("pirate_raid"))
+	popup.add_action_row("Trigger Cargo Request (📦)", func() -> void:
+		_trigger_incident("cargo_request"))
+	popup.add_action_row("Trigger Derelict Tumble (!)", func() -> void:
+		_trigger_incident("derelict_tumble"))
+	popup.add_action_row("Trigger Meteor Strike (🚨)", func() -> void:
+		_trigger_incident("meteor_strike"))
+	popup.add_action_row("Trigger Faction Skirmish (🎯)", func() -> void:
+		_trigger_incident("faction_skirmish"))
+	popup.add_action_row("Trigger Rare Drift (◆)", func() -> void:
+		_trigger_incident("rare_drift"))
+	popup.add_action_row("Clear active incidents", func() -> void:
+		if _root.incident_director != null:
+			_root.incident_director.clear_all()
+			show_hint("All active incidents cleared"))
+
+
+func _trigger_incident(type_name: String) -> void:
+	if _root.incident_director != null:
+		var inc := _root.incident_director.trigger_incident(type_name)
+		if inc != null:
+			show_hint("Triggered: %s" % inc.title)
 
 
 func _spawn_quick(count: int) -> void:
@@ -596,15 +864,35 @@ func _fill_gravity_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_separator()
 	var viz_on := _root._gravity_viz != null and _root._gravity_viz.is_showing()
 	popup.add_check_row("Gravity visualizer (H)", viz_on, func(_on: bool) -> void: _root.toggle_gravity_viz())
+	popup.add_check_row("Chaos (Y)", _root.gravity_chaos_on(), func(_on: bool) -> void: _root.toggle_gravity_chaos())
 
 
 func _fill_orbit_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Orbit & time"
+	popup.add_value_row("Orbit status", _orbit_readout())
 	popup.add_action_row("Enter orbit (debug)", func() -> void: _root.enter_orbit())
 	popup.add_action_row("Match circular speed", func() -> void: _root.match_circular_speed())
 	popup.add_action_row("Spawn satellite (N)", func() -> void: _root.spawn_satellite())
 	popup.add_action_row("Clear satellites (M)", func() -> void: _root.delete_satellites())
 	popup.add_separator()
+	if _root.model != null:
+		var assist_rate := _root.model.orbital_assist_rate
+		for step: float in FlightModel.ORBITAL_ASSIST_RATE_STEPS:
+			popup.add_radio_row(
+				"Assist strength ×%.1f" % step, is_equal_approx(assist_rate, step), int(step * 10),
+				func(v: int) -> void: _root.model.orbital_assist_rate = float(v) / 10.0
+			)
+		popup.add_separator()
+	# Fast orbits: a ship the assist is holding whips around its body far faster
+	# than its own gravity would ever carry it. Ships only — nothing but a
+	# [FlightModel] under orbital assist is affected, so rocks, debris and the
+	# planets themselves keep their real motion.
+	popup.add_check_row("Fast orbits", Session.fast_orbits,
+		func(on: bool) -> void: _set_fast_orbits(on))
+	popup.add_slider_row(
+		"Orbit speed", 2.0, 20.0, 1.0, Session.orbit_speed_scale,
+		func(v: float) -> void: _set_orbit_speed(v), "×%.0f"
+	)
 	var ts: int = int(_root.time_scale())
 	for step: int in [1, 2, 4, 8, 10]:
 		popup.add_radio_row(
@@ -613,8 +901,31 @@ func _fill_orbit_popup(popup: FlightMenu.DraggablePopup) -> void:
 		)
 
 
+## One "Spawn: <archetype>" row per [enum LargeCraftGenerator.Archetype],
+## built from [constant LargeCraftGenerator.ARCHETYPE_NAMES] so a new
+## archetype added there shows up here for free.
+func _fill_craft_popup(popup: FlightMenu.DraggablePopup) -> void:
+	popup.title = "Large craft"
+	popup.add_label_row("Debug spawner, ahead of the ship — full dial control is the large_craft_gen lab's job")
+	popup.add_label_row("Size")
+	for preset: int in FlightRoot.CRAFT_SIZE_LABELS.keys():
+		popup.add_radio_row(
+			FlightRoot.CRAFT_SIZE_LABELS[preset], _root.craft_size_preset == preset, preset,
+			func(v: int) -> void: _root.craft_size_preset = v
+		)
+	popup.add_separator()
+	for archetype: int in LargeCraftGenerator.ARCHETYPE_NAMES.keys():
+		var label: String = LargeCraftGenerator.ARCHETYPE_NAMES[archetype]
+		popup.add_action_row("Spawn: %s" % label, func() -> void: _root.spawn_large_craft(archetype))
+	popup.add_separator()
+	popup.add_action_row("Spawn 3 (mixed archetypes)", func() -> void: _root.spawn_large_craft_mix(3))
+	popup.add_action_row("Clear large craft", func() -> void: _root.clear_large_craft())
+
+
 func _fill_help_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Help"
+	var ver := String(Engine.get_version_info()["string"])
+	popup.add_value_row("Run", "Godot %s · seed %d" % [ver, Session.seed])
 	popup.add_action_row("Controls card (? / F1)", func() -> void: _root.toggle_help())
 	popup.add_action_row("Back to the hangar (Esc)", func() -> void: _root.return_to_hangar())
 
@@ -623,6 +934,13 @@ func _fill_trails_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Trails"
 	popup.add_check_row("Player ship trail", _root.trail_player_on(), func(on: bool) -> void: _root.set_trail_player(on))
 	popup.add_check_row("All ships trail", _root.trail_ships_on(), func(on: bool) -> void: _root.set_trail_ships(on))
+	popup.add_section("Appearance")
+	var len_slider := popup.add_slider_row(
+		"Trail length", 0.5, 2.0, 0.1, Session.trail_length,
+		func(v: float) -> void: Session.trail_length = v, "×%.1f"
+	)
+	# Trails read the length when built, so re-create the enabled ones on release.
+	len_slider.drag_ended.connect(func(_changed: bool) -> void: _root.refresh_trails())
 
 
 # --- Per-frame sync ---------------------------------------------------------
@@ -695,15 +1013,16 @@ func _draw_instruments() -> void:
 	if camera == null or _root.model == null:
 		return
 	var centre := size * 0.5
-	if _debug_reticle:
+	if Session.hud_reticle:
 		_draw_reticle(centre)
 	_draw_drift(camera, centre)
-	if _debug_markers:
+	if Session.hud_markers:
 		_draw_markers(camera)
-	_draw_lock_bracket(camera)
-	_draw_ai_lock_brackets(camera)
+		_draw_lock_bracket(camera)
+		_draw_ai_lock_brackets(camera)
 	_draw_power_bars()
-	_draw_player_indicator(camera)
+	if Session.hud_indicators:
+		_draw_player_indicator(camera)
 
 
 ## The gunsight. An open cross rather than a dot: a dot vanishes against a bright
@@ -859,7 +1178,7 @@ func _draw_power_bars() -> void:
 
 
 func _draw_bar(rect: Rect2, fraction: float, color: Color, label: String) -> void:
-	_overlay.draw_rect(rect, Color(BuilderTheme.BG_DEEP, 0.55), true)
+	_overlay.draw_rect(rect, Color(BuilderTheme.bg_deep(), 0.55), true)
 	_overlay.draw_rect(
 		Rect2(rect.position, Vector2(rect.size.x * clampf(fraction, 0.0, 1.0), rect.size.y)),
 		color, true

@@ -21,6 +21,10 @@ const COLUMN_WIDTH := 480.0
 
 
 func _enter_tree() -> void:
+	# The saved look and palette have to be live *before* the theme is built: the
+	# interface's colours are palette roles, so a palette loaded after the theme
+	# would leave the whole UI on the previous one until something rebuilt it.
+	StyleManager.instance().load_saved()
 	# The window theme and density scale must exist before any Control under
 	# this root reads its theme, and they live on the window, not the scene.
 	get_window().theme = BuilderTheme.build()
@@ -60,7 +64,7 @@ func _build_picker() -> void:
 	var backdrop := ColorRect.new()
 	backdrop.name = "Backdrop"
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	backdrop.color = BuilderTheme.BG_DEEP
+	backdrop.color = BuilderTheme.bg_deep()
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(backdrop)
 

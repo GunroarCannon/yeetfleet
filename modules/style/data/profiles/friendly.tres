@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="StyleProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/style/scripts/style_profile.gd" id="1_friendly_profile"]
+
+[resource]
+script = ExtResource("1_friendly_profile")
+id = "friendly"
+display_name = "Friendly"
+roundness = 0.3
+chunkiness = 0.2
+rock_potato = 0.4
+shading_bands = 3
+outline_width = 0.03
+outline_color = Color(0.1, 0.1, 0.1, 0.8)
+spec_amount = 0.3
+rim_amount = 0.4
+palette_saturation = 0.8
+palette_lift = 0.2
+planet_detail = 0.2
+planet_bands = 0.7
+star_count = 300
+star_size = 2.5
+squash_enabled = true

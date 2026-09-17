@@ -1,0 +1,65 @@
+{
+	"distress": {
+		"symbol": "🚨",
+		"label": "DISTRESS SIGNAL",
+		"color": "#FF3344",
+		"pulse": true,
+		"priority": 10
+	},
+	"wanted": {
+		"symbol": "🎯",
+		"label": "TARGET IDENTIFIED",
+		"color": "#FF2200",
+		"pulse": false,
+		"priority": 8
+	},
+	"cargo": {
+		"symbol": "📦",
+		"label": "CARGO DETECTED",
+		"color": "#00E5FF",
+		"pulse": false,
+		"priority": 6
+	},
+	"resource": {
+		"symbol": "◆",
+		"label": "VALUABLE RESOURCE",
+		"color": "#FFD700",
+		"pulse": false,
+		"priority": 5
+	},
+	"discovery": {
+		"symbol": "!",
+		"label": "ANOMALY FOUND",
+		"color": "#FFAA00",
+		"pulse": true,
+		"priority": 7
+	},
+	"friendly": {
+		"symbol": "●",
+		"label": "FRIENDLY CRAFT",
+		"color": "#00E676",
+		"pulse": false,
+		"priority": 2
+	},
+	"enemy": {
+		"symbol": "▲",
+		"label": "HOSTILE SQUADRON",
+		"color": "#FF1744",
+		"pulse": true,
+		"priority": 9
+	},
+	"neutral": {
+		"symbol": "○",
+		"label": "CIVILIAN TRAFFIC",
+		"color": "#ECEFF1",
+		"pulse": false,
+		"priority": 1
+	},
+	"anger": {
+		"symbol": "⚠",
+		"label": "FACTION ALERT",
+		"color": "#FF5252",
+		"pulse": true,
+		"priority": 10
+	}
+}

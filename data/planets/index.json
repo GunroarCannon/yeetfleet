@@ -2,6 +2,7 @@
   "format": 1,
   "planets": [
     "new_world.tres",
+    "smoke_test_world.tres",
     "tarn_iv.tres",
     "tarn_iv_moon.tres"
   ]

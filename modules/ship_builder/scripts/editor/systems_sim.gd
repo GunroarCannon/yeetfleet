@@ -199,7 +199,7 @@ func _rebuild_plumes() -> void:
 			_largest_plume_index = _plumes.size()
 		var func_data: Dictionary = entry.get("func", {})
 		var plume_scale := float(func_data.get("plume", 1.0))
-		var color := Color.from_string(String(func_data.get("exhaust_color", "6fd8ff")), ShipMaterials.COL_BEAM)
+		var color := Color.from_string(String(func_data.get("exhaust_color", "6fd8ff")), ShipMaterials.beam_color())
 
 		var inst := MeshInstance3D.new()
 		inst.name = "Plume"
@@ -449,7 +449,7 @@ func _spawn_shot(entry: Dictionary, func_data: Dictionary, muzzle_index: int) ->
 	var xform := entry["xform"] as Transform3D
 	# The muzzle's own stable colour — a part-declared shot_color, else the
 	# red/green/blue palette colour assigned at bind.
-	var color := _muzzle_colors[muzzle_index] if muzzle_index < _muzzle_colors.size() else ShipMaterials.COL_BEAM
+	var color := _muzzle_colors[muzzle_index] if muzzle_index < _muzzle_colors.size() else ShipMaterials.beam_color()
 	var is_beam: bool = bool(func_data.get("beam", false))
 	var speed := float(func_data.get("shot_speed", 700.0))
 	var life := float(func_data.get("shot_life", DEFAULT_SHOT_LIFE))

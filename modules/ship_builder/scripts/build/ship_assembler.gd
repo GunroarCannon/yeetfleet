@@ -32,6 +32,7 @@ static func assemble(
 	with_sockets := true
 ) -> ShipView:
 	var view := ShipView.new()
+	view.design = design
 	view.resolution = design.resolve(library, cargo_load)
 
 	view.root = Node3D.new()
@@ -48,6 +49,7 @@ static func assemble(
 		var built := PartMeshFactory.build(placement.part, placement.mirrored)
 		_add_placement(view, design, placement, built, with_colliders)
 		var box: AABB = placement.xform * built.aabb
+		view.part_boxes.append(box)
 		if first:
 			view.aabb = box
 			first = false

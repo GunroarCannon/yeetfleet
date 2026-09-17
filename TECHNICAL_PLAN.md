@@ -148,17 +148,17 @@ actor can push every other actor**, which is exactly what today's code cannot do
 ```
 modules/physics/
   scripts/
-    phys_body.gd        # a registry entry: mass, radius, velocity, angular, layer
-    phys_world.gd       # the per-scene service; steps after all controllers
-    broadphase.gd       # uniform spatial hash
-    impulse_solver.gd   # pair resolution: linear + angular + separation
-    phys_profile.gd     # Resource: every tunable constant
-    ccd.gd              # swept sphere test for fast movers
+	phys_body.gd        # a registry entry: mass, radius, velocity, angular, layer
+	phys_world.gd       # the per-scene service; steps after all controllers
+	broadphase.gd       # uniform spatial hash
+	impulse_solver.gd   # pair resolution: linear + angular + separation
+	phys_profile.gd     # Resource: every tunable constant
+	ccd.gd              # swept sphere test for fast movers
   data/profiles/
-    grounded.tres
-    cartoony.tres
+	grounded.tres
+	cartoony.tres
   tools/
-    physics_smoke.gd    # headless, deterministic, no scene
+	physics_smoke.gd    # headless, deterministic, no scene
 ```
 
 #### `PhysBody`
@@ -262,11 +262,11 @@ Bump-to-interact. Small, and it rides entirely on M1's `impacted` signal.
 ```
 modules/interact/
   scripts/
-    touchable.gd         # component attached to any Node3D with a PhysBody
-    pickup.gd            # touch -> collect; radius scales with ship
-    tow_link.gd          # touch a disabled ship -> soft spring constraint
-    cargo_attach.gd      # touch a mission ship -> CARGO ATTACHED
-    interact_registry.gd # the module façade
+	touchable.gd         # component attached to any Node3D with a PhysBody
+	pickup.gd            # touch -> collect; radius scales with ship
+	tow_link.gd          # touch a disabled ship -> soft spring constraint
+	cargo_attach.gd      # touch a mission ship -> CARGO ATTACHED
+	interact_registry.gd # the module façade
   tools/interact_smoke.gd
 ```
 
@@ -288,13 +288,13 @@ One global toggle: **Grounded ⟷ Friendly**.
 ```
 modules/style/
   scripts/
-    style_profile.gd     # Resource: every look dial
-    style_manager.gd     # static: current profile, style_changed signal, apply()
-    mesh_rounding.gd     # bevel + inflate + proportion pass over LowPoly output
-    palette.gd           # one palette definition both looks derive from
+	style_profile.gd     # Resource: every look dial
+	style_manager.gd     # static: current profile, style_changed signal, apply()
+	mesh_rounding.gd     # bevel + inflate + proportion pass over LowPoly output
+	palette.gd           # one palette definition both looks derive from
   data/profiles/
-    grounded.tres
-    friendly.tres
+	grounded.tres
+	friendly.tres
   tools/style_smoke.gd
 
 modules/style_lab/
@@ -349,18 +349,18 @@ The incident director and the visual language.
 ```
 modules/events/
   scripts/
-    incident.gd            # base: setup(context), tick(delta), is_done()
-    incident_director.gd   # budget, spacing, spawn near-but-not-on the player
-    event_bubble.gd        # the ~1.5s HUD bloom, then it never speaks again
-    world_marker.gd        # the 🚨 🎯 📦 ◆ vocabulary as billboarded sprites
-    incidents/
-      distress_call.gd
-      pirate_raid.gd
-      cargo_request.gd
-      derelict_tumble.gd
-      meteor_strike.gd
-      faction_skirmish.gd
-      rare_drift.gd
+	incident.gd            # base: setup(context), tick(delta), is_done()
+	incident_director.gd   # budget, spacing, spawn near-but-not-on the player
+	event_bubble.gd        # the ~1.5s HUD bloom, then it never speaks again
+	world_marker.gd        # the 🚨 🎯 📦 ◆ vocabulary as billboarded sprites
+	incidents/
+	  distress_call.gd
+	  pirate_raid.gd
+	  cargo_request.gd
+	  derelict_tumble.gd
+	  meteor_strike.gd
+	  faction_skirmish.gd
+	  rare_drift.gd
   data/icons.json          # the §9 table, as data
   tools/events_smoke.gd
 ```

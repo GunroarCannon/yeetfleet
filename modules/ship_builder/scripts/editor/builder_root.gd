@@ -93,6 +93,9 @@ func _ready() -> void:
 
 	rebuild(false)
 	_report_load_errors()
+	# The hull being edited has to follow a global look change too — otherwise the
+	# builder shows the old shape while the flight scene has moved on.
+	StyleManager.instance().style_changed.connect(_on_style_changed)
 	get_viewport().size_changed.connect(_on_window_resized)
 	BuilderTheme.apply_density_scale(get_window())
 	_on_window_resized()
@@ -124,6 +127,21 @@ func _report_load_errors() -> void:
 
 
 # --- Rebuild ---------------------------------------------------------------
+
+## Re-skin the hull being edited for the new look and palette.
+##
+## Geometry, part colours and the outline all come from the global style, so all
+## three are re-applied together — and the grid sits relative to the hull's bounds,
+## which a chunkiness change moves, so it has to be re-placed rather than left
+## floating through a hull that just got fatter.
+func _on_style_changed(_profile: StyleProfile) -> void:
+	if view == null:
+		return
+	view.restyle()
+	if _systems != null:
+		_systems.bind(view, self)
+	_place_grid()
+
 
 ## Re-resolve the design and rebuild every mesh. Cheap enough to run on every
 ## edit: meshes are cached per part, so a rebuild is a few hundred node creations

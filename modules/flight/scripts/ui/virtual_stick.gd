@@ -120,7 +120,7 @@ func _draw() -> void:
 	var centre := _origin if _dragging else size * 0.5
 	var live := _dragging or _external
 	var ring := BuilderTheme.accent() if live else BuilderTheme.border_strong()
-	draw_circle(centre, r, Color(BuilderTheme.BG_DEEP, 0.34))
+	draw_circle(centre, r, Color(BuilderTheme.bg_deep(), 0.34))
 	draw_arc(centre, r, 0.0, TAU, 40, ring, RING_WIDTH, true)
 	# Cross hairs at rest position: without them a centred stick is a blank disc
 	# and gives no sense of which way it will move.
