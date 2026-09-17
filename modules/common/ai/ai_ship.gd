@@ -91,7 +91,10 @@ var current_target: Node3D = null
 
 
 func _init() -> void:
-	_rng.randomize()
+	# Seed from Session so two F5 restarts replay identical AI behaviour (§0.3).
+	# Hashed with the instance ID so every ship gets a different stream without
+	# calling randomize(), which would break determinism.
+	_rng.seed = hash(Session.seed ^ get_instance_id())
 
 
 ## Build this ship from a random preset. Called once after [method add_child]

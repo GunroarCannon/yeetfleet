@@ -48,7 +48,7 @@ enum Archetype {
 	RESCUE_TEAM,
 	## Smuggler. Solo or pair, evasive, uses asteroid cover, fights only cornered.
 	SMUGGLER,
-	## Bounty hunters. Small group, coordinated pursuit, high aggression,智能 target selection.
+	## Bounty hunters. Small group, coordinated pursuit, high aggression, smart target selection.
 	BOUNTY_HUNTER,
 	## Ancient autopilot. Derelict ships that move in pre-programmed patterns.
 	DERELICT_PATROL,
