@@ -29,7 +29,7 @@ var gravity: GravitySystem = null
 var phys: PhysWorld = null
 var style: StyleProfile = null
 var events: IncidentDirector = null
-# var reputation: RepStore     # modules/reputation     (M5)
+var reputation: RepStore = null   ## modules/reputation (M5)
 
 
 func _init() -> void:

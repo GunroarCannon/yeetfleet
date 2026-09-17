@@ -571,11 +571,31 @@ func _build_incident_director() -> void:
 	var ctx := NebulaContext.new()
 	ctx.gravity = gravity
 	ctx.phys = phys_world
+	# M5 — create a session-scoped reputation store and wire it in.
+	var rep_store := SessionRepStore.new()
+	ctx.reputation = rep_store
 	incident_director.context = ctx
 	incident_director.world_parent = self
 	if _hud != null:
 		incident_director.hud_container = _hud.get_event_container()
 	add_child(incident_director)
+	# Wire incident outcomes into the reputation system.
+	# Signature: incident_resolved(id: String, how: String, who: String)
+	incident_director.incident_resolved.connect(
+		func(_id: String, _how: String, _who: String) -> void:
+			# "who" is the actor node name; "how" is the resolve verb.
+			# Only hostile resolutions generate grudges for now.
+			if _who.is_empty():
+				return
+			match _how:
+				"player_attacked":
+					rep_store.record_act("player", "faction_generic", RepStore.ACTS.ATTACK, 4)
+				"player_rescued":
+					rep_store.record_act("player", "faction_generic", RepStore.ACTS.RESCUE, 3)
+				_:
+					pass
+	)
+
 
 
 ## Load every .tres profile in modules/physics/data/profiles, keyed by file base

@@ -1,0 +1,75 @@
+Godot Engine v4.5.stable.official.876b29033 - https://godotengine.org
+
+
+=== reputation smoke ===
+
+-- Grudge --
+  [PASS] actor_id set
+  [PASS] faction_id set
+  [PASS] act set
+  [PASS] severity set
+  [PASS] heat initialised to severity × HEAT_PER_SEVERITY
+  [PASS] grudge still alive after 1 second
+  [PASS] heat decreased after tick
+  [PASS] grudge dies when heat reaches zero
+-- SessionRepStore hostile path --
+  [PASS] initial heat is 0
+  [PASS] heat = severity × HEAT_PER_SEVERITY after attack
+  [PASS] one grudge recorded
+  [PASS] heat accumulates across multiple acts on same faction
+  [PASS] two grudges recorded
+  [PASS] traders heat is independent
+  [PASS] empire heat unchanged by traders act
+-- SessionRepStore friendly reduces heat --
+  [PASS] heat decreases after friendly rescue act
+  [PASS] heat = base − cool_per_severity × severity
+  [PASS] friendly act alone does not produce negative heat
+-- SessionRepStore decay --
+  [PASS] heat > 0 after attack
+  [PASS] heat decays to 0 over time
+  [PASS] dead grudges are removed
+-- SessionRepStore serialise round-trip --
+  [PASS] to_dict has grudges key
+  [PASS] to_dict has friendly key
+  [PASS] to_dict has session_time key
+  [PASS] empire heat survives round-trip
+  [PASS] traders heat survives round-trip
+  [PASS] grudge count survives round-trip
+-- Witness range --
+  [PASS] both nearby ships witness the act
+-- Witness out of range --
+  [PASS] ship beyond WITNESS_RANGE_M does not witness
+  [PASS] only in-range ship witnesses in mixed set
+  [PASS] correct witness selected
+-- Recognition thresholds --
+  [PASS] no history → UNKNOWN
+  [PASS] small heat → IDENTIFIED
+  [PASS] heat >= HOSTILE_THRESHOLD → HOSTILE
+  [PASS] heat >= KOS_THRESHOLD → KOS
+-- Recognition labels --
+  [PASS] UNKNOWN label is empty string
+  [PASS] IDENTIFIED label correct
+  [PASS] HOSTILE label correct
+  [PASS] KOS label correct
+-- Recognition out of transponder range --
+  [PASS] beyond transponder range → UNKNOWN even at max heat
+-- SavedRepStore delegates --
+  [PASS] SavedRepStore.get_heat delegates to SessionRepStore
+  [PASS] SavedRepStore.to_dict delegates to SessionRepStore
+  [PASS] SavedRepStore.from_dict round-trip preserves heat
+-- Multiple faction isolation --
+  [PASS] empire has heat
+  [PASS] pirates: only friendly act → heat = 0
+  [PASS] traders has heat
+  [PASS] empire in factions list
+  [PASS] traders in factions list
+-- Grudge from_dict round-trip --
+  [PASS] actor_id round-trip
+  [PASS] faction_id round-trip
+  [PASS] act round-trip
+  [PASS] severity round-trip
+  [PASS] heat round-trip within tolerance
+  [PASS] timestamp round-trip
+
+--- 0 assertion(s) failed ---
+
