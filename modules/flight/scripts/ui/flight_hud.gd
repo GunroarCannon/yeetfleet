@@ -982,7 +982,7 @@ func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 	# being "responsive" and starts being an FPS — point the nose and be pointing
 	# there. Nothing happens on the other three modes, which is the point.
 	popup.add_slider_row(
-		"Arcade pivot", 1.0, 6.0, 0.25, Session.arcade_pivot,
+		"Arcade pivot / tilt", 1.0, 6.0, 0.25, Session.arcade_pivot,
 		func(v: float) -> void: _apply_arcade_pivot(v), "×%.2f"
 	)
 	popup.add_help_row(

@@ -38,6 +38,15 @@ static func build(kind: String, spec: Dictionary) -> Built:
 		"turret": markers = _turret(lp, spec)
 		"wing": markers = _wing(lp, spec)
 		"tail_fin": markers = _tail_fin(lp, spec)
+		"truss_spine": markers = _truss_spine(lp, spec)
+		"city_slab": markers = _city_slab(lp, spec)
+		"biosphere_dome": markers = _biosphere_dome(lp, spec)
+		"energy_ring": markers = _energy_ring(lp, spec)
+		"plasma_core": markers = _plasma_core(lp, spec)
+		"saucer_sector": markers = _saucer_sector(lp, spec)
+		"fuel_cluster": markers = _fuel_cluster(lp, spec)
+		"radiator_wing": markers = _radiator_wing(lp, spec)
+		"hangar_bay": markers = _hangar_bay(lp, spec)
 		_: markers = _greeble_block(lp, spec)
 
 	var built := Built.new()
@@ -177,6 +186,21 @@ static func _ring_xz(y: float, rx: float, rz: float, sides: int) -> PackedVector
 		var a := TAU * float(i) / float(n)
 		out.append(Vector3(cos(a) * rx, y, sin(a) * rz))
 	return out
+
+
+static func _rect_xz(y: float, width: float, depth: float, corner := 0.0) -> PackedVector3Array:
+	var hw := width * 0.5
+	var hd := depth * 0.5
+	var c := clampf(corner, 0.0, minf(hw, hd) * 0.95)
+	if c <= 0.0:
+		return PackedVector3Array([
+			Vector3(hw, y, -hd), Vector3(hw, y, hd), Vector3(-hw, y, hd), Vector3(-hw, y, -hd)
+		])
+	return PackedVector3Array([
+		Vector3(hw, y, -hd + c), Vector3(hw, y, hd - c), Vector3(hw - c, y, hd),
+		Vector3(-hw + c, y, hd), Vector3(-hw, y, hd - c), Vector3(-hw, y, -hd + c),
+		Vector3(-hw + c, y, -hd), Vector3(hw - c, y, -hd),
+	])
 
 
 ## Thin connecting beam — links a dock arm's hull-side mount back to the
@@ -415,3 +439,432 @@ static func _dome(lp: LowPoly, spec: Dictionary) -> Dictionary:
 	var band2 := _ring_xz(radius * 0.40 * (-1.0 if flip else 1.0), radius * 0.90, radius * 0.90, sides)
 	lp.add_loft([band, band2], LowPoly.CH_TRIM, false, false)
 	return {}
+
+
+## Open 4-column structural lattice girder with cross-ties and diagonal bracing.
+## Extrudes along -Z from z=0 to z=-length.
+static func _truss_spine(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var length := _f(spec, "length", 20.0)
+	var width := _f(spec, "width", 4.0)
+	var height := _f(spec, "height", 4.0)
+	var chord_thick := maxf(minf(width, height) * 0.12, 0.2)
+	var bays := maxi(_i(spec, "bays", 4), 1)
+	var hw := (width - chord_thick) * 0.5
+	var hh := (height - chord_thick) * 0.5
+
+	# 4 continuous longitudinal chords running the full length
+	var corners := [
+		Vector3(hw, hh, 0.0),
+		Vector3(-hw, hh, 0.0),
+		Vector3(-hw, -hh, 0.0),
+		Vector3(hw, -hh, 0.0),
+	]
+	for c in corners:
+		lp.add_box(Vector3(c.x, c.y, -length * 0.5), Vector3(chord_thick, chord_thick, length), LowPoly.CH_TRIM)
+
+	# Cross-ties per bay
+	var bay_len := length / float(bays)
+	for b in bays + 1:
+		var z := -float(b) * bay_len
+		lp.add_box(Vector3(0.0, hh, z), Vector3(width, chord_thick, chord_thick), LowPoly.CH_TRIM)
+		lp.add_box(Vector3(0.0, -hh, z), Vector3(width, chord_thick, chord_thick), LowPoly.CH_TRIM)
+		lp.add_box(Vector3(hw, 0.0, z), Vector3(chord_thick, height, chord_thick), LowPoly.CH_TRIM)
+		lp.add_box(Vector3(-hw, 0.0, z), Vector3(chord_thick, height, chord_thick), LowPoly.CH_TRIM)
+
+	# Diagonal cross braces along each bay
+	var diag_len := Vector2(width, bay_len).length()
+	for b in bays:
+		var z0 := -float(b) * bay_len
+		var z1 := -float(b + 1) * bay_len
+		var z_mid := (z0 + z1) * 0.5
+		lp.begin_shape()
+		lp.add_box(Vector3(0.0, hh, z_mid), Vector3(chord_thick * 0.8, chord_thick * 0.8, diag_len * 0.95), LowPoly.CH_PRIMARY)
+		lp.add_box(Vector3(0.0, -hh, z_mid), Vector3(chord_thick * 0.8, chord_thick * 0.8, diag_len * 0.95), LowPoly.CH_PRIMARY)
+		lp.add_box(Vector3(hw, 0.0, z_mid), Vector3(chord_thick * 0.8, chord_thick * 0.8, diag_len * 0.95), LowPoly.CH_PRIMARY)
+		lp.add_box(Vector3(-hw, 0.0, z_mid), Vector3(chord_thick * 0.8, chord_thick * 0.8, diag_len * 0.95), LowPoly.CH_PRIMARY)
+		lp.end_shape(false)
+
+	# Center transit conduit / power pipe running down the core
+	var core_r := minf(width, height) * 0.22
+	var core_prof := LowPoly.ngon(6, core_r, 1.0)
+	lp.add_loft([
+		LowPoly.ring(core_prof, 0.0, Vector2.ONE),
+		LowPoly.ring(core_prof, -length, Vector2.ONE),
+	], LowPoly.CH_ACCENT, true, true)
+	return {}
+
+
+## Stepped cantilevered habitat block with chamfered profile and glowing window strips.
+## Built upright (local +Y is height, X is width, Z is depth) matching tower and spire conventions.
+static func _city_slab(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var width := _f(spec, "width", 14.0)
+	var height := _f(spec, "height", 8.0)
+	var depth := _f(spec, "depth", 12.0)
+	var chamfer := _f(spec, "chamfer", width * 0.15)
+	var taper := _f(spec, "taper", 0.85)
+
+	# Base mounting terrace collar (CH_TRIM)
+	var base_ring_0 := _rect_xz(0.0, width * 1.06, depth * 1.06, chamfer)
+	var base_ring_1 := _rect_xz(height * 0.12, width * 1.06, depth * 1.06, chamfer)
+	lp.add_loft([base_ring_0, base_ring_1], LowPoly.CH_TRIM, true, false)
+
+	# Main tiered block loft (CH_PRIMARY)
+	var r0 := _rect_xz(height * 0.10, width, depth, chamfer)
+	var r1 := _rect_xz(height * 0.50, width * 0.96, depth * 0.96, chamfer)
+	var r2 := _rect_xz(height * 0.85, width * taper, depth * taper, chamfer * taper)
+	var r3 := _rect_xz(height, width * taper * 0.95, depth * taper * 0.95, chamfer * taper * 0.95)
+	lp.add_loft([r0, r1, r2, r3], LowPoly.CH_PRIMARY, false, true)
+
+	# Lit window bands (CH_ACCENT) wrapping horizontally around the tiers
+	var window_tiers := _i(spec, "windows", 3)
+	lp.begin_shape()
+	for i in window_tiers:
+		var t := (float(i) + 0.5) / float(window_tiers)
+		var y_win := height * lerpf(0.22, 0.82, t)
+		var s := lerpf(1.0, taper, t)
+		var hw := width * s * 0.5 + 0.02
+		var hd := depth * s * 0.5 + 0.02
+		var h_win := height * 0.04
+		# Front face (+Z)
+		lp.add_decal_quad(
+			Vector3(-hw * 0.8, y_win - h_win, hd),
+			Vector3(hw * 0.8, y_win - h_win, hd),
+			Vector3(hw * 0.8, y_win + h_win, hd),
+			Vector3(-hw * 0.8, y_win + h_win, hd),
+			LowPoly.CH_ACCENT
+		)
+		# Back face (-Z)
+		lp.add_decal_quad(
+			Vector3(hw * 0.8, y_win - h_win, -hd),
+			Vector3(-hw * 0.8, y_win - h_win, -hd),
+			Vector3(-hw * 0.8, y_win + h_win, -hd),
+			Vector3(hw * 0.8, y_win + h_win, -hd),
+			LowPoly.CH_ACCENT
+		)
+		# Right face (+X)
+		lp.add_decal_quad(
+			Vector3(hw, y_win - h_win, hd * 0.8),
+			Vector3(hw, y_win - h_win, -hd * 0.8),
+			Vector3(hw, y_win + h_win, -hd * 0.8),
+			Vector3(hw, y_win + h_win, hd * 0.8),
+			LowPoly.CH_ACCENT
+		)
+		# Left face (-X)
+		lp.add_decal_quad(
+			Vector3(-hw, y_win - h_win, -hd * 0.8),
+			Vector3(-hw, y_win - h_win, hd * 0.8),
+			Vector3(-hw, y_win + h_win, hd * 0.8),
+			Vector3(-hw, y_win + h_win, -hd * 0.8),
+			LowPoly.CH_ACCENT
+		)
+	lp.end_shape(false)
+
+	# Cantilevered observation terrace on front (+Z face)
+	var terrace_w := width * 0.45
+	var terrace_d := depth * 0.25
+	var terrace_y := height * 0.5
+	var t_z0 := depth * 0.5
+	var t_z1 := depth * 0.5 + terrace_d
+	var tr0 := _rect_xz(terrace_y, terrace_w, terrace_d, terrace_w * 0.1)
+	var tr1 := _rect_xz(terrace_y - height * 0.1, terrace_w * 0.9, terrace_d * 0.9, terrace_w * 0.1)
+	for idx in tr0.size():
+		tr0[idx].z += terrace_d * 0.5 + depth * 0.48
+		tr1[idx].z += terrace_d * 0.5 + depth * 0.48
+	lp.add_loft([tr0, tr1], LowPoly.CH_TRIM, true, true)
+
+	# Heavy cantilever under-bracket ribs (CH_TRIM)
+	var rib_w := width * 0.16
+	var rib_h := height * 0.25
+	lp.add_box(Vector3(width * 0.25, -rib_h * 0.4, 0.0), Vector3(rib_w, rib_h, depth * 0.7), LowPoly.CH_TRIM)
+	lp.add_box(Vector3(-width * 0.25, -rib_h * 0.4, 0.0), Vector3(rib_w, rib_h, depth * 0.7), LowPoly.CH_TRIM)
+	return {}
+
+
+## Geodesic faceted biosphere dome with equatorial structural collar ring
+## and glowing biome facet panes (CH_ACCENT).
+static func _biosphere_dome(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var radius := _f(spec, "radius", 8.0)
+	var sides := _i(spec, "sides", 14)
+	var steps := maxi(_i(spec, "steps", 6), 3)
+	var flip := _f(spec, "flip", 0.0) > 0.5
+	var y_sign := -1.0 if flip else 1.0
+
+	# Base structural collar ring
+	var collar_r := radius * 1.08
+	var collar_h := radius * 0.15
+	var collar_outer := _ring_xz(0.0, collar_r, collar_r, sides)
+	var collar_top := _ring_xz(collar_h * y_sign, collar_r, collar_r, sides)
+	lp.add_loft([collar_outer, collar_top], LowPoly.CH_TRIM, true, false)
+
+	# Faceted geodesic dome rings
+	var rings: Array = []
+	for i in steps + 1:
+		var t := float(i) / float(steps)
+		var ang := t * PI * 0.5
+		var r := cos(ang) * radius
+		var y := (collar_h + sin(ang) * radius * 0.85) * y_sign
+		rings.append(_ring_xz(y, r, r, sides))
+	lp.add_loft(rings, LowPoly.CH_PRIMARY, false, true)
+
+	# Glowing bio-luminescent window sectors on the dome
+	var mid_step := steps / 2
+	if mid_step < rings.size() - 1:
+		var r_low: PackedVector3Array = rings[mid_step]
+		var r_high: PackedVector3Array = rings[mid_step + 1]
+		lp.begin_shape()
+		for i in sides:
+			if i % 2 == 0:
+				var j := (i + 1) % sides
+				lp.add_decal_quad(
+					r_low[i] * 1.01, r_low[j] * 1.01,
+					r_high[j] * 1.01, r_high[i] * 1.01,
+					LowPoly.CH_ACCENT
+				)
+		lp.end_shape(false)
+
+	# Geodesic meridional structural ribs running up to the apex
+	for i in sides:
+		if i % 2 == 0:
+			var p_base: Vector3 = rings[0][i]
+			var p_mid: Vector3 = rings[mid_step][i]
+			var rib_len := (p_mid - p_base).length()
+			lp.add_box((p_base + p_mid) * 0.5, Vector3(radius * 0.05, radius * 0.05, rib_len), LowPoly.CH_TRIM)
+	return {}
+
+
+## Circular energy conduit ring platform (portal accelerator ring or gravity wheel).
+## Hoop faces Z so you can fly through it.
+static func _energy_ring(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var radius := _f(spec, "radius", 18.0)
+	var tube_radius := _f(spec, "tube_radius", 1.8)
+	var sides := _i(spec, "sides", 10)
+	var segments := maxi(_i(spec, "segments", 16), 8)
+
+	# Outer structural ring (CH_TRIM)
+	var outer_r := radius + tube_radius * 0.4
+	var outer_tube := tube_radius * 0.6
+	var tube_profile := LowPoly.ngon(sides, outer_tube, 1.2)
+	var rings: Array = []
+	for i in segments + 1:
+		var a := TAU * float(i) / float(segments)
+		var centre := Vector3(cos(a) * outer_r, sin(a) * outer_r, 0.0)
+		var tangent := Vector3(-sin(a), cos(a), 0.0)
+		var normal := Vector3(0.0, 0.0, 1.0)
+		var binormal := tangent.cross(normal)
+		var ring_pts := PackedVector3Array()
+		for p in tube_profile:
+			ring_pts.append(centre + binormal * p.x + normal * p.y)
+		rings.append(ring_pts)
+	lp.add_loft(rings, LowPoly.CH_TRIM, false, false)
+
+	# Inner glowing accelerator track (CH_ACCENT)
+	var inner_r := radius - tube_radius * 0.5
+	var inner_tube := tube_radius * 0.4
+	var inner_profile := LowPoly.ngon(8, inner_tube, 0.8)
+	var inner_rings: Array = []
+	for i in segments + 1:
+		var a := TAU * float(i) / float(segments)
+		var centre := Vector3(cos(a) * inner_r, sin(a) * inner_r, 0.0)
+		var tangent := Vector3(-sin(a), cos(a), 0.0)
+		var normal := Vector3(0.0, 0.0, 1.0)
+		var binormal := tangent.cross(normal)
+		var ring_pts := PackedVector3Array()
+		for p in inner_profile:
+			ring_pts.append(centre + binormal * p.x + normal * p.y)
+		inner_rings.append(ring_pts)
+	lp.add_loft(inner_rings, LowPoly.CH_ACCENT, false, false)
+
+	# Radial structural brackets tying outer and inner rings
+	var spoke_count := clampi(segments / 2, 4, 12)
+	for i in spoke_count:
+		var a := TAU * float(i) / float(spoke_count)
+		var mid_r := (outer_r + inner_r) * 0.5
+		var pos := Vector3(cos(a) * mid_r, sin(a) * mid_r, 0.0)
+		var bracket_len := outer_r - inner_r + tube_radius * 0.5
+		lp.add_box(pos, Vector3(tube_radius * 0.4, bracket_len, tube_radius * 0.8), LowPoly.CH_PRIMARY)
+	return {}
+
+
+## Ventral plasma super-core / reactor aperture with central glowing plasma emitter.
+static func _plasma_core(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var radius := _f(spec, "radius", 12.0)
+	var depth := _f(spec, "depth", 6.0)
+	var sides := _i(spec, "sides", 14)
+
+	# Stepped outer containment bevel rings stepping downward into the recess
+	var r0 := _ring_xz(0.0, radius, radius, sides)
+	var r1 := _ring_xz(-depth * 0.3, radius * 0.88, radius * 0.88, sides)
+	var r2 := _ring_xz(-depth * 0.7, radius * 0.65, radius * 0.65, sides)
+	var r3 := _ring_xz(-depth, radius * 0.42, radius * 0.42, sides)
+	lp.add_loft([r0, r1, r2, r3], LowPoly.CH_TRIM, true, true)
+
+	# Central glowing plasma sphere / column (CH_ACCENT)
+	var core_r := radius * 0.35
+	var core_h := depth * 0.6
+	var c_base := _ring_xz(-depth, core_r * 0.9, core_r * 0.9, sides)
+	var c_mid := _ring_xz(-depth * 0.3, core_r, core_r, sides)
+	var c_tip := _ring_xz(core_h * 0.2, core_r * 0.2, core_r * 0.2, sides)
+	lp.add_loft([c_base, c_mid, c_tip], LowPoly.CH_ACCENT, true, true)
+
+	# Magnetic containment vanes (radial fins)
+	var fin_count := 6
+	for i in fin_count:
+		var a := TAU * float(i) / float(fin_count)
+		var fin_mid := Vector3(cos(a) * radius * 0.6, -depth * 0.5, sin(a) * radius * 0.6)
+		lp.add_box(fin_mid, Vector3(radius * 0.08, depth * 0.5, radius * 0.35), LowPoly.CH_PRIMARY)
+	return {}
+
+
+## Concentric stepped disc wedge for the colossal saucer mothership (Ref 5).
+static func _saucer_sector(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var center_angle := _f(spec, "center_angle", 0.0)
+	var angle_span := _f(spec, "angle_span", PI * 0.25)
+	var inner_r := _f(spec, "inner_r", 6.0)
+	var mid_r := _f(spec, "mid_r", 18.0)
+	var outer_r := _f(spec, "outer_r", 30.0)
+	var height := _f(spec, "height", 8.0)
+	var steps := maxi(_i(spec, "steps", 5), 2)
+
+	# Construct the wedge volumes using add_quad
+	lp.begin_shape()
+	for i in steps:
+		var t0 := float(i) / float(steps)
+		var t1 := float(i + 1) / float(steps)
+		var ang0 := center_angle - angle_span * 0.5 + angle_span * t0
+		var ang1 := center_angle - angle_span * 0.5 + angle_span * t1
+		var d0 := Vector3(cos(ang0), 0.0, sin(ang0))
+		var d1 := Vector3(cos(ang1), 0.0, sin(ang1))
+
+		# Inner tier: y from -height*0.2 to +height*0.5
+		var in_top0 := d0 * mid_r + Vector3(0, height * 0.35, 0)
+		var in_top1 := d1 * mid_r + Vector3(0, height * 0.35, 0)
+		var in_core0 := d0 * inner_r + Vector3(0, height * 0.5, 0)
+		var in_core1 := d1 * inner_r + Vector3(0, height * 0.5, 0)
+		lp.add_quad(in_core0, in_core1, in_top1, in_top0, LowPoly.CH_PRIMARY)
+
+		# Outer armor tier: y from -height*0.3 to +height*0.12
+		var out_mid0 := d0 * mid_r + Vector3(0, height * 0.12, 0)
+		var out_mid1 := d1 * mid_r + Vector3(0, height * 0.12, 0)
+		var out_rim0 := d0 * outer_r + Vector3(0, 0.0, 0)
+		var out_rim1 := d1 * outer_r + Vector3(0, 0.0, 0)
+		lp.add_quad(out_mid0, out_mid1, out_rim1, out_rim0, LowPoly.CH_PRIMARY)
+
+		# Trench step wall between inner and outer decks
+		lp.add_quad(in_top0, in_top1, out_mid1, out_mid0, LowPoly.CH_TRIM)
+
+		# Ventral keel slope
+		var bot_core0 := d0 * inner_r + Vector3(0, -height * 0.45, 0)
+		var bot_core1 := d1 * inner_r + Vector3(0, -height * 0.45, 0)
+		var bot_rim0 := d0 * outer_r + Vector3(0, -height * 0.15, 0)
+		var bot_rim1 := d1 * outer_r + Vector3(0, -height * 0.15, 0)
+		lp.add_quad(bot_rim0, bot_rim1, bot_core1, bot_core0, LowPoly.CH_PRIMARY)
+
+		# Outer edge vertical band
+		lp.add_quad(out_rim0, out_rim1, bot_rim1, bot_rim0, LowPoly.CH_TRIM)
+	lp.end_shape(false)
+
+	# Window stripe decals on the trench step wall
+	lp.begin_shape()
+	for i in steps:
+		var t0 := float(i) / float(steps)
+		var t1 := float(i + 1) / float(steps)
+		var ang0 := center_angle - angle_span * 0.5 + angle_span * t0
+		var ang1 := center_angle - angle_span * 0.5 + angle_span * t1
+		var d0 := Vector3(cos(ang0), 0.0, sin(ang0))
+		var d1 := Vector3(cos(ang1), 0.0, sin(ang1))
+		var w_top0 := d0 * (mid_r + 0.02) + Vector3(0, height * 0.28, 0)
+		var w_top1 := d1 * (mid_r + 0.02) + Vector3(0, height * 0.28, 0)
+		var w_bot0 := d0 * (mid_r + 0.02) + Vector3(0, height * 0.18, 0)
+		var w_bot1 := d1 * (mid_r + 0.02) + Vector3(0, height * 0.18, 0)
+		lp.add_decal_quad(w_top0, w_top1, w_bot1, w_bot0, LowPoly.CH_ACCENT)
+	lp.end_shape(false)
+	return {}
+
+
+## Propellant tank cluster with mounting cradle and manifold piping.
+static func _fuel_cluster(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var length := _f(spec, "length", 16.0)
+	var tank_r := _f(spec, "tank_radius", 2.2)
+	var count := clampi(_i(spec, "count", 4), 2, 6)
+	var spread := tank_r * 2.1
+
+	# End bulkheads / cradles
+	lp.add_box(Vector3(0, 0, 0.5), Vector3(spread * float(count) * 0.6, spread * 1.5, 1.2), LowPoly.CH_TRIM)
+	lp.add_box(Vector3(0, 0, -length - 0.5), Vector3(spread * float(count) * 0.6, spread * 1.5, 1.2), LowPoly.CH_TRIM)
+
+	# Cylindrical tanks
+	var tank_prof := LowPoly.ngon(8, tank_r, 1.0)
+	for i in count:
+		var x_off := (float(i) - float(count - 1) * 0.5) * spread
+		lp.add_loft([
+			LowPoly.ring(tank_prof, 0.0, Vector2.ONE, Vector3(x_off, 0, 0)),
+			LowPoly.ring(tank_prof, -length * 0.1, Vector2(1.05, 1.05), Vector3(x_off, 0, 0)),
+			LowPoly.ring(tank_prof, -length * 0.9, Vector2(1.05, 1.05), Vector3(x_off, 0, 0)),
+			LowPoly.ring(tank_prof, -length, Vector2.ONE, Vector3(x_off, 0, 0)),
+		], LowPoly.CH_PRIMARY, true, true)
+		lp.add_box(Vector3(x_off, 0, -length * 0.35), Vector3(tank_r * 2.15, tank_r * 2.15, 0.4), LowPoly.CH_ACCENT)
+		lp.add_box(Vector3(x_off, 0, -length * 0.65), Vector3(tank_r * 2.15, tank_r * 2.15, 0.4), LowPoly.CH_ACCENT)
+	return {}
+
+
+## Industrial cooling radiator wing with corrugated slats and coolant conduits.
+static func _radiator_wing(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var span := _f(spec, "span", 18.0)
+	var chord := _f(spec, "chord", 10.0)
+	var thickness := _f(spec, "thickness", 0.6)
+	var side := signf(_f(spec, "side", 1.0))
+	if is_zero_approx(side):
+		side = 1.0
+
+	# Heavy structural root mount spar
+	lp.add_box(Vector3(side * span * 0.5, 0, 0), Vector3(span, thickness * 1.5, thickness * 2.0), LowPoly.CH_TRIM)
+
+	# Radiator panel slab
+	var panel_w := span * 0.9
+	var panel_d := chord * 0.85
+	lp.add_box(
+		Vector3(side * (span * 0.5 + 0.5), 0, -panel_d * 0.5),
+		Vector3(panel_w, thickness * 0.5, panel_d),
+		LowPoly.CH_PRIMARY
+	)
+
+	# Glowing coolant conduit pipe along trailing edge
+	lp.add_box(
+		Vector3(side * span * 0.5, thickness * 0.4, -panel_d),
+		Vector3(span * 0.95, thickness * 0.6, thickness * 0.6),
+		LowPoly.CH_ACCENT
+	)
+
+	# Radiator cooling corrugation ribs
+	var rib_count := 5
+	for i in rib_count:
+		var t := (float(i) + 0.5) / float(rib_count)
+		var x := side * lerpf(span * 0.15, span * 0.9, t)
+		lp.add_box(Vector3(x, thickness * 0.3, -panel_d * 0.5), Vector3(0.3, thickness * 0.4, panel_d * 0.95), LowPoly.CH_TRIM)
+	return {}
+
+
+## Inset open-mouth docking cavity with landing guide lights.
+static func _hangar_bay(lp: LowPoly, spec: Dictionary) -> Dictionary:
+	var width := _f(spec, "width", 8.0)
+	var height := _f(spec, "height", 5.0)
+	var depth := _f(spec, "depth", 12.0)
+	var frame_thick := _f(spec, "frame", 0.8)
+
+	var hw := width * 0.5
+	var hh := height * 0.5
+	lp.add_box(Vector3(0, hh + frame_thick * 0.5, 0), Vector3(width + frame_thick * 2.0, frame_thick, frame_thick * 2.0), LowPoly.CH_TRIM)
+	lp.add_box(Vector3(0, -hh - frame_thick * 0.5, 0), Vector3(width + frame_thick * 2.0, frame_thick, frame_thick * 2.0), LowPoly.CH_TRIM)
+	lp.add_box(Vector3(hw + frame_thick * 0.5, 0, 0), Vector3(frame_thick, height, frame_thick * 2.0), LowPoly.CH_TRIM)
+	lp.add_box(Vector3(-hw - frame_thick * 0.5, 0, 0), Vector3(frame_thick, height, frame_thick * 2.0), LowPoly.CH_TRIM)
+
+	lp.add_box(Vector3(0, -hh + 0.1, -depth * 0.5), Vector3(width, 0.2, depth), LowPoly.CH_PRIMARY)
+	lp.add_box(Vector3(0, hh - 0.1, -depth * 0.5), Vector3(width, 0.2, depth), LowPoly.CH_PRIMARY)
+	lp.add_box(Vector3(hw - 0.1, 0, -depth * 0.5), Vector3(0.2, height, depth), LowPoly.CH_PRIMARY)
+	lp.add_box(Vector3(-hw + 0.1, 0, -depth * 0.5), Vector3(0.2, height, depth), LowPoly.CH_PRIMARY)
+	lp.add_box(Vector3(0, 0, -depth), Vector3(width, height, 0.4), LowPoly.CH_TRIM)
+
+	lp.add_box(Vector3(0, -hh + 0.22, -depth * 0.5), Vector3(width * 0.15, 0.05, depth * 0.85), LowPoly.CH_ACCENT)
+
+	return {"dock": [_marker(Vector3(0.0, -hh + 0.3, -depth * 0.6), Vector3.FORWARD)]}
+

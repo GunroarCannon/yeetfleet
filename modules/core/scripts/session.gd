@@ -137,7 +137,7 @@ static var player_speed_scale := 1.0
 ## the player without changing how the player's own ship flies: turning your own
 ## speed down to make combat readable is a different request from turning the
 ## enemy's down to make it winnable, and one dial cannot do both.
-static var npc_speed_scale := 1.0
+static var npc_speed_scale := 0.3
 ## Fast orbits: a ship being held in orbit by the flight model's orbital assist
 ## whips around its body faster than the body's own gravity would ever carry it.
 ## Deliberately unphysical — that is what the toggle is for.
@@ -156,7 +156,7 @@ static var orbit_speed_scale := 4.0
 ## ship pivots almost instantly. Deliberately scoped to arcade: sim and
 ## realistic are the modes that exist to have weight, and a dial that could
 ## quietly turn those into the same thing would make the mode list a lie.
-static var arcade_pivot := 1.0
+static var arcade_pivot := 3.75
 ## Solar-system-gen lab handoff to the real flight scene: the generation
 ## recipe for [constant FlightRoot.Location] value GENERATED_SYSTEM, or null
 ## for none pending — see [SolarSystemGenLabRoot._on_enter_flight_test_pressed].
@@ -272,10 +272,10 @@ static func reset_to_defaults() -> void:
 	trail_length = 1.0
 	solar_time_scale = 1.0
 	player_speed_scale = 1.0
-	npc_speed_scale = 1.0
+	npc_speed_scale = 0.3
 	fast_orbits = false
 	orbit_speed_scale = 4.0
-	arcade_pivot = 1.0
+	arcade_pivot = 3.75
 	pending_solar_system = null
 	pending_spawn_body_name = ""
 

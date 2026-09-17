@@ -15,6 +15,14 @@ func _initialize() -> void:
 	var packed := load("res://modules/large_craft_gen/large_craft_gen_lab.tscn") as PackedScene
 	var lab := packed.instantiate()
 	root.add_child(lab)
+	await process_frame
+	await process_frame
+	if args.size() >= 5:
+		var arch_idx := int(args[4])
+		lab.generator.archetype = arch_idx as LargeCraftGenerator.Archetype
+		lab.generator.generate()
+		lab._sync_archetype_option()
+		lab._frame_camera_to_craft()
 	for i in warm:
 		await process_frame
 	var img := root.get_texture().get_image()

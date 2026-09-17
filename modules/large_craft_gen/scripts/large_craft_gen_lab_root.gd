@@ -105,7 +105,7 @@ func _build_camera() -> void:
 func _frame_camera_to_craft() -> void:
 	var extent := 40.0
 	if generator != null:
-		extent = generator.approx_extent()
+		extent = generator.get_structure_radius()
 	_orbit_dist = clampf(extent * 2.2, DIST_MIN, DIST_MAX)
 
 
@@ -184,11 +184,14 @@ func _unhandled_input(event: InputEvent) -> void:
 func _update_camera_transform() -> void:
 	if _cam == null:
 		return
+	var target := Vector3.ZERO
+	if generator != null:
+		target = generator.get_structure_center()
 	var yaw := deg_to_rad(_orbit_yaw)
 	var pitch := deg_to_rad(_orbit_pitch)
 	var offset := Vector3(cos(pitch) * sin(yaw), sin(pitch), cos(pitch) * cos(yaw)) * _orbit_dist
-	_cam.global_position = offset
-	_cam.look_at(Vector3.ZERO, Vector3.UP)
+	_cam.global_position = target + offset
+	_cam.look_at(target, Vector3.UP)
 
 
 ## Raycasts from the camera along its own forward — a crosshair shot, not a

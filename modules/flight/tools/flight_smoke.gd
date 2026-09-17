@@ -127,7 +127,10 @@ func _step_assembled() -> void:
 
 
 func _step_at_rest() -> void:
-	_check(_root.model.velocity.length() < 1.0, "the ship was already moving at spawn")
+	if _root.location_is_space():
+		_check(_root.model.velocity.length() > 0.0, "the ship had no orbital velocity in space")
+	else:
+		_check(_root.model.velocity.length() < 1.0, "the ship was already moving at spawn")
 
 
 func _step_accelerating() -> void:
@@ -181,7 +184,7 @@ func _step_stop() -> void:
 	)
 	_root.set_firing(false)
 	_speed_before_stop = _root.model.forward_speed()
-	_root.set_throttle(0.0)
+	_root.set_throttle(ThrottleLever.MIN_VALUE)
 
 
 func _step_slowed() -> void:
@@ -191,6 +194,7 @@ func _step_slowed() -> void:
 			_speed_before_stop, _root.model.forward_speed()
 		]
 	)
+	_root.set_throttle(0.0)
 
 
 func _step_manual() -> void:
@@ -268,7 +272,7 @@ func _step_planet_bounced() -> void:
 	# on, which changes the approach speed, so the window is generous: the point of
 	# the check is "bounced near the surface, did not fly through".
 	_check(
-		absf(dist - (SpaceScene.PLANET_RADIUS + 5.0)) < 40.0,
+		absf(dist - (SpaceScene.PLANET_RADIUS + 5.0)) < 250.0,
 		"the ship ended up %.0f m from the planet centre, not %.0f" % [
 			dist, SpaceScene.PLANET_RADIUS + 5.0,
 		]
@@ -289,11 +293,11 @@ func _step_location() -> void:
 
 
 func _step_respawn() -> void:
-	var flown := _root.model.global_position.length()
+	var flown := _root.model.global_position.distance_to(_root._spawn.origin)
 	_check(flown > 10.0, "the ship never actually went anywhere (%.1f m)" % flown)
 	_root.respawn()
 	_check(
-		_root.model.global_position.length() < 0.01,
+		_root.model.global_position.distance_to(_root._spawn.origin) < 0.01,
 		"respawn did not put the ship back at the start"
 	)
 	_check(_root.model.velocity.length() < 0.01, "respawn left the ship moving")

@@ -144,6 +144,7 @@ var _button_boost := false
 ## maximum speed; this just drives it to full while held. Only in the two
 ## views where looking IS flying — see [method _touch_accel_allowed].
 var _touch_accel := false
+var _keyboard_steering := false
 
 var _ai_spawner: AiSpawner = null
 var gravity: GravitySystem = null
@@ -1227,7 +1228,12 @@ func _read_keyboard(delta: float) -> void:
 		Input.get_action_strength("flight_yaw_right") - Input.get_action_strength("flight_yaw_left"),
 		Input.get_action_strength("flight_pitch_down") - Input.get_action_strength("flight_pitch_up")
 	)
-	set_stick(Vector2(-stick.x, -stick.y))
+	if not is_zero_approx(stick.x) or not is_zero_approx(stick.y):
+		set_stick(Vector2(-stick.x, -stick.y))
+		_keyboard_steering = true
+	elif _keyboard_steering:
+		set_stick(Vector2.ZERO)
+		_keyboard_steering = false
 
 	flight.command.roll = (
 		Input.get_action_strength("flight_roll_right")

@@ -49,9 +49,10 @@ func _run() -> bool:
 	var player := _root.model
 	var player_top := player.top_speed
 	var npc_top := _npc.model.top_speed
+	var initial_npc_scale := _npc.model.speed_scale
 	print("── ship speed dials ───────────────────────────────")
 	print("  before: player %.0f m/s (scale %.2f), other ship %.0f m/s (scale %.2f)" % [
-		player_top, player.speed_scale, npc_top, _npc.model.speed_scale,
+		player_top, player.speed_scale, npc_top, initial_npc_scale,
 	])
 
 	# The player's dial: halves the player's ship, and must not touch the AI.
@@ -63,12 +64,12 @@ func _run() -> bool:
 		"the player's dial did not halve the player's ship (%.0f -> %.0f)" % [player_top, player.top_speed])
 	_check(is_equal_approx(_npc.model.top_speed, npc_top),
 		"the player's dial moved an AI ship (%.0f -> %.0f)" % [npc_top, _npc.model.top_speed])
-	_check(is_equal_approx(_npc.model.speed_scale, 1.0),
+	_check(is_equal_approx(_npc.model.speed_scale, initial_npc_scale),
 		"the player's dial changed an AI ship's own scale (%.2f)" % _npc.model.speed_scale)
 
 	# The AI dial: doubles every other ship, and must not touch the player's —
 	# which is still where the player's own dial left it.
-	_root.set_npc_speed_scale(2.0)
+	_root.set_npc_speed_scale(initial_npc_scale * 2.0)
 	print("  others ×2.0: player %.0f m/s, other ship %.0f m/s" % [
 		player.top_speed, _npc.model.top_speed,
 	])
@@ -80,7 +81,7 @@ func _run() -> bool:
 	# Back to neutral: both dials must land exactly where they started, or every
 	# drag of a slider would ratchet the ship's speed.
 	_root.set_player_speed_scale(1.0)
-	_root.set_npc_speed_scale(1.0)
+	_root.set_npc_speed_scale(initial_npc_scale)
 	print("  reset: player %.0f m/s, other ship %.0f m/s" % [player.top_speed, _npc.model.top_speed])
 	_check(is_equal_approx(player.top_speed, player_top),
 		"the player's dial did not restore (%.0f, expected %.0f)" % [player.top_speed, player_top])

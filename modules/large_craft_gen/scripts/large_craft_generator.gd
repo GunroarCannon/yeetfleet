@@ -192,15 +192,97 @@ func randomize_unlocked_params(new_seed: int) -> void:
 
 
 # --- Mothership / dock (Archetype.MOTHERSHIP) -----------------------------
-## segment_count = hull segments along the spine. hull_width/hull_height_ratio
-## /taper = cross-section and how much it narrows fore/aft. dock_arm_count/
-## dock_arm_length = docking arms off the hull. spire_count/greeble_count =
-## surface detail.
+## Concentric stepped saucer mothership with ventral plasma super-core,
+## radial city trenches, illuminated window bands, and perimeter docking clamp bays (Ref 5 & 6).
 func _generate_mothership() -> void:
-	var spine := _build_spine()
-	_mount_dock_arms_on_spine(spine)
-	_scatter_on_spine("spire", spire_count, spine, true)
-	_scatter_on_spine("greeble_block", greeble_count, spine, false)
+	var saucer_r := maxf(hull_width * 3.2, 32.0)
+	var saucer_h := hull_width * hull_height_ratio * 0.75
+	var mid_r := saucer_r * 0.55
+	var inner_r := saucer_r * 0.25
+
+	# 1. Forward command prow & central citadel spine running along Z
+	# Forward bow prow extends along +Z so shoot_at along the Z axis hits it cleanly.
+	var bow_length := saucer_r * 1.15
+	var prow_segments := maxi(segment_count / 3, 4)
+	for i in prow_segments:
+		var t := float(i) / float(prow_segments)
+		var z := lerpf(inner_r * 0.4, bow_length, t)
+		var scale_t := lerpf(1.0, taper * 0.4, t)
+		var w := hull_width * 0.65 * scale_t
+		_add_part("hull_segment", {
+			"length": (bow_length - inner_r * 0.4) / float(prow_segments) * 1.05,
+			"width": w, "height": w * hull_height_ratio,
+			"corner": w * 0.15, "taper": 0.88,
+		}, Transform3D(Basis(), Vector3(0, 0, z)))
+
+	# Aft stern engineering hull / engine block
+	var stern_length := saucer_r * 0.85
+	var stern_segments := maxi(segment_count / 4, 3)
+	for i in stern_segments:
+		var t := float(i) / float(stern_segments)
+		var z := lerpf(-inner_r * 0.4, -stern_length, t)
+		var w := hull_width * lerpf(0.75, 1.15, t)
+		_add_part("hull_segment", {
+			"length": stern_length / float(stern_segments) * 1.05,
+			"width": w, "height": w * hull_height_ratio * 0.9,
+			"corner": w * 0.12, "taper": 1.0,
+		}, Transform3D(Basis(), Vector3(0, 0, z)))
+
+	# 2. Colossal concentric tiered saucer / disc (Ref 5)
+	var sectors := 8
+	var angle_per := TAU / float(sectors)
+	for i in sectors:
+		var angle := angle_per * float(i)
+		_add_part("saucer_sector", {
+			"center_angle": angle,
+			"angle_span": angle_per * 1.02,
+			"inner_r": inner_r,
+			"mid_r": mid_r,
+			"outer_r": saucer_r,
+			"height": saucer_h,
+			"steps": 5,
+		}, Transform3D(Basis(), Vector3(0.0, 0.0, 0.0)))
+
+	# 3. Ventral recessed glowing super-core / plasma vent (Ref 5)
+	_add_part("plasma_core", {
+		"radius": inner_r * 0.95,
+		"depth": saucer_h * 0.85,
+		"sides": 14,
+	}, Transform3D(Basis(), Vector3(0.0, -saucer_h * 0.35, 0.0)))
+
+	# 4. Dorsal central observation biosphere dome / bridge citadel (Ref 5, 6)
+	_add_part("biosphere_dome", {
+		"radius": inner_r * 0.85,
+		"sides": 14,
+		"steps": 6,
+		"flip": 0.0,
+	}, Transform3D(Basis(), Vector3(0.0, saucer_h * 0.45, 0.0)))
+
+	# 5. Cantilevered perimeter docking clamp bays along the saucer rim
+	# Exactly dock_arm_count pads, distributed around the perimeter!
+	if dock_arm_count > 0:
+		for i in dock_arm_count:
+			var angle := TAU * float(i) / float(dock_arm_count) + _rng.randf_range(-0.1, 0.1)
+			var radial := Vector3(cos(angle), 0.0, sin(angle))
+			var mount_pos := radial * saucer_r
+			_place_dock_arm(mount_pos, radial, _jittered(dock_arm_length))
+
+	# 6. Spires and greebles on the saucer decks and spine
+	for i in spire_count:
+		var a := _rng.randf_range(0.0, TAU)
+		var r := _rng.randf_range(inner_r * 1.05, mid_r * 0.98)
+		var pos := Vector3(cos(a) * r, saucer_h * 0.36, sin(a) * r)
+		var height := _rng.randf_range(1.5, 4.0)
+		_add_part("spire", {"height": height, "base_radius": 0.6, "sides": 6},
+			Transform3D(_radial_up_basis(Vector3.UP), pos), true)
+
+	for i in greeble_count:
+		var a := _rng.randf_range(0.0, TAU)
+		var r := _rng.randf_range(mid_r * 1.02, saucer_r * 0.98)
+		var pos := Vector3(cos(a) * r, saucer_h * 0.13, sin(a) * r)
+		var size := _rng.randf_range(0.4, 0.9)
+		_add_part(_random_greeble_kind(), {"sx": size, "sy": size, "sz": size},
+			Transform3D(Basis(), pos), true)
 
 
 ## {z: float, radius: float} per segment, hull-surface radius at that point
@@ -208,11 +290,6 @@ func _generate_mothership() -> void:
 func _build_spine() -> Array[Dictionary]:
 	var half := float(segment_count) * SEGMENT_LENGTH * 0.5
 	var sections: Array[Dictionary] = []
-	# Linear taper (lerp from 1.0 to [member taper] across the run), not a
-	# per-segment compounding multiply — at 80 segments even a gentle 0.9
-	# per-segment taper compounds to 0.9^80 ≈ 0.0002 and the hull collapses
-	# to a needle a few segments in. Linear keeps "last segment is `taper`
-	# fraction of the first" true regardless of how many segments there are.
 	var last := maxf(float(segment_count - 1), 1.0)
 	for i in segment_count:
 		var z := half - float(i) * SEGMENT_LENGTH - SEGMENT_LENGTH * 0.5
@@ -221,7 +298,7 @@ func _build_spine() -> Array[Dictionary]:
 		var height := width * hull_height_ratio
 		var jitter := 1.0 + _rng.randf_range(-part_scale_jitter, part_scale_jitter)
 		_add_part("hull_segment", {
-			"length": SEGMENT_LENGTH * 1.02,  # slight overlap so segments don't gap at the seam
+			"length": SEGMENT_LENGTH * 1.02,
 			"width": width * jitter, "height": height * jitter,
 			"corner": width * 0.12, "taper": taper,
 		}, Transform3D(Basis(), Vector3(0, 0, z)))
@@ -262,30 +339,53 @@ func _scatter_on_spine(kind: String, count: int, spine: Array[Dictionary], uprig
 
 
 # --- Dreadnought (Archetype.DREADNOUGHT) ------------------------------------
-## Same tapered hull spine as the mothership — the "docking station" and the
-## "warship" read as the same basic hull shape in the reference material, the
-## difference is what's bolted to it and what it does once spawned (flight-
-## side: moves under its own power and fires, see [FlightRoot]). segment_count/
-## hull_width/hull_height_ratio/taper = spine, as the mothership. dock_arm_count/
-## dock_arm_length = small hangar bays (repurposed from the mothership's own
-## docking arms — a warship still launches fighters). spire_count = weapon
-## turrets studding the hull (repurposed — bristling with guns reads better
-## than antennae on something meant to fight). greeble_count = hull plating,
-## as everywhere else.
+## Colossal titan warship with spinal rail cannon trench, asymmetric citadel
+## engineering, offset rotating gravity wheel, propellant tank cluster, and gun turrets (Ref 6).
 func _generate_dreadnought() -> void:
 	var spine := _build_spine()
-	_mount_dock_arms_on_spine(spine)
 	_mount_turrets_on_spine(spine)
 	_mount_wings_and_tail(spine)
+
+	# Asymmetric Citadel Engineering (Ref 6):
+	var mid_i := clampi(int(float(spine.size()) * 0.5), 0, spine.size() - 1)
+	var mid: Dictionary = spine[mid_i]
+	var mid_r := float(mid["radius"])
+	var mid_z := float(mid["z"])
+
+	# Port flank: offset rotating gravity wheel / ring on a structural truss axle!
+	var wheel_r := mid_r * 1.6
+	var axle_len := mid_r * 2.2
+	var port_mount := Vector3(mid_r, 0.0, mid_z)
+	_add_part("truss_spine", {
+		"length": axle_len, "width": mid_r * 0.25, "height": mid_r * 0.25, "bays": 3,
+	}, Transform3D(_radial_basis(Vector3.RIGHT), port_mount))
+	_add_part("energy_ring", {
+		"radius": wheel_r, "tube_radius": mid_r * 0.18, "sides": 10, "segments": 16,
+	}, Transform3D(Basis(), port_mount + Vector3(axle_len, 0.0, 0.0)))
+
+	# Starboard flank: bank of pressurized propellant tanks (fuel_cluster) in cradle!
+	_add_part("fuel_cluster", {
+		"length": SEGMENT_LENGTH * 3.5, "tank_radius": mid_r * 0.25, "count": 4,
+	}, Transform3D(Basis(), Vector3(-mid_r * 1.1, 0.0, mid_z + SEGMENT_LENGTH * 1.5)))
+
+	# Dorsal deck: geodesic biosphere dome / command module
+	_add_part("biosphere_dome", {
+		"radius": mid_r * 0.55, "sides": 12, "steps": 5, "flip": 0.0,
+	}, Transform3D(Basis(), Vector3(0.0, mid_r * hull_height_ratio * 0.95, mid_z - SEGMENT_LENGTH)))
+
+	# Flank heat radiator wings
+	for side: float in [1.0, -1.0]:
+		_add_part("radiator_wing", {
+			"span": mid_r * 1.8, "chord": SEGMENT_LENGTH * 2.5, "thickness": mid_r * 0.08, "side": side,
+		}, Transform3D(Basis(), Vector3(side * mid_r * 0.9, mid_r * 0.3, mid_z - SEGMENT_LENGTH * 2.5)))
+
+	# Launch / docking bays
+	_mount_dock_arms_on_spine(spine)
+
+	# Greebles
 	_scatter_on_spine("greeble_block", greeble_count, spine, false)
 
 
-## Wings + a tail fin — the actual "reads as a ship, not a tube with guns
-## bolted on" silhouette; sized off the same hull_width/segment_count every
-## other part on this archetype already reads, rather than adding yet more
-## dials just for this. Wings mount a little aft of centre (clear of the
-## bow's taper); the fin and a pair of smaller horizontal stabilizers sit at
-## the stern.
 func _mount_wings_and_tail(spine: Array[Dictionary]) -> void:
 	if spine.is_empty():
 		return
@@ -313,9 +413,6 @@ func _mount_wings_and_tail(spine: Array[Dictionary]) -> void:
 		"sweep": SEGMENT_LENGTH * 2.0, "thickness": thickness,
 	}, Transform3D(Basis(), Vector3(0, stern_r * 0.6, stern_z)))
 
-	# A pair of smaller horizontal stabilizers flank the fin's base — the
-	# main wings already proved the "wing" kind mirrors cleanly, so this is
-	# just a scaled-down reuse rather than a new part kind.
 	var stab_span := span * 0.35
 	for side: float in [1.0, -1.0]:
 		_add_part("wing", {
@@ -324,8 +421,6 @@ func _mount_wings_and_tail(spine: Array[Dictionary]) -> void:
 		}, Transform3D(Basis(), Vector3(side * stern_r * 0.5, stern_r * 0.25, stern_z)))
 
 
-## Studs the hull with [member spire_count] weapon turrets and records each
-## one's muzzle transform in [member _turrets] for [method get_turret_points].
 func _mount_turrets_on_spine(spine: Array[Dictionary]) -> void:
 	for i in spire_count:
 		if spine.is_empty():
@@ -346,22 +441,20 @@ func _mount_turrets_on_spine(spine: Array[Dictionary]) -> void:
 
 
 # --- Ring station (Archetype.RING_STATION) ---------------------------------
-## segment_count = ring wedge count (ring smoothness/detail). hull_width =
-## hub radius and ring tube thickness. dock_arm_count/dock_arm_length = dock
-## pads jutting from the ring's outer rim. spire_count = antennae on the rim.
-## greeble_count = surface detail on the hub.
+## Colossal torus ring citadel with central glowing biosphere dome,
+## open structural truss spokes, perimeter radiator fins, and rim docking gantries (Ref 1).
 func _generate_ring_station() -> void:
-	var hub_radius := hull_width * 0.6
-	var ring_radius := maxf(hull_width * 4.0, hub_radius * 2.2)
-	var tube_radius := maxf(hull_width * 0.18, 0.5)
+	var hub_radius := hull_width * 0.7
+	var ring_radius := maxf(hull_width * 4.2, hub_radius * 2.5)
+	var tube_radius := maxf(hull_width * 0.22, 0.8)
 
-	_add_part("dome", {"radius": hub_radius, "sides": 12, "steps": 6, "flip": 0.0}, Transform3D())
-	_add_part("dome", {"radius": hub_radius, "sides": 12, "steps": 6, "flip": 1.0}, Transform3D())
+	# 1. Central glowing geodesic biosphere dome / core station hub (Ref 1)
+	_add_part("biosphere_dome", {"radius": hub_radius, "sides": 14, "steps": 6, "flip": 0.0}, Transform3D())
+	_add_part("dome", {"radius": hub_radius * 0.95, "sides": 14, "steps": 5, "flip": 1.0}, Transform3D())
 
-	# Ring lies flat (hoop-normal along world Y): rotate the wedge's own
-	# XY-plane convention 90° about X.
+	# 2. Multi-tier outer torus ring with convex hull collision
 	var ring_basis := Basis(Vector3(1, 0, 0), PI * 0.5)
-	var wedges := maxi(segment_count, 3)
+	var wedges := maxi(segment_count, 12)
 	for i in wedges:
 		var center_angle := TAU * float(i) / float(wedges)
 		_add_part("ring_segment", {
@@ -369,158 +462,231 @@ func _generate_ring_station() -> void:
 			"radius": ring_radius, "tube_radius": tube_radius, "sides": 8, "steps": 4,
 		}, Transform3D(ring_basis, Vector3.ZERO))
 
-	# Spokes: a handful regardless of wedge count, so a coarse ring still
-	# reads as "a wheel", not just a hoop floating near a ball.
-	var spoke_count := clampi(roundi(float(wedges) / 6.0), 3, 12)
+	# 3. Open structural truss spokes connecting the central hub to the outer ring (Ref 1)
+	var spoke_count := clampi(roundi(float(wedges) / 4.0), 4, 10)
 	for i in spoke_count:
 		var angle := TAU * float(i) / float(spoke_count)
 		var dir_flat := Vector3(cos(angle), 0.0, sin(angle))
-		var mount := Vector3(dir_flat.x * hub_radius, 0.0, dir_flat.z * hub_radius)
+		var mount := dir_flat * hub_radius
+		var spoke_len := ring_radius - hub_radius
 		var xform := Transform3D(_radial_basis(dir_flat), mount)
-		_add_part("strut", {"length": ring_radius - hub_radius, "thickness": tube_radius * 0.8}, xform, true)
+		_add_part("truss_spine", {
+			"length": spoke_len, "width": tube_radius * 1.1, "height": tube_radius * 1.1, "bays": 4,
+		}, xform)
 
+	# 4. Outer rim radiator wings (Ref 1)
+	var wing_count := 4
+	for i in wing_count:
+		var angle := TAU * (float(i) + 0.5) / float(wing_count)
+		var dir_flat := Vector3(cos(angle), 0.0, sin(angle))
+		var mount := dir_flat * (ring_radius + tube_radius)
+		var side := 1.0 if i % 2 == 0 else -1.0
+		_add_part("radiator_wing", {
+			"span": tube_radius * 3.5, "chord": tube_radius * 2.5, "thickness": tube_radius * 0.25, "side": side,
+		}, Transform3D(_radial_basis(dir_flat), mount))
+
+	# 5. Outer rim docking arms
 	if dock_arm_count > 0:
 		for i in dock_arm_count:
-			var angle := TAU * float(i) / float(dock_arm_count) + _rng.randf_range(-0.15, 0.15)
+			var angle := TAU * float(i) / float(dock_arm_count) + _rng.randf_range(-0.1, 0.1)
 			var dir_flat := Vector3(cos(angle), 0.0, sin(angle))
 			var mount := dir_flat * (ring_radius + tube_radius)
 			_place_dock_arm(mount, dir_flat, _jittered(dock_arm_length))
 
+	# 6. Spire antennae and surface greebles
 	for i in spire_count:
 		var angle := _rng.randf_range(0.0, TAU)
 		var dir_flat := Vector3(cos(angle), 0.0, sin(angle))
 		var mount := dir_flat * (ring_radius + tube_radius)
-		var height := _rng.randf_range(1.0, 3.0)
+		var height := _rng.randf_range(1.5, 4.0)
 		_add_part("spire", {"height": height, "base_radius": 0.5, "sides": 6},
 			Transform3D(_radial_up_basis(Vector3.UP), mount), true)
 
 	for i in greeble_count:
 		var angle := _rng.randf_range(0.0, TAU)
-		var on_ring := _rng.randf() > 0.5
+		var on_ring := _rng.randf() > 0.4
 		var radius := (ring_radius if on_ring else hub_radius) + _rng.randf_range(0.2, 1.0)
 		var pos := Vector3(cos(angle) * radius, _rng.randf_range(-hub_radius * 0.3, hub_radius * 0.3) if not on_ring else 0.0, sin(angle) * radius)
-		var size := _rng.randf_range(0.3, 0.8)
+		var size := _rng.randf_range(0.35, 0.85)
 		_add_part(_random_greeble_kind(), {"sx": size, "sy": size, "sz": size}, Transform3D(Basis(), pos), true)
 
 
 # --- Gate frame (Archetype.GATE_FRAME) --------------------------------------
-## segment_count = internal rings threaded through the frame. hull_width/
-## hull_height_ratio = the opening's width/height. dock_arm_length = frame
-## depth (also reused as the spacing that sets total length). dock_arm_count
-## = dock pads mounted on the frame's outer beams. spire_count/greeble_count
-## = surface detail on the beams.
+## Colossal vertical rectangular open monolith portal frame with stepped side pylons,
+## suspended tiered circular energy rings, and central vertical glowing plasma beam (Ref 0).
 func _generate_gate_frame() -> void:
-	var width := hull_width * 2.0
-	var height := hull_width * hull_height_ratio * 2.0
-	var depth := maxf(dock_arm_length * float(maxi(segment_count, 1)) * 0.5, dock_arm_length)
+	var width := hull_width * 2.8
+	var height := hull_width * hull_height_ratio * 3.4
+	var depth := maxf(dock_arm_length * 0.8, 20.0)
 	var hx := width * 0.5
 	var hy := height * 0.5
 	var hz := depth * 0.5
-	var thickness := maxf(hull_width * 0.12, 0.4)
+	var pylon_w := maxf(hull_width * 0.35, 3.0)
+	var pylon_d := maxf(hull_width * 0.4, 4.0)
 
-	# Four corner beams running the full depth.
-	for corner in [Vector3(hx, hy, 0), Vector3(-hx, hy, 0), Vector3(hx, -hy, 0), Vector3(-hx, -hy, 0)]:
-		_add_part("strut", {"length": depth, "thickness": thickness},
-			Transform3D(Basis(), corner + Vector3(0, 0, hz)))
-	# End-cap rectangles at front and back tie the corners together — each
-	# beam aimed at its neighbour with [method _radial_basis] (local -Z -> dir)
-	# rather than hand-composed rotations, the same trick every other aimed
-	# part in this file already uses, so it's proven rather than guessed.
-	for z in [hz, -hz]:
-		var corners := [Vector3(hx, hy, z), Vector3(-hx, hy, z), Vector3(-hx, -hy, z), Vector3(hx, -hy, z)]
-		for i in 4:
-			var a: Vector3 = corners[i]
-			var b: Vector3 = corners[(i + 1) % 4]
-			var seg := b - a
-			_add_part("strut", {"length": seg.length(), "thickness": thickness}, Transform3D(_radial_basis(seg.normalized()), a))
+	# 1. Colossal vertical side pylons (Left and Right - Ref 0)
+	for side: float in [1.0, -1.0]:
+		var px: float = side * (hx + pylon_w * 0.5)
+		_add_part("city_slab", {
+			"width": pylon_w * 1.3, "height": height * 1.1, "depth": pylon_d,
+			"chamfer": pylon_w * 0.25, "taper": 0.95, "windows": 5,
+		}, Transform3D(Basis(), Vector3(px, -hy * 1.05, 0.0)))
 
-	# Internal rings, hoop facing Z (the gate's own fly-through axis) — no
-	# extra rotation needed, unlike the ring station's flattened wheel.
-	var ring_count := maxi(segment_count, 1)
-	var ring_radius := minf(hx, hy) * 0.75
-	var tube_radius := maxf(hull_width * 0.08, 0.25)
-	for r in ring_count:
-		var t := (float(r) + 0.5) / float(ring_count)
-		var z := lerpf(hz, -hz, t)
-		var wedges := 8
-		for i in wedges:
-			var center_angle := TAU * float(i) / float(wedges)
-			_add_part("ring_segment", {
-				"center_angle": center_angle, "angle_span": TAU / float(wedges) * 1.02,
-				"radius": ring_radius, "tube_radius": tube_radius, "sides": 6, "steps": 3,
-			}, Transform3D(Basis(), Vector3(0, 0, z)))
+		_add_part("truss_spine", {
+			"length": height * 1.05, "width": pylon_w * 0.8, "height": pylon_d * 0.8, "bays": 6,
+		}, Transform3D(_radial_basis(Vector3.UP), Vector3(px + side * pylon_w * 0.6, -hy * 1.05, 0.0)))
 
+	# 2. Top and bottom arched bridge lintels tying the pylons together
+	for y_side: float in [1.0, -1.0]:
+		var py: float = y_side * (hy + pylon_w * 0.3)
+		_add_part("truss_spine", {
+			"length": width + pylon_w * 2.0, "width": pylon_w * 0.8, "height": pylon_d * 0.7, "bays": 6,
+		}, Transform3D(_radial_basis(Vector3.RIGHT), Vector3(-(hx + pylon_w), py, 0.0)))
+
+	# 3. Tiered suspended circular energy rings inside the portal opening (Ref 0)
+	var ring_tiers := maxi(segment_count / 6, 3)
+	var ring_radius := minf(hx, hy) * 0.6
+	var tube_radius := maxf(hull_width * 0.09, 0.4)
+	for r in ring_tiers:
+		var t := (float(r) + 0.5) / float(ring_tiers) - 0.5
+		var ring_y := t * hy * 0.85
+		var scale_tier := 1.0 - absf(t) * 0.25
+		_add_part("energy_ring", {
+			"radius": ring_radius * scale_tier,
+			"tube_radius": tube_radius,
+			"sides": 10,
+			"segments": 20,
+		}, Transform3D(_radial_up_basis(Vector3.UP), Vector3(0.0, ring_y, 0.0)))
+
+	# 4. Vertical central glowing plasma conduit emitter beam running between rings
+	_add_part("plasma_core", {
+		"radius": ring_radius * 0.35, "depth": height * 0.9, "tiers": 4,
+	}, Transform3D(_radial_up_basis(Vector3.UP), Vector3(0.0, 0.0, 0.0)))
+
+	# 5. Cantilevered docking arms on outer pylon faces
 	if dock_arm_count > 0:
 		for i in dock_arm_count:
-			var side := 1.0 if i % 2 == 0 else -1.0
-			var z := lerpf(hz * 0.6, -hz * 0.6, float(i / 2) / maxf(float(dock_arm_count / 2), 1.0))
-			var dir_flat := Vector3(side, 0.0, 0.0)
-			_place_dock_arm(Vector3(side * hx, 0.0, z), dir_flat, _jittered(dock_arm_length * 0.4))
+			var side: float = 1.0 if (i % 2 == 0) else -1.0
+			var t := float(i) / float(maxi(dock_arm_count - 1, 1)) - 0.5
+			var mount := Vector3(side * (hx + pylon_w * 1.1), t * hy * 1.1, 0.0)
+			var dir := Vector3(side, 0.0, 0.0)
+			_place_dock_arm(mount, dir, _jittered(dock_arm_length * 0.65))
 
+	# 6. Spires and greebles
 	for i in spire_count:
-		var corner := Vector3(hx if _rng.randf() > 0.5 else -hx, hy if _rng.randf() > 0.5 else -hy, _rng.randf_range(-hz, hz))
-		_add_part("spire", {"height": _rng.randf_range(1.0, 2.5), "base_radius": 0.5, "sides": 5},
-			Transform3D(_radial_up_basis((corner - Vector3(0, 0, corner.z)).normalized()), corner), true)
+		var side := 1.0 if _rng.randf() > 0.5 else -1.0
+		var px := side * (hx + pylon_w * 0.5)
+		var y := _rng.randf_range(-hy, hy)
+		var z := _rng.randf_range(-hz, hz)
+		var height_s := _rng.randf_range(1.5, 3.5)
+		_add_part("spire", {"height": height_s, "base_radius": 0.5, "sides": 6},
+			Transform3D(_radial_up_basis(Vector3(side, 0, 0)), Vector3(px + side * pylon_w * 0.5, y, z)), true)
 
 	for i in greeble_count:
-		var corner := Vector3(hx if _rng.randf() > 0.5 else -hx, hy if _rng.randf() > 0.5 else -hy, _rng.randf_range(-hz, hz))
-		var size := _rng.randf_range(0.3, 0.7)
-		_add_part(_random_greeble_kind(), {"sx": size, "sy": size, "sz": size}, Transform3D(Basis(), corner), true)
+		var side := 1.0 if _rng.randf() > 0.5 else -1.0
+		var px := side * (hx + pylon_w * 0.5)
+		var y := _rng.randf_range(-hy, hy)
+		var z := _rng.randf_range(-hz, hz)
+		var size := _rng.randf_range(0.4, 0.8)
+		_add_part(_random_greeble_kind(), {"sx": size, "sy": size, "sz": size},
+			Transform3D(Basis(), Vector3(px, y, z)), true)
 
 
 # --- Tower cluster (Archetype.TOWER_CLUSTER) --------------------------------
-## dock_arm_count = number of towers in the cluster (repurposed — a cluster
-## reads better than one tower). segment_count = segments per tower (height).
-## hull_width = tower cross-section. dock_arm_length unused here. spire_count
-## /greeble_count = lit-window surface detail, the bulk of the look.
+## Colossal vertical orbital city spire with central structural elevator truss spine,
+## massive angular cantilevered city slabs with lit window grids, and terraces (Refs 2, 3, 4).
 func _generate_tower_cluster() -> void:
-	var tower_count := maxi(dock_arm_count, 1)
-	var cluster_radius := hull_width * 0.9 * sqrt(float(tower_count))
-	var towers: Array[Dictionary] = []  # {base: Vector3, top: Vector3, radius: float}
-	for t in tower_count:
-		var angle := TAU * float(t) / float(tower_count) + _rng.randf_range(-0.3, 0.3)
-		var offset := (Vector3(cos(angle), 0, sin(angle)) * cluster_radius) if tower_count > 1 else Vector3.ZERO
-		var tower_height := float(segment_count) * SEGMENT_LENGTH * (0.8 + _rng.randf_range(0.0, 0.6))
-		var width := hull_width * (0.6 + _rng.randf_range(0.0, 0.5))
-		var floors := maxi(int(tower_height / SEGMENT_LENGTH), 1)
-		# Linear taper across the tower's height, same reasoning as
-		# [method _build_spine] — a compounding `scale *= taper` per floor
-		# pinches a tall tower to a needle well before its top.
-		var last_floor := maxf(float(floors - 1), 1.0)
-		for f in floors:
-			var y := float(f) * SEGMENT_LENGTH + SEGMENT_LENGTH * 0.5
-			var w := width * lerpf(1.0, taper, float(f) / last_floor)
-			_add_part("hull_segment", {
-				"length": SEGMENT_LENGTH * 1.02, "width": w, "height": w * hull_height_ratio,
-				"corner": w * 0.15, "taper": 1.0,
-			}, Transform3D(_radial_up_basis(Vector3.UP), offset + Vector3(0, y, 0)))
-		towers.append({"base": offset, "top": offset + Vector3(0, floors * SEGMENT_LENGTH, 0), "radius": width * 0.5})
+	var tower_height := float(segment_count) * SEGMENT_LENGTH * 1.1
+	var core_width := hull_width * 0.35
+	var floors := maxi(int(tower_height / SEGMENT_LENGTH), 3)
 
-	# A thin central spar ties the cluster together visually, same idea as
-	# the reference monolith's connecting spine.
-	if towers.size() > 1:
-		var tallest: Dictionary = towers[0]
-		for tw in towers:
-			if float(tw["top"].y) > float(tallest["top"].y):
-				tallest = tw
-		_add_part("strut", {"length": float(tallest["top"].y), "thickness": hull_width * 0.1},
-			Transform3D(_radial_up_basis(Vector3.UP), Vector3(0, tallest["top"].y, 0)), true)
+	# 1. Colossal multi-tiered foundation base platform at y=0 (Refs 2, 3, 4)
+	var base_w := hull_width * 2.2
+	var base_h := SEGMENT_LENGTH * 0.7
+	_add_part("city_slab", {
+		"width": base_w, "height": base_h, "depth": base_w,
+		"chamfer": base_w * 0.2, "taper": 0.92, "windows": 2,
+	}, Transform3D(Basis(), Vector3(0.0, 0.0, 0.0)))
+	_add_part("city_slab", {
+		"width": base_w * 0.65, "height": base_h * 0.8, "depth": base_w * 0.65,
+		"chamfer": base_w * 0.15, "taper": 0.95, "windows": 2,
+	}, Transform3D(Basis(), Vector3(0.0, base_h, 0.0)))
 
-	if dock_arm_count > 0 and not towers.is_empty():
-		var base_tower: Dictionary = towers[0]
-		_place_dock_arm(Vector3(base_tower["base"]) + Vector3(0, SEGMENT_LENGTH, 0), Vector3.FORWARD, _jittered(dock_arm_length))
+	# 2. Central vertical open structural truss elevator spine (Ref 2, 3)
+	var truss_bays := clampi(floors, 4, 16)
+	_add_part("truss_spine", {
+		"length": tower_height,
+		"width": core_width,
+		"height": core_width,
+		"bays": truss_bays,
+	}, Transform3D(_radial_basis(Vector3.UP), Vector3(0.0, 0.0, 0.0)))
 
-	for i in spire_count + greeble_count:
-		if towers.is_empty():
-			break
-		var tower: Dictionary = towers[_rng.randi_range(0, towers.size() - 1)]
-		var y := _rng.randf_range(0.0, float(tower["top"].y))
+	# 3. Cantilevered city slabs jutting out at staggered levels (Refs 2, 3, 4)
+	var slab_levels := clampi(floors / 2, 3, 12)
+	for lvl in slab_levels:
+		var t := float(lvl) / float(slab_levels)
+		var y := lerpf(base_h * 2.0, tower_height - SEGMENT_LENGTH * 2.0, t)
+		var angle := float(lvl) * 2.39996 + _rng.randf_range(-0.15, 0.15)
+		var slab_w := hull_width * lerpf(1.3, 0.6, t)
+		var slab_d := hull_width * lerpf(1.1, 0.55, t)
+		var slab_h := SEGMENT_LENGTH * lerpf(1.4, 0.9, t)
+		var reach := core_width * 0.5 + slab_d * 0.45
+		var pos := Vector3(sin(angle) * reach, y, cos(angle) * reach)
+		var slab_basis := Basis(Vector3.UP, angle)
+		_add_part("city_slab", {
+			"width": slab_w, "height": slab_h, "depth": slab_d,
+			"chamfer": slab_w * 0.18, "taper": 0.88, "windows": 3,
+		}, Transform3D(slab_basis, pos))
+
+		# Cantilever structural truss bridge connecting back into the elevator spine
+		var bridge_dir := Vector3(sin(angle), 0.0, cos(angle))
+		var bridge_mount := Vector3(0.0, y + slab_h * 0.2, 0.0)
+		_add_part("truss_spine", {
+			"length": reach + slab_d * 0.1,
+			"width": core_width * 0.35,
+			"height": core_width * 0.35,
+			"bays": 2,
+		}, Transform3D(_radial_basis(bridge_dir), bridge_mount), true)
+
+	# 4. Spire crown at the apex
+	_add_part("spire", {
+		"height": hull_width * 1.2, "base_radius": core_width * 0.6, "sides": 8,
+	}, Transform3D(_radial_up_basis(Vector3.UP), Vector3(0.0, tower_height, 0.0)))
+
+	# 5. Observation biosphere dome on the lower terrace
+	_add_part("biosphere_dome", {
+		"radius": core_width * 1.1, "sides": 12, "steps": 5, "flip": 0.0,
+	}, Transform3D(Basis(), Vector3(0.0, base_h * 1.8, 0.0)))
+
+	# 6. Cantilevered landing pads
+	if dock_arm_count > 0:
+		for i in dock_arm_count:
+			var t := (float(i) + 0.5) / float(dock_arm_count)
+			var y := lerpf(base_h * 2.5, tower_height * 0.7, t)
+			var angle := TAU * float(i) / float(dock_arm_count) + 0.5
+			var dir := Vector3(sin(angle), 0.0, cos(angle))
+			var mount := dir * (core_width * 1.2 + hull_width * 0.4) + Vector3(0, y, 0)
+			_place_dock_arm(mount, dir, _jittered(dock_arm_length * 0.6))
+
+	# 7. Spires and greebles
+	for i in spire_count:
+		var t := _rng.randf()
+		var y := lerpf(base_h * 2.0, tower_height * 0.9, t)
 		var angle := _rng.randf_range(0.0, TAU)
-		var r := float(tower["radius"])
-		var pos := Vector3(tower["base"]) + Vector3(cos(angle) * r, y, sin(angle) * r)
-		var size := _rng.randf_range(0.25, 0.7)
+		var r := core_width * 0.8 + _rng.randf_range(0.5, hull_width * 0.5)
+		var pos := Vector3(sin(angle) * r, y, cos(angle) * r)
+		_add_part("spire", {"height": _rng.randf_range(1.5, 3.5), "base_radius": 0.5, "sides": 6},
+			Transform3D(_radial_up_basis(Vector3.UP), pos), true)
+
+	for i in greeble_count:
+		var t := _rng.randf()
+		var y := lerpf(base_h * 1.5, tower_height * 0.9, t)
+		var angle := _rng.randf_range(0.0, TAU)
+		var r := core_width * 0.6 + _rng.randf_range(0.2, hull_width * 0.4)
+		var pos := Vector3(sin(angle) * r, y, cos(angle) * r)
+		var size := _rng.randf_range(0.3, 0.75)
 		_add_part(_random_greeble_kind(), {"sx": size, "sy": size, "sz": size},
-			Transform3D(Basis(), pos + Vector3(cos(angle), 0, sin(angle)) * size * 0.4), true)
+			Transform3D(Basis(), pos), true)
 
 
 # --- Shared placement helpers -----------------------------------------------
@@ -606,11 +772,18 @@ func _add_part(kind: String, spec: Dictionary, local_xform: Transform3D, cosmeti
 
 	var shape := CollisionShape3D.new()
 	shape.name = "Shape"
-	var box := BoxShape3D.new()
-	var size := built.aabb.size
-	box.size = Vector3(maxf(size.x, 0.2), maxf(size.y, 0.2), maxf(size.z, 0.2))
-	shape.shape = box
-	shape.position = built.aabb.get_center()
+	var col_shape: Shape3D = null
+	if not cosmetic and built.mesh != null and built.mesh.get_surface_count() > 0:
+		col_shape = built.mesh.create_convex_shape(true, true)
+	if col_shape != null:
+		shape.shape = col_shape
+		shape.position = Vector3.ZERO
+	else:
+		var box := BoxShape3D.new()
+		var size := built.aabb.size
+		box.size = Vector3(maxf(size.x, 0.2), maxf(size.y, 0.2), maxf(size.z, 0.2))
+		shape.shape = box
+		shape.position = built.aabb.get_center()
 	body.add_child(shape)
 
 	_parts_root.add_child(body)
@@ -657,7 +830,7 @@ func bake_structure_meshes() -> void:
 	var has_greeble := false
 
 	for part in _parts.values():
-		if not is_instance_valid(part.node) or part.mesh == null:
+		if not is_instance_valid(part.node) or part.mesh == null or part.mesh.get_surface_count() == 0:
 			continue
 		var st := st_greeble if part.cosmetic else st_hull
 		if part.cosmetic:
@@ -669,18 +842,23 @@ func bake_structure_meshes() -> void:
 		if arrays.is_empty():
 			continue
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL] if arrays[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+		var colors: PackedColorArray = arrays[Mesh.ARRAY_COLOR] if arrays[Mesh.ARRAY_COLOR] != null else PackedColorArray()
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
 
 		if indices.is_empty():
 			for i in verts.size():
-				if not normals.is_empty():
+				if not normals.is_empty() and i < normals.size():
 					st.set_normal((xform.basis * normals[i]).normalized())
+				if not colors.is_empty() and i < colors.size():
+					st.set_color(colors[i])
 				st.add_vertex(xform * verts[i])
 		else:
 			for idx in indices:
-				if not normals.is_empty():
+				if not normals.is_empty() and idx < normals.size():
 					st.set_normal((xform.basis * normals[idx]).normalized())
+				if not colors.is_empty() and idx < colors.size():
+					st.set_color(colors[idx])
 				st.add_vertex(xform * verts[idx])
 
 		# Hide individual mesh instances but keep the StaticBody3D collision intact
@@ -772,11 +950,18 @@ func _detach_part(id: int, hit_dir: Vector3) -> RigidBody3D:
 	rigid.add_child(mesh_inst)
 
 	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	var size := part.aabb.size
-	box.size = Vector3(maxf(size.x, 0.2), maxf(size.y, 0.2), maxf(size.z, 0.2))
-	shape.shape = box
-	shape.position = part.aabb.get_center()
+	var col_shape: Shape3D = null
+	if not part.cosmetic and part.mesh != null and part.mesh.get_surface_count() > 0:
+		col_shape = part.mesh.create_convex_shape(true, true)
+	if col_shape != null:
+		shape.shape = col_shape
+		shape.position = Vector3.ZERO
+	else:
+		var box := BoxShape3D.new()
+		var size := part.aabb.size
+		box.size = Vector3(maxf(size.x, 0.2), maxf(size.y, 0.2), maxf(size.z, 0.2))
+		shape.shape = box
+		shape.position = part.aabb.get_center()
 	rigid.add_child(shape)
 
 	_debris_root.add_child(rigid)
@@ -828,6 +1013,40 @@ func approx_extent() -> float:
 	# needs (spawn placement, camera framing) — [member scale] is applied
 	# uniformly, so its x component alone is exact.
 	return extent * scale.x
+
+
+## Geometric bounding-box center of all live parts in global space.
+## Centers camera framing accurately on tall vertical spires or offset citadels.
+func get_structure_center() -> Vector3:
+	if _parts.is_empty():
+		return global_position
+	var min_pos := Vector3(INF, INF, INF)
+	var max_pos := Vector3(-INF, -INF, -INF)
+	for id: int in _parts.keys():
+		var part: Part = _parts[id]
+		var half_size: Vector3 = part.aabb.size * 0.5
+		var p: Vector3 = part.local_xform.origin
+		min_pos.x = minf(min_pos.x, p.x - half_size.x)
+		min_pos.y = minf(min_pos.y, p.y - half_size.y)
+		min_pos.z = minf(min_pos.z, p.z - half_size.z)
+		max_pos.x = maxf(max_pos.x, p.x + half_size.x)
+		max_pos.y = maxf(max_pos.y, p.y + half_size.y)
+		max_pos.z = maxf(max_pos.z, p.z + half_size.z)
+	var local_center: Vector3 = (min_pos + max_pos) * 0.5
+	return to_global(local_center)
+
+
+## Radius of sphere enclosing all live parts measured from [method get_structure_center].
+func get_structure_radius() -> float:
+	var center := get_structure_center()
+	var max_dist := 1.0
+	for id: int in _parts.keys():
+		var part: Part = _parts[id]
+		var part_world: Vector3 = to_global(part.local_xform.origin)
+		var part_radius: float = part.aabb.size.length() * 0.5 * scale.x
+		var d: float = center.distance_to(part_world) + part_radius
+		max_dist = maxf(max_dist, d)
+	return max_dist
 
 
 ## World-space transforms of every live dock pad — for a future ship-docking
