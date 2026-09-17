@@ -92,7 +92,8 @@ func _test_art_style_toggle() -> void:
 	_assert(cartoony_prof.roundness > 0.5, "cartoony has roundness > 0.5 (got %.2f)" % cartoony_prof.roundness)
 	_assert(cartoony_prof.chunkiness > 0.2, "cartoony has chunkiness > 0.2 (got %.2f)" % cartoony_prof.chunkiness)
 	_assert(cartoony_prof.star_five_point > 0.5, "cartoony has 5-point cartoon stars")
-	_assert(cartoony_prof.outline_width > 0.01, "cartoony has outline width > 0.01")
+	_assert(cartoony_prof.shading_bands >= 2, "cartoony has cel shading bands >= 2")
+	_assert(cartoony_prof.outline_width == 0.0, "cartoony outline_width is 0 to avoid black ship mesh artifacts")
 
 	# Toggle back to grounded
 	var grounded_prof := mgr.toggle_art_style()

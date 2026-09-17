@@ -521,13 +521,15 @@ func toggle_palette_menu() -> void:
 
 func toggle_art_style() -> void:
 	var prof := StyleManager.instance().toggle_art_style()
+	PartMeshFactory.clear_cache()
 	if _style_chip != null:
 		_style_chip.text = _get_style_chip_label()
-	show_hint("Art Style: %s (%s, roundness %.2f)" % [
+	show_hint("Art Style: %s (%s) — rebuilding geometry & restarting…" % [
 		prof.display_name,
-		"cartoony & rounded" if prof.id == "cartoony" else "grounded & sharp",
-		prof.roundness
+		"cartoony & rounded" if prof.id == "cartoony" else "grounded & sharp"
 	])
+	if _root != null:
+		_root.restart_scene()
 
 
 func toggle_mobile_view() -> void:
