@@ -22,7 +22,12 @@ func _initialize() -> void:
 		lab.generator.archetype = arch_idx as LargeCraftGenerator.Archetype
 		lab.generator.generate()
 		lab._sync_archetype_option()
-		lab._frame_camera_to_craft()
+	if args.size() >= 6 and String(args[5]) != "":
+		StyleManager.instance().set_palette_by_id(String(args[5]))
+		lab.generator.refresh_materials()
+	if args.size() >= 7 and String(args[6]) != "":
+		StyleManager.instance().set_profile_by_id(String(args[6]))
+		lab.generator.refresh_materials()
 	for i in warm:
 		await process_frame
 	var img := root.get_texture().get_image()
