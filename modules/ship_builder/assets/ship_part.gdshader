@@ -47,7 +47,7 @@ uniform float ao_strength : hint_range(0.0, 1.0) = 0.32;
 // through it". Lifting every facet to a small fraction of its own paint means
 // the darkest part of the hull is still unmistakably hull. Kept low enough that
 // the lit side still carries the form.
-uniform float solidity : hint_range(0.0, 0.5) = 0.17;
+uniform float solidity : hint_range(0.0, 1.0) = 0.42;
 
 uniform vec4 rim_color : source_color = vec4(0.55, 0.75, 1.0, 1.0);
 uniform float rim_strength : hint_range(0.0, 2.0) = 0.16;

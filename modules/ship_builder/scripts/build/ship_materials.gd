@@ -110,13 +110,16 @@ static func apply_palette(mat: ShaderMaterial, design: ShipDesign, overrides: Di
 	# The rim is silhouette definition, not a look. High contrast mode is allowed
 	# a brighter edge because separating parts from the background matters more
 	# there than the hull reading as solid metal.
-	mat.set_shader_parameter("rim_strength", 0.34 if high_contrast else 0.16)
+	var rim := 0.34 if high_contrast else 0.16
+	if Session.enhanced_lighting:
+		rim += 0.25
+	mat.set_shader_parameter("rim_strength", rim)
 	# Occlusion and the self-lit floor are two halves of one decision. Crushing
 	# the down-facing plates to black against a black stage is what made the
 	# ships read as see-through, so the occlusion is gentler than it was and the
 	# floor guarantees the darkest facet still out-values the void behind it.
 	mat.set_shader_parameter("ao_strength", 0.24 if high_contrast else 0.32)
-	mat.set_shader_parameter("solidity", 0.24 if high_contrast else 0.17)
+	mat.set_shader_parameter("solidity", 0.45 if high_contrast else 0.42)
 	apply_style_dials(mat)
 
 

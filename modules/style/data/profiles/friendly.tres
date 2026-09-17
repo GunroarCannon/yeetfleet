@@ -20,4 +20,5 @@ planet_detail = 0.2
 planet_bands = 0.7
 star_count = 300
 star_size = 2.5
+star_five_point = 0.9
 squash_enabled = true

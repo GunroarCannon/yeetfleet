@@ -115,6 +115,8 @@ static var star_density := 1.0
 static var asteroid_density := 1.0
 ## Enhanced backdrop: corona, distant galaxy and nebula dust around the star.
 static var render_backdrop := true
+## Enhanced lighting: increases rim strength and warms the main light.
+static var enhanced_lighting := true
 ## Trail length multiplier, read by Trail3D when a trail is (re)built.
 static var trail_length := 1.0
 ## Solar system gen lab: simulation speed multiplier, live-read (no restart
@@ -156,7 +158,7 @@ static var orbit_speed_scale := 4.0
 ## ship pivots almost instantly. Deliberately scoped to arcade: sim and
 ## realistic are the modes that exist to have weight, and a dial that could
 ## quietly turn those into the same thing would make the mode list a lie.
-static var arcade_pivot := 3.75
+static var arcade_pivot := 3.0
 ## Solar-system-gen lab handoff to the real flight scene: the generation
 ## recipe for [constant FlightRoot.Location] value GENERATED_SYSTEM, or null
 ## for none pending — see [SolarSystemGenLabRoot._on_enter_flight_test_pressed].
@@ -269,13 +271,14 @@ static func reset_to_defaults() -> void:
 	star_density = 1.0
 	asteroid_density = 1.0
 	render_backdrop = true
+	enhanced_lighting = true
 	trail_length = 1.0
 	solar_time_scale = 1.0
 	player_speed_scale = 1.0
 	npc_speed_scale = 0.3
 	fast_orbits = false
 	orbit_speed_scale = 4.0
-	arcade_pivot = 3.75
+	arcade_pivot = 3.0
 	pending_solar_system = null
 	pending_spawn_body_name = ""
 

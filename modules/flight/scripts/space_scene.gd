@@ -365,12 +365,12 @@ func _build_environment() -> void:
 
 	var key := DirectionalLight3D.new()
 	key.name = "SunLight"
-	key.light_energy = 1.5
+	key.light_energy = 2.2 if Session.enhanced_lighting else 1.5
 	# The palette's star colour, pulled most of the way to white: this is the
 	# light the star *casts*, not the star's own disc, and a saturated light
 	# tints every hull in the system.
-	key.light_color = Palette.color("star").lerp(Color.WHITE, 0.5)
-	key.shadow_enabled = false
+	key.light_color = Palette.color("star").lerp(Color.WHITE, 0.2 if Session.enhanced_lighting else 0.5)
+	key.shadow_enabled = Session.enhanced_lighting
 	key.look_at_from_position(Vector3.ZERO, -SUN_DIR, Vector3.UP)
 	add_child(key)
 

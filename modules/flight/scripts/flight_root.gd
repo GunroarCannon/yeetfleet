@@ -101,6 +101,7 @@ var _motes: MultiMeshInstance3D
 var _mote_field_on := true
 ## Smoothed 0..1 stretch of the drift motes into motion streaks, driven by speed.
 var _mote_stretch := 0.0
+var _render_visible := true
 ## Whether the mote instance bases are currently written as streaks (so they get
 ## reset to identity once — not every frame — when the ship slows back down).
 var _mote_writing_streak := false
@@ -2910,6 +2911,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_F10:
 			if _hud != null:
 				_hud.toggle_palette_menu()
+		KEY_F11:
+			var tree := get_tree()
+			tree.debug_collisions_hint = not tree.debug_collisions_hint
+			if _hud != null:
+				_hud.show_hint("Collision Debug: %s" % ("ON" if tree.debug_collisions_hint else "OFF"))
+		KEY_F12:
+			_render_visible = not _render_visible
+			set_debug_visible("everything", _render_visible)
+			if _hud != null:
+				_hud.show_hint("Rendering: %s" % ("ON" if _render_visible else "OFF (Collisions Only)"))
 		KEY_QUESTION, KEY_SLASH, KEY_F1:
 			toggle_help()
 		KEY_ESCAPE:

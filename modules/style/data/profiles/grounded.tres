@@ -19,5 +19,6 @@ palette_lift = 0.0
 planet_detail = 1.0
 planet_bands = 0.0
 star_count = 900
-star_size = 1.0
+star_size = 2.0
+star_five_point = 0.8
 squash_enabled = false

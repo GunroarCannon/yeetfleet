@@ -114,6 +114,7 @@ class Part extends RefCounted:
 	var mesh: ArrayMesh
 	var aabb: AABB
 	var markers: Dictionary
+	var spec: Dictionary
 	var local_xform: Transform3D
 
 var _parts: Dictionary = {}  ## id (int) -> Part
@@ -774,7 +775,7 @@ func _add_part(kind: String, spec: Dictionary, local_xform: Transform3D, cosmeti
 	shape.name = "Shape"
 	var col_shape: Shape3D = null
 	if not cosmetic and built.mesh != null and built.mesh.get_surface_count() > 0:
-		col_shape = built.mesh.create_convex_shape(true, true)
+		col_shape = built.mesh.create_trimesh_shape()
 	if col_shape != null:
 		shape.shape = col_shape
 		shape.position = Vector3.ZERO
@@ -796,6 +797,7 @@ func _add_part(kind: String, spec: Dictionary, local_xform: Transform3D, cosmeti
 	part.mesh = built.mesh
 	part.aabb = built.aabb
 	part.markers = built.markers
+	part.spec = spec
 	part.local_xform = local_xform
 	_parts[part.id] = part
 	_next_id += 1
@@ -1115,9 +1117,38 @@ func get_collision_spheres() -> Array[Dictionary]:
 		var part: Part = _parts[id]
 		if part.cosmetic or not is_instance_valid(part.node):
 			continue
+		
+		var hull: Array[Dictionary] = []
+		if part.kind == "energy_ring":
+			var r: float = float(part.spec.get("radius", 18.0))
+			var tr: float = float(part.spec.get("tube_radius", 1.8))
+			var count: int = max(6, int(PI * r / tr))
+			for i in count:
+				var a := TAU * float(i) / float(count)
+				hull.append({
+					"center": Vector3(cos(a) * r, sin(a) * r, 0.0),
+					"radius": tr * 1.5
+				})
+		elif part.kind == "ring_segment":
+			var r: float = float(part.spec.get("radius", 20.0))
+			var tr: float = float(part.spec.get("tube_radius", 2.0))
+			var ca: float = float(part.spec.get("center_angle", 0.0))
+			var span: float = float(part.spec.get("angle_span", PI * 0.25))
+			var arc_len := r * span
+			var count: int = max(2, int(arc_len / (tr * 1.5)))
+			for i in count + 1:
+				var t := float(i) / float(count)
+				var a := ca - span * 0.5 + span * t
+				hull.append({
+					"center": Vector3(cos(a) * r, sin(a) * r, 0.0),
+					"radius": tr * 1.2
+				})
+		else:
+			hull = HullFit.spheres_for_box(part.aabb)
+			
 		out.append({
 			"node": part.node,
-			"hull": HullFit.spheres_for_box(part.aabb),
+			"hull": hull,
 		})
 	return out
 
