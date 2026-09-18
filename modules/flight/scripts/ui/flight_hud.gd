@@ -1639,7 +1639,7 @@ func _draw_edge_indicators(camera: Camera3D, centre: Vector2) -> void:
 			var edge_pos = centre + arrow_dir * clamp_scale
 			
 			var col = BuilderTheme.warn()
-			if ship.team == 1:
+			if ship.team_id == 1:
 				col = BuilderTheme.good()
 			
 			col.a = clampf(1.0 - (dist / max_range), 0.2, 0.8)
@@ -1681,7 +1681,7 @@ func _draw_minimap(camera: Camera3D) -> void:
 			
 			var map_pos = centre + Vector2(dot_right, -dot_fwd) / max_range * r
 			if map_pos.distance_to(centre) <= r:
-				var col = BuilderTheme.good() if ship.team == 1 else BuilderTheme.warn()
+				var col = BuilderTheme.good() if ship.team_id == 1 else BuilderTheme.warn()
 				_overlay.draw_circle(map_pos, 2.5, col)
 				
 	# Draw planets
@@ -1701,4 +1701,3 @@ func _draw_minimap(camera: Camera3D) -> void:
 			# Draw on edge
 			var map_pos = centre + dir * r
 			_overlay.draw_arc(map_pos, 3.0, 0.0, TAU, 8, col, 1.5, true)
-
