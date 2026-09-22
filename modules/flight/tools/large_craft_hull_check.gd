@@ -111,6 +111,8 @@ func _check_craft_hull() -> void:
 func _part_box(node: Node3D) -> AABB:
 	if node == null:
 		return AABB()
+	if node.has_meta("aabb"):
+		return node.get_meta("aabb") as AABB
 	var shape_node := _find_box_shape(node)
 	if shape_node == null:
 		return AABB()

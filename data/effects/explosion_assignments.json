@@ -1,0 +1,128 @@
+{
+  "capital_ship_death": {
+    "color": [
+      1.0,
+      0.699999988079071,
+      0.300000011920929,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_nuke",
+    "scale": 4.5,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "warp"
+  },
+  "missile_blast": {
+    "color": [
+      1.0,
+      0.800000011920929,
+      0.300000011920929,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_impact_01",
+    "scale": 1.2,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "missile"
+  },
+  "nova_nuke": {
+    "color": [
+      1.0,
+      0.699999988079071,
+      0.300000011920929,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_nuke",
+    "scale": 3.0,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "jingle_lose"
+  },
+  "part_breakoff": {
+    "color": [
+      1.0,
+      0.899999976158142,
+      0.400000005960464,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_hit_01",
+    "scale": 0.8,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "hit"
+  },
+  "planet_impact": {
+    "color": [
+      1.0,
+      0.600000023841858,
+      0.200000002980232,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_ground_explosion",
+    "scale": 2.2,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "railgun"
+  },
+  "plasma_burst": {
+    "color": [
+      0.100000001490116,
+      0.949999988079071,
+      0.850000023841858,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "procedural_plasma_bomb",
+    "scale": 1.6,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "plasma"
+  },
+  "shield_overload": {
+    "color": [
+      0.200000002980232,
+      0.850000023841858,
+      1.0,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_ball_lightning",
+    "scale": 1.8,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "alarm"
+  },
+  "ship_death": {
+    "color": [
+      1.0,
+      0.550000011920929,
+      0.150000005960464,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "binbun_air_explosion",
+    "scale": 1.4,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "hit"
+  },
+  "singularity_collapse": {
+    "color": [
+      0.649999976158142,
+      0.100000001490116,
+      0.949999988079071,
+      1.0
+    ],
+    "debris": true,
+    "effect_id": "procedural_singularity",
+    "scale": 2.5,
+    "shake": 0.4,
+    "shockwave": true,
+    "sound": "ambience_blackhole"
+  }
+}

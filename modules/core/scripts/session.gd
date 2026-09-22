@@ -60,6 +60,12 @@ static var planet_scale := 1.0
 ## Planet spacing scale: gaps between worlds and the moon's orbit.
 ## Formerly `FlightRoot._planet_spacing`.
 static var planet_spacing := 1.0
+## Planet shatter fineness / detail level: controls piece count and fragment scale when a planet breaks.
+## 1.0 is default (balanced), lower = chunkier/coarser (e.g. 0.5), higher = finer/more pieces (e.g. 2.0).
+static var planet_break_fineness: float = 1.0
+## Radiant glow toggle for shattered planet pieces: controls whether fractured mantle/core emission is active.
+## When false, disables emission on debris chunks and asteroids for enhanced performance/FPS on low-end hardware.
+static var planet_debris_glow: bool = true
 ## Ship size scale: multiplies every spawned hull — the player's own and each AI
 ## ship — and its collision radius. 1.0 is the design size. Changing it reloads
 ## the flight scene so all ships rebuild at the new scale.
@@ -107,16 +113,26 @@ static var mesh_baking_enabled := false
 ## Whether the drift field (motes/streaks) and planet pointer come back on after
 ## a reload — they used to be ephemeral per-scene toggles.
 static var drift_field := true
-static var planet_pointer := true
+static var planet_pointer := false
+## Whether gravity bodies attract things in ("pull"). Off by default.
+static var gravity_pull := false
 ## World-build quality dials. Read while the space scene builds, so changing one
 ## takes effect on the next scene restart (the menus label them "restart to
 ## apply", the same contract as [member planet_scale]).
 static var star_density := 1.0
+## Star size multiplier for celestial background stars.
+static var star_size_mult := 1.25
 static var asteroid_density := 1.0
 ## Enhanced backdrop: corona, distant galaxy and nebula dust around the star.
 static var render_backdrop := true
 ## Enhanced lighting: increases rim strength and warms the main light.
 static var enhanced_lighting := true
+## Cinematic lighting (Galaxy on Fire 2 style): dramatic sunflare starburst, intense bloom, high-contrast rim & shadows.
+static var cinematic_lighting := true
+## Weird glare/flare effects toggle: solar corona, flare petals, intense bloom.
+static var glare_enabled := true
+## Tactical high-beam headlights and navigation lights on ships.
+static var ship_headlights := true
 ## Trail length multiplier, read by Trail3D when a trail is (re)built.
 static var trail_length := 1.0
 ## Solar system gen lab: simulation speed multiplier, live-read (no restart
@@ -183,6 +199,7 @@ static func start() -> void:
 	if _started:
 		return
 	_started = true
+	load_from_disk()
 	read_cmdline(_run_args())
 	if not seed_forced:
 		_roll_seed()
@@ -247,12 +264,101 @@ static func _announce() -> void:
 	print("[session] Project Nebula — mode %s, seed %d%s" % [mode_name, seed, forced])
 
 
+const SETTINGS_PATH := "user://session_settings.cfg"
+const SECTION := "session"
+
+
+## Save all user-adjustable preferences to disk.
+static func save_to_disk() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value(SECTION, "planet_scale", planet_scale)
+	cfg.set_value(SECTION, "planet_spacing", planet_spacing)
+	cfg.set_value(SECTION, "planet_break_fineness", planet_break_fineness)
+	cfg.set_value(SECTION, "planet_debris_glow", planet_debris_glow)
+	cfg.set_value(SECTION, "ship_scale", ship_scale)
+	cfg.set_value(SECTION, "high_res", high_res)
+	cfg.set_value(SECTION, "trail_player", trail_player)
+	cfg.set_value(SECTION, "trail_ships", trail_ships)
+	cfg.set_value(SECTION, "flight_location", flight_location)
+	cfg.set_value(SECTION, "camera_fov", camera_fov)
+	cfg.set_value(SECTION, "camera_chase", camera_chase)
+	cfg.set_value(SECTION, "assist_mult", assist_mult)
+	cfg.set_value(SECTION, "damping_mult", damping_mult)
+	cfg.set_value(SECTION, "hud_reticle", hud_reticle)
+	cfg.set_value(SECTION, "hud_markers", hud_markers)
+	cfg.set_value(SECTION, "hud_indicators", hud_indicators)
+	cfg.set_value(SECTION, "mobile_view_fit", mobile_view_fit)
+	cfg.set_value(SECTION, "mesh_baking_enabled", mesh_baking_enabled)
+	cfg.set_value(SECTION, "drift_field", drift_field)
+	cfg.set_value(SECTION, "planet_pointer", planet_pointer)
+	cfg.set_value(SECTION, "gravity_pull", gravity_pull)
+	cfg.set_value(SECTION, "star_density", star_density)
+	cfg.set_value(SECTION, "star_size_mult", star_size_mult)
+	cfg.set_value(SECTION, "asteroid_density", asteroid_density)
+	cfg.set_value(SECTION, "render_backdrop", render_backdrop)
+	cfg.set_value(SECTION, "enhanced_lighting", enhanced_lighting)
+	cfg.set_value(SECTION, "cinematic_lighting", cinematic_lighting)
+	cfg.set_value(SECTION, "glare_enabled", glare_enabled)
+	cfg.set_value(SECTION, "ship_headlights", ship_headlights)
+	cfg.set_value(SECTION, "trail_length", trail_length)
+	cfg.set_value(SECTION, "player_speed_scale", player_speed_scale)
+	cfg.set_value(SECTION, "npc_speed_scale", npc_speed_scale)
+	cfg.set_value(SECTION, "fast_orbits", fast_orbits)
+	cfg.set_value(SECTION, "orbit_speed_scale", orbit_speed_scale)
+	cfg.set_value(SECTION, "arcade_pivot", arcade_pivot)
+	cfg.save(SETTINGS_PATH)
+
+
+## Load user preferences from disk.
+static func load_from_disk() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return
+	planet_scale = float(cfg.get_value(SECTION, "planet_scale", planet_scale))
+	planet_spacing = float(cfg.get_value(SECTION, "planet_spacing", planet_spacing))
+	planet_break_fineness = float(cfg.get_value(SECTION, "planet_break_fineness", planet_break_fineness))
+	planet_debris_glow = bool(cfg.get_value(SECTION, "planet_debris_glow", planet_debris_glow))
+	ship_scale = float(cfg.get_value(SECTION, "ship_scale", ship_scale))
+	high_res = bool(cfg.get_value(SECTION, "high_res", high_res))
+	trail_player = bool(cfg.get_value(SECTION, "trail_player", trail_player))
+	trail_ships = bool(cfg.get_value(SECTION, "trail_ships", trail_ships))
+	flight_location = int(cfg.get_value(SECTION, "flight_location", flight_location))
+	camera_fov = float(cfg.get_value(SECTION, "camera_fov", camera_fov))
+	camera_chase = float(cfg.get_value(SECTION, "camera_chase", camera_chase))
+	assist_mult = float(cfg.get_value(SECTION, "assist_mult", assist_mult))
+	damping_mult = float(cfg.get_value(SECTION, "damping_mult", damping_mult))
+	hud_reticle = bool(cfg.get_value(SECTION, "hud_reticle", hud_reticle))
+	hud_markers = bool(cfg.get_value(SECTION, "hud_markers", hud_markers))
+	hud_indicators = bool(cfg.get_value(SECTION, "hud_indicators", hud_indicators))
+	mobile_view_fit = bool(cfg.get_value(SECTION, "mobile_view_fit", mobile_view_fit))
+	mesh_baking_enabled = bool(cfg.get_value(SECTION, "mesh_baking_enabled", mesh_baking_enabled))
+	drift_field = bool(cfg.get_value(SECTION, "drift_field", drift_field))
+	planet_pointer = bool(cfg.get_value(SECTION, "planet_pointer", planet_pointer))
+	gravity_pull = bool(cfg.get_value(SECTION, "gravity_pull", gravity_pull))
+	star_density = float(cfg.get_value(SECTION, "star_density", star_density))
+	star_size_mult = float(cfg.get_value(SECTION, "star_size_mult", star_size_mult))
+	asteroid_density = float(cfg.get_value(SECTION, "asteroid_density", asteroid_density))
+	render_backdrop = bool(cfg.get_value(SECTION, "render_backdrop", render_backdrop))
+	enhanced_lighting = bool(cfg.get_value(SECTION, "enhanced_lighting", enhanced_lighting))
+	cinematic_lighting = bool(cfg.get_value(SECTION, "cinematic_lighting", cinematic_lighting))
+	glare_enabled = bool(cfg.get_value(SECTION, "glare_enabled", glare_enabled))
+	ship_headlights = bool(cfg.get_value(SECTION, "ship_headlights", ship_headlights))
+	trail_length = float(cfg.get_value(SECTION, "trail_length", trail_length))
+	player_speed_scale = float(cfg.get_value(SECTION, "player_speed_scale", player_speed_scale))
+	npc_speed_scale = float(cfg.get_value(SECTION, "npc_speed_scale", npc_speed_scale))
+	fast_orbits = bool(cfg.get_value(SECTION, "fast_orbits", fast_orbits))
+	orbit_speed_scale = float(cfg.get_value(SECTION, "orbit_speed_scale", orbit_speed_scale))
+	arcade_pivot = float(cfg.get_value(SECTION, "arcade_pivot", arcade_pivot))
+
+
 ## Restore every persisted display/menu setting to its shipped default. The
 ## Flight HUD Settings menu's "Reset all settings" row calls this and then
 ## restarts the scene so the world, ships and HUD all rebuild at the defaults.
 static func reset_to_defaults() -> void:
 	planet_scale = 1.0
 	planet_spacing = 1.0
+	planet_break_fineness = 1.0
+	planet_debris_glow = true
 	ship_scale = 1.0
 	high_res = false
 	trail_player = false
@@ -266,12 +372,19 @@ static func reset_to_defaults() -> void:
 	hud_reticle = true
 	hud_markers = true
 	hud_indicators = true
+	mobile_view_fit = false
+	mesh_baking_enabled = false
 	drift_field = true
-	planet_pointer = true
+	planet_pointer = false
+	gravity_pull = false
 	star_density = 1.0
+	star_size_mult = 1.25
 	asteroid_density = 1.0
 	render_backdrop = true
 	enhanced_lighting = true
+	cinematic_lighting = true
+	glare_enabled = true
+	ship_headlights = true
 	trail_length = 1.0
 	solar_time_scale = 1.0
 	player_speed_scale = 1.0
@@ -281,4 +394,10 @@ static func reset_to_defaults() -> void:
 	arcade_pivot = 3.0
 	pending_solar_system = null
 	pending_spawn_body_name = ""
+	# Remove config file so fresh defaults are preserved
+	if FileAccess.file_exists(SETTINGS_PATH):
+		DirAccess.remove_absolute(SETTINGS_PATH)
+	var path_global := ProjectSettings.globalize_path(SETTINGS_PATH)
+	if FileAccess.file_exists(path_global):
+		DirAccess.remove_absolute(path_global)
 

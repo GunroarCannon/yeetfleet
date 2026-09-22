@@ -56,6 +56,17 @@ var _clouds: MeshInstance3D
 # all six faces of the sphere for nothing.
 var _noise_signature := ""
 
+## How hard a palette switch pulls this planet's colours toward the palette's
+## planet roles. Not 1.0 on purpose: a palette has one pair of planet hues, and
+## matching it exactly would make every world in a system the same colour. The
+## remainder keeps the authored per-planet character.
+const PALETTE_MIX := 0.7
+
+## The colours as authored, captured the first time [method apply_palette] runs
+## so repeated palette switches blend from the original rather than compounding
+## lerp on top of lerp.
+var _base_colors := {}
+
 
 ## Which atmosphere shader to use. Set from FlightRoot debug menu.
 static var atmosphere_shader_path := ATMOSPHERE_SAFE_PATH
@@ -89,6 +100,53 @@ func configure(new_data: PlanetData) -> void:
 		_build_atmosphere()
 	if data.cloud_density > 0.0:
 		_build_clouds()
+	# Recolour to the live palette if one is active. With no palette (the
+	# default) this is a no-op, so an authored planet keeps exactly the colours
+	# the editor gave it.
+	apply_palette()
+
+
+## Pull this planet's colours toward the active palette's planet roles, keeping
+## the distance between them loose enough that a generated system's worlds still
+## read as individuals.
+##
+## Anchored to a snapshot of the authored colours taken on first call, so
+## switching palettes twice does not darken or desaturate anything — the blend is
+## always palette-from-authored, never palette-from-last-palette. A no-op when no
+## palette is active, which is what keeps the palette rollout invisible until a
+## palette is actually chosen.
+func apply_palette(mix := PALETTE_MIX) -> void:
+	if data == null:
+		return
+	var manager := StyleManager.instance()
+	if manager == null or manager.current_palette == null:
+		return
+	if _base_colors.is_empty():
+		_base_colors = {
+			"primary": data.primary_color,
+			"secondary": data.secondary_color,
+			"water": data.water_color,
+			"ring_a": data.ring_color_a,
+			"ring_b": data.ring_color_b,
+			"atmosphere": data.atmosphere_color,
+			"cloud": data.cloud_color,
+		}
+	var primary: Color = _base_colors["primary"]
+	var secondary: Color = _base_colors["secondary"]
+	data.primary_color = primary.lerp(Palette.color("planet_primary"), mix)
+	data.secondary_color = secondary.lerp(Palette.color("planet_secondary"), mix)
+	data.water_color = (_base_colors["water"] as Color).lerp(
+		Palette.planet_sea(data.primary_color, 0.25), mix
+	)
+	data.ring_color_a = (_base_colors["ring_a"] as Color).lerp(Palette.color("planet_ring"), mix)
+	data.ring_color_b = (_base_colors["ring_b"] as Color).lerp(
+		Palette.color("planet_ring").darkened(0.3), mix
+	)
+	data.atmosphere_color = (_base_colors["atmosphere"] as Color).lerp(
+		Palette.planet_sky(data.primary_color, 0.0, 0.2), mix
+	)
+	data.cloud_color = (_base_colors["cloud"] as Color).lerp(Palette.color("planet_cloud"), mix)
+	refresh_appearance()
 
 
 ## Push colours and shader parameters at the existing materials. Nothing is
@@ -327,6 +385,11 @@ const SPIN_MULT := 20.0
 ## [constant SPIN_MULT]. The moon is a Planet too, so it spins on its axis while
 ## SpaceScene carries it around Tarn — "things in orbit spin".
 func _process(delta: float) -> void:
+	# Guarded because a Planet is in the tree between add_child and configure,
+	# which is exactly how the editor and the smokes build one. Without this the
+	# spin reads a null [member data] every frame a half-built planet exists.
+	if data == null:
+		return
 	rotate_y(data.rotation_speed * SPIN_MULT * delta)
 
 
@@ -411,6 +474,7 @@ func _write_surface_params(mat: ShaderMaterial) -> void:
 	# noise to a smooth ball.
 	mat.set_shader_parameter("relief", 0.0 if data.is_gas_giant() else 1.0)
 	mat.set_shader_parameter("sun_direction", sun_direction.normalized())
+	mat.set_shader_parameter("wireframe_mode", 1.0 if StyleManager.instance().is_wireframe() else 0.0)
 
 
 # --- Accessors ------------------------------------------------------------

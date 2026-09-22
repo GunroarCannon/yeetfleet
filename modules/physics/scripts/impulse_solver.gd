@@ -118,13 +118,17 @@ static func _contact(a: PhysBody, b: PhysBody, delta: float, profile: PhysProfil
 static func _discrete_contact(a: PhysBody, b: PhysBody) -> Dictionary:
 	var a_hull := a.has_hull()
 	var b_hull := b.has_hull()
+	var a_in_tree := a.node != null and a.node.is_inside_tree()
+	var b_in_tree := b.node != null and b.node.is_inside_tree()
+	var a_scale := a.node.global_basis.get_scale().x if a_in_tree else 1.0
+	var b_scale := b.node.global_basis.get_scale().x if b_in_tree else 1.0
 	if not a_hull and not b_hull:
-		return _sphere_overlap(a.position(), a.radius, b.position(), b.radius)
+		return _sphere_overlap(a.position(), a.radius * a_scale, b.position(), b.radius * b_scale)
 	# One transform read per *body*, not per sphere, and B's sections resolved
 	# into world space once — the inner loop then reads two packed arrays rather
 	# than re-transforming a dictionary entry for every section of A.
-	var a_xform := a.node.global_transform if a_hull and a.node != null else Transform3D()
-	var b_xform := b.node.global_transform if b_hull and b.node != null else Transform3D()
+	var a_xform := a.node.global_transform if a_hull and a_in_tree else Transform3D()
+	var b_xform := b.node.global_transform if b_hull and b_in_tree else Transform3D()
 	var a_count := a.hull.size() if a_hull else 1
 	var b_count := b.hull.size() if b_hull else 1
 	var a_solo := a.position()
@@ -135,7 +139,7 @@ static func _discrete_contact(a: PhysBody, b: PhysBody) -> Dictionary:
 	b_radii.resize(b_count)
 	for j in b_count:
 		b_centers[j] = b_xform * (b.hull[j]["offset"] as Vector3) if b_hull else b_solo
-		b_radii[j] = float(b.hull[j]["radius"]) if b_hull else b.radius
+		b_radii[j] = (float(b.hull[j]["radius"]) if b_hull else b.radius) * b_scale
 
 	var best_overlap := 0.0
 	var best_pa := Vector3.ZERO
@@ -145,7 +149,7 @@ static func _discrete_contact(a: PhysBody, b: PhysBody) -> Dictionary:
 	var hit := false
 	for i in a_count:
 		var pa := a_xform * (a.hull[i]["offset"] as Vector3) if a_hull else a_solo
-		var ra := float(a.hull[i]["radius"]) if a_hull else a.radius
+		var ra := (float(a.hull[i]["radius"]) if a_hull else a.radius) * a_scale
 		for j in b_count:
 			var pb := b_centers[j]
 			var rb := b_radii[j]
@@ -180,8 +184,12 @@ static func _discrete_contact(a: PhysBody, b: PhysBody) -> Dictionary:
 static func _swept_contact(a: PhysBody, b: PhysBody, delta: float) -> Dictionary:
 	var a_hull := a.has_hull()
 	var b_hull := b.has_hull()
-	var a_xform := a.node.global_transform if a_hull and a.node != null else Transform3D()
-	var b_xform := b.node.global_transform if b_hull and b.node != null else Transform3D()
+	var a_in_tree := a.node != null and a.node.is_inside_tree()
+	var b_in_tree := b.node != null and b.node.is_inside_tree()
+	var a_scale := a.node.global_basis.get_scale().x if a_in_tree else 1.0
+	var b_scale := b.node.global_basis.get_scale().x if b_in_tree else 1.0
+	var a_xform := a.node.global_transform if a_hull and a_in_tree else Transform3D()
+	var b_xform := b.node.global_transform if b_hull and b_in_tree else Transform3D()
 	var a_count := a.hull.size() if a_hull else 1
 	var b_count := b.hull.size() if b_hull else 1
 	var a_solo := a.position()
@@ -193,10 +201,10 @@ static func _swept_contact(a: PhysBody, b: PhysBody, delta: float) -> Dictionary
 	var best_rb := 0.0
 	for i in a_count:
 		var pa := a_xform * (a.hull[i]["offset"] as Vector3) if a_hull else a_solo
-		var ra := float(a.hull[i]["radius"]) if a_hull else a.radius
+		var ra := (float(a.hull[i]["radius"]) if a_hull else a.radius) * a_scale
 		for j in b_count:
 			var pb := b_xform * (b.hull[j]["offset"] as Vector3) if b_hull else b_solo
-			var rb := float(b.hull[j]["radius"]) if b_hull else b.radius
+			var rb := (float(b.hull[j]["radius"]) if b_hull else b.radius) * b_scale
 			# ALREADY_OVERLAPPING is -1, so it sorts ahead of any real t and the
 			# maxf below clamps it back to the start of the step.
 			var t := Ccd.impact_time(pa, a.velocity, ra, pb, b.velocity, rb, delta)

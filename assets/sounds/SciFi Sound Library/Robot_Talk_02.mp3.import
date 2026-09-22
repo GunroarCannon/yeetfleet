@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://uyx7u0bgdwfu"
+path="res://.godot/imported/Robot_Talk_02.mp3-1ad7eb83fb443f4868a311abd2a8f95d.mp3str"
+
+[deps]
+
+source_file="res://assets/sounds/SciFi Sound Library/Robot_Talk_02.mp3"
+dest_files=["res://.godot/imported/Robot_Talk_02.mp3-1ad7eb83fb443f4868a311abd2a8f95d.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

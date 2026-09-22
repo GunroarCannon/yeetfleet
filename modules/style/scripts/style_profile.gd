@@ -43,6 +43,9 @@ extends Resource
 ## Live impact deformation (consumes PhysProfile.squash_amount)
 @export var squash_enabled := false  # Consumes PhysProfile.squash_amount for impact deformation
 
+## Vector Arcade wireframe mode
+@export var wireframe := false
+
 ## Utility: whether a dial requires reload
 func requires_reload(dial_name: String) -> bool:
 	return dial_name in ["roundness", "chunkiness", "rock_potato"]

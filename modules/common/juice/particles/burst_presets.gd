@@ -24,7 +24,7 @@ static func config(preset: Preset) -> Dictionary:
 	match preset:
 		Preset.SPARKS:
 			return {
-				"pool": 128, "count": 20, "life": Vector2(0.3, 0.6), "size": Vector2(0.06, 0.16),
+				"pool": 128, "count": 12, "life": Vector2(0.3, 0.6), "size": Vector2(0.06, 0.16),
 				"speed": Vector2(3.0, 8.0), "gravity": 0.0, "spin": 6.0,
 				"color_from": Color(1.2, 1.1, 1.0), "color_to": Color("ffb347"),
 				"additive": true, "stretch": 2.5,
@@ -38,7 +38,7 @@ static func config(preset: Preset) -> Dictionary:
 			}
 		Preset.EMBERS:
 			return {
-				"pool": 96, "count": 18, "life": Vector2(2.0, 4.0), "size": Vector2(0.04, 0.09),
+				"pool": 96, "count": 10, "life": Vector2(2.0, 4.0), "size": Vector2(0.04, 0.09),
 				"speed": Vector2(0.3, 1.2), "gravity": -0.05, "spin": 1.0,
 				"color_from": Color("ffcf8a"), "color_to": Color("ff5b2e"),
 				"additive": true, "stretch": 1.0,

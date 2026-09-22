@@ -25,6 +25,14 @@ signal assist_changed(enabled: bool)
 ## camera can react to it. [param level] is 0..1.
 signal boost_changed(level: float)
 
+## Emitted when the ship enters or recovers from an out-of-control spin state.
+signal out_of_control_changed(active: bool)
+
+
+func _ready() -> void:
+	add_to_group("flight_models")
+
+
 ## Control input, all in -1..1 except throttle. Written every frame by
 ## [FlightControls]; read here and nowhere else.
 class Command:
@@ -89,7 +97,13 @@ var assist_mode := 2
 var assist := true
 
 ## Current world velocity, m/s.
+##
+## Writing this directly is honoured even on a body bound to a [PhysWorld]: see
+## [method set_velocity] and [method _pull_solver_state] for how a teleport, a
+## spawn ejection or a test's set-up survives the step that follows it.
 var velocity := Vector3.ZERO
+## The velocity this ship last handed the solver (see [method _pull_solver_state]).
+var _phys_velocity_written := Vector3.ZERO
 ## Current body-frame angular rate, rad/s: x pitch, y yaw, z roll.
 var angular := Vector3.ZERO
 
@@ -185,16 +199,21 @@ var _tumble := Vector3.ZERO
 ## before the computer flies the ship back onto its rails (§3.1 #6). Set from
 ## [PhysProfile.assist_lockout_on_impact].
 var _assist_lockout := 0.0
+## Out-of-control spin state: when an impact or shockwave induces violent spin,
+## control authority is lost and the ship tumbles until it dampens or recovers.
+var out_of_control := false
+var _out_of_control_timer := 0.0
+## Asymmetric aerodynamic or thruster drag resulting from severed wings / detached parts,
+## which exerts constant rotational drift in forward flight.
+var asymmetric_drag := Vector3.ZERO
 
-## An induced tumble is capped so a lucky glancing hit cannot spin the ship so
-## fast it becomes unrecoverable or nauseating.
-const TUMBLE_MAX := 5.0
+## An induced tumble is capped so a violent hit can spin the ship fast and disorienting,
+## but not infinitely break numerical integration.
+const TUMBLE_MAX := 18.0
 ## Approach speed (m/s) below which a contact is a touch, not a crash.
 const IMPACT_TOUCH_SPEED := 6.0
-## Approach speed at which a hit starts breaking parts off. One number where the
-## pre-M1 code had a per-scenery split (30 for rocks, 120 for planets); the
-## profile is where this belongs once the lab can tune it.
-const IMPACT_DAMAGE_SPEED := 60.0
+## Approach speed at which a hit starts breaking parts off.
+const IMPACT_DAMAGE_SPEED := 18.0
 
 ## Orbit detection: emits when the ship enters or leaves a stable orbit.
 signal orbit_changed(body_name: String, in_orbit: bool)
@@ -373,6 +392,21 @@ func target_speed() -> float:
 	return command.throttle * top_speed * REVERSE_FRACTION
 
 
+## Set the ship's velocity outright, keeping a bound physics body in step.
+##
+## This is the way to mean "this is my velocity now" — a teleport, a respawn,
+## an ejection onto an orbit (see [method FlightRoot.enter_orbit] and
+## [method AiSpawner.spawn_ballistic_satellite]), or a test setting up a speed.
+## A plain [member velocity] write is honoured too as long as the solver has not
+## touched the body since (see [method _pull_solver_state]); this method is the
+## one that says so out loud.
+func set_velocity(value: Vector3) -> void:
+	velocity = value
+	if _phys != null:
+		_phys.velocity = value
+		_phys_velocity_written = value
+
+
 ## Drop all motion. Used when the scene restarts the ship rather than reloading.
 func halt() -> void:
 	velocity = Vector3.ZERO
@@ -383,6 +417,7 @@ func halt() -> void:
 	if _phys != null:
 		_phys.velocity = Vector3.ZERO
 		_phys.angular = Vector3.ZERO
+		_phys_velocity_written = Vector3.ZERO
 	# Re-derive speed/turn from stats if we have them, undoing any damage.
 	if _stats != null:
 		var base := clampf(_stats.top_speed, SPEED_MIN, SPEED_MAX)
@@ -434,6 +469,44 @@ func _physics_process(delta: float) -> void:
 		_check_collision()
 
 
+## Apply an impact spin from a physical collision or explosion torque.
+## [param torque_impulse] is in radians/second.
+## [param out_of_control_duration] if > 0 locks out assist and scrambles pilot controls.
+func apply_impact_spin(torque_impulse: Vector3, out_of_control_duration: float = 0.0) -> void:
+	_tumble = (_tumble + torque_impulse).limit_length(TUMBLE_MAX)
+	if out_of_control_duration > 0.0:
+		_out_of_control_timer = maxf(_out_of_control_timer, out_of_control_duration)
+		_assist_lockout = maxf(_assist_lockout, out_of_control_duration + 0.4)
+		if not out_of_control:
+			out_of_control = true
+			out_of_control_changed.emit(true)
+
+
+## Apply an explosive radial blast wave from [param blast_origin] out to [param max_radius].
+## Pushes velocity outward, applies angular tumble torque, and knocks the ship out of control.
+func apply_radial_blast(blast_origin: Vector3, max_radius: float, peak_force: float, peak_torque: float = 8.0) -> void:
+	var diff := global_position - blast_origin
+	var dist := diff.length()
+	if dist >= max_radius:
+		return
+	var falloff := 1.0 - clampf(dist / max_radius, 0.0, 1.0)
+	var intensity := falloff * falloff
+	var push_dir := diff.normalized() if dist > 0.01 else -global_transform.basis.z
+	var impulse := push_dir * (peak_force * intensity)
+	velocity += impulse / _ship_mass()
+
+	var spin_axis := push_dir.cross(Vector3(0.3, 0.9, -0.2)).normalized()
+	if spin_axis.length_squared() < 0.01:
+		spin_axis = Vector3.UP
+	var torque := spin_axis * (peak_torque * intensity)
+	var ooc_time := clampf(intensity * 2.5, 0.3, 3.0)
+	apply_impact_spin(torque, ooc_time)
+
+	if is_player():
+		Juice.shake(clampf(intensity * 0.85, 0.2, 1.0), 0.45)
+		Juice.hitstop(clampf(intensity * 0.06, 0.02, 0.09), 0.15)
+
+
 # --- Rotation ---------------------------------------------------------------
 
 func _integrate_rotation(delta: float) -> void:
@@ -442,6 +515,37 @@ func _integrate_rotation(delta: float) -> void:
 		command.yaw * turn_rate,
 		command.roll * turn_rate * ROLL_FACTOR
 	)
+
+	# If currently spinning out of control from an impact or blast:
+	if _out_of_control_timer > 0.0:
+		_out_of_control_timer = maxf(_out_of_control_timer - delta, 0.0)
+		if _out_of_control_timer <= 0.0 and out_of_control:
+			out_of_control = false
+			out_of_control_changed.emit(false)
+		# Cartoony top-spin: steer the tumble axis toward world-up so the ship
+		# spins like a gyroscope top rather than flopping randomly on all axes.
+		# The rate is preserved — only the direction drifts to Y-dominant.
+		var spin_speed := _tumble.length()
+		if spin_speed > 0.01:
+			var top_axis := Vector3.UP * (1.0 if _tumble.y >= 0.0 else -1.0)
+			# Blend toward world-Y by ~4 rad/s² — fast enough to feel snappy,
+			# slow enough that the first half-second still reads as "chaos".
+			var axis_now := (_tumble / spin_speed).lerp(top_axis, clampf(delta * 4.0, 0.0, 1.0))
+			_tumble = axis_now.normalized() * spin_speed
+		var jitter := Vector3(
+			sin(Time.get_ticks_msec() * 0.011) * 0.5,
+			cos(Time.get_ticks_msec() * 0.008) * 0.5,
+			sin(Time.get_ticks_msec() * 0.014) * 0.5
+		)
+		wanted = wanted * 0.15 + jitter * (turn_rate * 0.4)
+
+
+	# Asymmetric drag from missing wings / detached parts pulls the ship continuously:
+	if asymmetric_drag.length_squared() > 1e-6:
+		var fwd_speed := forward_speed()
+		var drag_factor := clampf(fwd_speed / 120.0, 0.2, 2.5)
+		wanted += asymmetric_drag * drag_factor
+
 	# Spool towards the commanded rate on each axis, then damp any axis the pilot
 	# is not asking anything of. Two separate steps rather than one blended one,
 	# because damping an axis you are actively commanding is what makes a ship
@@ -450,6 +554,8 @@ func _integrate_rotation(delta: float) -> void:
 	angular = angular.lerp(wanted, spool)
 
 	var damp := SPIN_DAMP_ASSIST if assist_mode == 2 else (SPIN_DAMP_ASSIST * 0.6 if assist_mode == 1 else SPIN_DAMP_FREE)
+	if out_of_control or _assist_lockout > 0.0:
+		damp = SPIN_DAMP_FREE * 0.65
 	var decay := clampf(damp * delta, 0.0, 1.0)
 	if absf(command.pitch) < 0.01:
 		angular.x = lerpf(angular.x, 0.0, decay)
@@ -478,6 +584,7 @@ func _integrate_rotation(delta: float) -> void:
 		if step > 1e-6:
 			basis = (Basis(_tumble / rate, step) * basis).orthonormalized()
 		_tumble *= clampf(1.0 - _spin_damp_now() * delta, 0.0, 1.0)
+
 	# Renormalise: thousands of incremental rotations accumulate skew otherwise,
 	# and a sheared basis shears the whole ship with it.
 	global_transform = Transform3D(basis.orthonormalized(), global_transform.origin)
@@ -578,6 +685,7 @@ func _integrate_translation(delta: float) -> void:
 	# its tuned hand-integration.
 	if _phys != null:
 		_phys.velocity = velocity
+		_phys_velocity_written = velocity
 	global_position += velocity * delta
 
 
@@ -666,6 +774,8 @@ func _check_collision() -> void:
 				if outward_speed < min_speed:
 					new_vel += push_dir * (min_speed - outward_speed)
 				velocity = new_vel
+				var planet_spin := (push_dir.cross(velocity.normalized()) + Vector3(0.2, 0.5, 0.1)).normalized() * (impact_speed * 0.05)
+				apply_impact_spin(planet_spin, clampf(impact_speed / 60.0, 0.2, 1.5))
 				# Planet contacts are soft: the orbital assist (see
 				# _apply_orbital_assist) should keep the ship out of the surface,
 				# and a slow scrape here is a bump, not a hull breach. Only a
@@ -694,6 +804,9 @@ func _check_collision() -> void:
 					global_position = rock_pos + push_dir * collision_radius
 					var impact_speed := velocity.dot(-push_dir)
 					velocity = velocity.bounce(push_dir) * 0.25
+					var ast_lever := (pos - rock_pos).normalized()
+					var ast_spin := (ast_lever.cross(velocity.normalized()) + Vector3(0.3, 0.4, -0.2)).normalized() * (impact_speed * 0.07)
+					apply_impact_spin(ast_spin, clampf(impact_speed / 35.0, 0.3, 2.0))
 					if impact_speed > 30.0:
 						_on_impact(impact_speed)
 					break  # one rock per frame
@@ -737,9 +850,30 @@ func set_phys_world(world: PhysWorld, radius: float, hull: Array[Dictionary] = [
 		_phys.set_hull(hull)
 	_phys.mass = _ship_mass()
 	_phys.velocity = velocity
+	_phys_velocity_written = velocity
 	phys_world = world
 	if world != null and not world.bodies.has(_phys):
 		world.add(_phys)
+
+	# Synchronize with Godot physics engine for direct raycasts and rigid body contacts
+	var col_body := get_node_or_null("GodotCollider") as AnimatableBody3D
+	if col_body == null:
+		col_body = AnimatableBody3D.new()
+		col_body.name = "GodotCollider"
+		col_body.collision_layer = 1 | 2
+		col_body.collision_mask = 1 | 2 | 4
+		col_body.sync_to_physics = false
+		add_child(col_body)
+		var cs := CollisionShape3D.new()
+		cs.name = "ColShape"
+		var ss := SphereShape3D.new()
+		ss.radius = maxf(radius * 0.85, 1.5)
+		cs.shape = ss
+		col_body.add_child(cs)
+	else:
+		var cs := col_body.get_node_or_null("ColShape") as CollisionShape3D
+		if cs != null and cs.shape is SphereShape3D:
+			(cs.shape as SphereShape3D).radius = maxf(radius * 0.85, 1.5)
 
 
 ## Leave the world (ship destroyed, scene torn down). Idempotent.
@@ -784,29 +918,115 @@ func _ship_mass() -> float:
 ## Called by [PhysWorld] when this body took an impulse. Routes the severity of
 ## the hit — its closing speed, the number a pilot reads as "how hard did I hit
 ## that" — into the assist lockout, part damage and hitstop.
-func _on_phys_impacted(_other: PhysBody, _impulse: float, _point: Vector3, _normal: Vector3, closing: float) -> void:
+func _on_phys_impacted(other: PhysBody, impulse: float, point: Vector3, normal: Vector3, closing: float) -> void:
 	if closing <= IMPACT_TOUCH_SPEED:
 		return
 	var profile := _active_profile()
-	# Disengage the assists for the profile's window so the knock plays out. The
-	# window is set, never shortened: a second hit inside it keeps the ship
-	# reeling rather than resetting the timer mid-fall.
+	# Disengage the assists for the profile's window so the knock plays out.
 	var lockout := profile.assist_lockout_on_impact if profile != null else 0.6
 	if lockout > _assist_lockout:
 		_assist_lockout = lockout
-	# Damage: a genuinely fast slam breaks parts off. Only the player has a
-	# [DamageSystem]; AI ships (configured with none) just take the knock.
+
+	# Collision & ramming damage factoring speed and durability
+	_apply_collision_damage(other, impulse, point, closing)
+
+	# Damage: a genuinely fast slam breaks parts off.
 	if closing >= IMPACT_DAMAGE_SPEED and _damage != null:
 		_damage.handle_impact(closing)
-	# Impact freeze, scaled by the profile. OFF by default in flight unless the
-	# profile or reduce-motion lets it through — calling it is the wiring; Juice
-	# holds the final say.
+
+	# Calculate contact lever arm and impact torque to spin the ship:
+	var lever := point - global_position
+	var contact_torque := lever.cross(-normal) * (closing * 0.12)
+	# If head-on or near-center, add tangential spin so ships reliably spin on impact:
+	if contact_torque.length() < closing * 0.04:
+		var side_axis := (-normal.cross(global_transform.basis.y) + Vector3(0.1, 0.4, -0.2)).normalized()
+		contact_torque += side_axis * (closing * 0.08)
+	var ooc_time := 0.0
+	if closing >= IMPACT_DAMAGE_SPEED:
+		ooc_time = clampf((closing - IMPACT_DAMAGE_SPEED) / 22.0, 0.4, 2.5)
+	apply_impact_spin(contact_torque, ooc_time)
+
+	# Impact freeze, scaled by the profile.
 	if profile != null and profile.hitstop_scale > 0.0 and closing > IMPACT_TOUCH_SPEED * 2.0:
 		var seconds := clampf(0.015 + closing * 0.0004, 0.02, profile.hitstop_max)
 		Juice.hitstop(seconds * profile.hitstop_scale, 0.15)
 	# A little shake so even a mid hit reads in the camera.
-	Juice.shake(clampf(closing * 0.002, 0.05, 0.35), 0.3)
-	_trigger_squash(profile, _normal, closing)
+	Juice.shake(clampf(closing * 0.003, 0.08, 0.45), 0.3)
+	_trigger_squash(profile, normal, closing)
+
+
+func is_player() -> bool:
+	var p := get_parent()
+	return p != null and not (p is AiShip)
+
+
+func _durability() -> float:
+	var hp := 160.0
+	if _stats != null:
+		hp = maxf(_stats.get_stat("hull_hp"), 80.0)
+	var m := _ship_mass()
+	var d := hp + m * 2.5
+	if is_player():
+		# Player parts have naturally higher strength and durability
+		d *= 2.5
+	return d
+
+
+func _other_durability(other: PhysBody) -> float:
+	if other == null:
+		return 150.0
+	if other.layer == PhysBody.Layer.STATIC or other.layer == PhysBody.Layer.ROCK:
+		return 3500.0  # Massive immovable rock or structure
+	var other_mass := other.mass
+	var other_d := 150.0 + other_mass * 2.5
+	if other.node != null:
+		var other_owner = other.node.get_parent()
+		if other_owner != null:
+			if not (other_owner is AiShip) and other_owner.has_method("take_damage"):
+				other_d *= 2.5
+			elif other_owner is AiShip:
+				var ai: AiShip = other_owner as AiShip
+				other_d = ai.max_hp + other_mass * 2.0
+	return other_d
+
+
+func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, closing: float) -> void:
+	if closing < 10.0:
+		return
+
+	var base_dmg := (closing - 8.0) * 2.5
+	var my_d := _durability()
+	var their_d := _other_durability(other)
+
+	var my_speed := velocity.length()
+	var their_speed := other.velocity.length() if other != null else 0.0
+	var speed_ratio := (their_speed + 6.0) / (my_speed + their_speed + 12.0)
+
+	var durability_ratio := sqrt(their_d / maxf(my_d, 10.0))
+	var dmg := base_dmg * durability_ratio * speed_ratio * 1.5
+
+	if closing > 25.0:
+		dmg = maxf(dmg, (closing - 18.0) * 1.4)
+
+	if is_player():
+		# Heroic ramming advantage: player ship shrugs off self damage and hits harder
+		dmg *= 0.25
+	else:
+		# If AI hit by player, AI takes devastating kinetic ramming crush
+		if other != null and other.node != null:
+			var other_parent = other.node.get_parent()
+			if other_parent != null and not (other_parent is AiShip):
+				dmg *= 2.0
+
+	var p := get_parent()
+	if p != null:
+		if is_player() and p.has_method("take_damage"):
+			p.take_damage(dmg, point)
+		elif p is AiShip:
+			var ai := p as AiShip
+			ai.take_damage(dmg)
+			if closing > 22.0 and ai.has_method("break_random_part"):
+				ai.break_random_part()
 
 
 ## Cartoony impact deformation: flatten the hull along the hit normal and bulge
@@ -857,7 +1077,14 @@ func _pull_solver_state(delta: float) -> void:
 		_assist_lockout = maxf(_assist_lockout - delta, 0.0)
 	if _phys == null:
 		return
-	velocity = _phys.velocity
+	# Only take the solver's copy back when it is not the one we handed it. The
+	# world never integrates a driven body, so a value that differs is a
+	# collision impulse and has to be read; a value that matches means nothing
+	# touched us, and any velocity written since the last step — a spawn orbit, a
+	# teleport, [method set_velocity] — stands instead of being silently reverted
+	# before it is ever integrated.
+	if _phys.velocity != _phys_velocity_written:
+		velocity = _phys.velocity
 	if _phys.angular != Vector3.ZERO:
 		_tumble = (_tumble + _phys.angular).limit_length(TUMBLE_MAX)
 		_phys.angular = Vector3.ZERO
@@ -946,11 +1173,17 @@ func _apply_orbital_assist(delta: float) -> void:
 
 	var target := tangent * (v_orbit * boost)
 	var rate := clampf(delta * orbital_assist_rate, 0.0, 1.0)
-	# Tell the gravity step above how hard to pull: the dial's k², for as long as
-	# this ship is actually being held (see the pull in [method
-	# _integrate_translation]). Only read back while the assist keeps holding, so
-	# a fast orbit that gets flown out of returns to ordinary gravity at once.
-	_orbital_hold_boost = boost
+	# Tell the gravity step above how hard to pull: k², but *k as the ship is
+	# actually flying it*, not as the dial asks for. A circle taken at k times the
+	# circular speed needs k² times the pull, so handing the ship the dial's full
+	# k² while it is still accelerating through the slower circles would drag it
+	# inward through the spin-up — the fine print behind "the same circle, just
+	# sooner". Held to the ratio of its own tangential speed to circular, the pull
+	# grows under the ship exactly as its speed does, and the radius holds still
+	# the whole way up. Only read back while the assist keeps holding, so a fast
+	# orbit that gets flown out of returns to ordinary gravity at once.
+	var held := clampf(v_tan / maxf(v_orbit, 0.001), 1.0, boost)
+	_orbital_hold_boost = held
 	velocity = velocity.lerp(target, rate)
 
 

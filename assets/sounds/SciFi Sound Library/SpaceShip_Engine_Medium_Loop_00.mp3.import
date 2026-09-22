@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://c4v4uayray7r8"
+path="res://.godot/imported/SpaceShip_Engine_Medium_Loop_00.mp3-5518c8800c5d34edcd69ba1eab15685c.mp3str"
+
+[deps]
+
+source_file="res://assets/sounds/SciFi Sound Library/SpaceShip_Engine_Medium_Loop_00.mp3"
+dest_files=["res://.godot/imported/SpaceShip_Engine_Medium_Loop_00.mp3-5518c8800c5d34edcd69ba1eab15685c.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

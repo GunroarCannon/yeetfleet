@@ -614,3 +614,109 @@ The `toggle_rear_view()` function used `_rear_viewport.visible = _rear_view_on` 
 
 ### Why Orbits Now Work
 Correct tangential velocity + correct facing direction + real gravity = stable orbit. The ship follows a Keplerian ellipse around Tarn IV. Boosting increases speed (wider orbit), cutting throttle decreases speed (tighter orbit).
+
+---
+
+## Session 7 — Sci-Fi sound library, addon hit FX, toon toggle, lab comparison
+
+Everything added this session is behind a single switch, so each layer can be
+flipped against the original look without a code change.
+
+### New files
+
+**`modules/common/juice/fx_settings.gd`** — `FxSettings`, three persisted
+toggles in `user://fx.cfg`: `library_sounds`, `addon_vfx`, `sprite_hits`.
+
+**`modules/common/juice/sfx.gd`** — `Sfx`. The bundled Sci-Fi Sound Library as
+named streams (`laser`, `kinetic`, `railgun`, `plasma`, `missile`, `hit`,
+`engine_loop_small/medium/large`, `warp`, `menu_select`, `alarm`, `jingle_*`,
+`robot_talk`, `alien_language`, `ambience_*`). Cached, optional at load (a
+stripped build still boots), variants resolved through `random_stream`.
+
+**`modules/common/juice/addon_vfx.gd`** — `AddonVfx`. Instantiates BinbunVFX
+hit / impact / big-impact / air / ground / nuke / zap / ball scenes as one-shots
+(freed on `finished` with a lifetime backstop), plus the animated
+`assets/hit-effects` sprite flash. Owns a small pooled `AudioStreamPlayer3D` so
+the destruction lab gets sound without the flight module.
+
+**`modules/style/scripts/toon_override.gd`** — `ToonOverride`. One switch that
+forces every element into the project's toon path (hulls, rocks, stations,
+planets); exposes the UltimateToonSource `stylized.gdshader` for anything
+wanting a conventional toon material.
+
+**`modules/common/juice/tools/fx_smoke.gd`** — headless check for all three
+layers, including "the addon's `main` animation is actually reachable".
+
+### Sound: library replaces the synth where a match exists
+
+`SpaceAudio`'s bank is now filled from `Sfx` first (weapons, engine loop,
+alarms, menu, singularity drone) and falls back to the procedural synth for
+everything the library has no asset for — explosions, impacts, collisions — and
+for all of it when the toggle is off. `refresh_bank()` re-picks the bank so the
+switch is audible immediately. New `play_hit()` and `play_ui_select()`.
+
+### Muzzle particles now spawn at the gun
+
+`SystemsSim._spawn_shot` used to push the *muzzle transform* clear of the hull
+before calling `_muzzle_fx`, so every muzzle flash and spark burst appeared out
+ahead of the nose. Only the projectile's spawn point is offset now; the flash
+stays on the barrel tip.
+
+### Player ship no longer renders black
+
+With the default `cartoony` profile (`shading_bands = 3`), `ship_part.gdshader`
+cut the self-lit floor to 16% of albedo and the toon `light()` branch could
+return zero diffuse on a facet facing away from every light — the shadow side of
+the hull was darker than the void behind it. The floor is now 45%, the toon band
+has a 16% minimum, and a `toon_override` uniform joins the profile dial as a
+second way into the stepped path.
+
+### Palette now reaches planets
+
+`Planet.apply_palette()` blends the authored colours onto the active palette's
+planet roles from a snapshot taken on first call, so switching palettes twice
+does not compound. Anchored at `PALETTE_MIX = 0.7` so a system's worlds still
+read as individuals. `StyleManager._push_to_planets` walks it down to every
+live planet alongside the toon flag; with no palette active it is a no-op, which
+keeps the default look untouched. `Planet._process` also gained the null guard
+it needed for the add_child-before-configure window.
+
+### Destruction lab: pick, spawn, compare
+
+A `🧪 COMPARE EFFECTS` panel drives one catalog of every effect (Juice blasts
+and waves, the addon scenes, the sprite flash, the camera-origin strikes). Pick
+one and `Spawn Selected at Target (C)`, or `Compare Row (V)` to lay every
+position-centred effect out in a line — spaced by a slider, across the camera's
+right vector — and watch them side by side. Strikes that originate at the
+camera are excluded from the row. A `🎚 LAYERS (A/B)` section carries the four
+toggles. Shockwave ring, spherical blast wave, EMP wave and the ripple rings are
+all still there and in the catalog.
+
+### Brackeys particle controls
+
+Enabled as an editor plugin in `project.godot` (preview/scrub particles in the
+3D view without touching the inspector).
+
+### Vendored BinbunVFX addon actually loads now
+
+The addon shipped with `res://assets/BinbunVFX_Vol2/...` internal paths (it was
+authored for that folder), stale UIDs, and its `AnimationPlayer` libraries in
+Godot 3's `libraries/ = SubResource(...)` form — which Godot 4 parses as an
+empty library, so the scenes loaded, looked fine, and never played. All 16
+scene files had their paths repointed to `res://addons/...`, 23 had their
+libraries rewritten to the Godot 4 `libraries = { &"": ... }` form, and the 184
+stale `uid=` attributes on `ext_resource` lines were dropped.
+
+### Verified
+
+`fx_smoke`, `juice_smoke`, `planet_smoke`, `core_smoke`, `destruction_lab_smoke`,
+`events_smoke`, `flight_smoke`, `flight_bridge_smoke`, `profile_cycle_check`,
+`control_mode_check`, `aggro_indicator_check`, `chaos_check`, `high_res_check`,
+`mother_check`, `scale_check`, `ship_hull_check`, `interact_smoke`,
+`large_craft_gen_smoke`, `physics_smoke`, `physics_lab_smoke`, `smoke_test`,
+`solar_system_gen_*`, `palette_smoke`, `style_smoke`, `style_lab_smoke` all pass.
+
+Pre-existing failures left alone (none touch the files edited here): `orbit_check`
+and `sat_check` (the ×4 / fast-orbit time-scale path in `flight_model`),
+`features_check` (drift-field thickness and mote stretch), and `arena_check`
+(calls a `set_throttle` that `ArenaRoot` does not have).

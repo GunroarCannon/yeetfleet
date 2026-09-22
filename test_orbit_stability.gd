@@ -33,7 +33,7 @@ func _test_next_seed() -> void:
     _generator = SolarSystemGenerator.new()
     _generator.system_seed = _current_seed
     _generator.planet_count = 6
-    add_child(_generator)
+    root.add_child(_generator)
     _generator.generate_system()
 
     # Skip if no planets were generated
@@ -66,7 +66,7 @@ func _finish() -> void:
         for failure in _failures:
             print("  %s" % failure)
 
-    get_tree().quit(_failures.size() == 0)
+    quit(0 if _failures.size() == 0 else 1)
 
 func _process(delta: float) -> bool:
     if _steps_done:

@@ -167,6 +167,18 @@ func leave_control() -> void:
 		_hud.show_hint("Back to the free camera")
 
 
+## Route a throttle command to the controlled ship, matching [method
+## FlightRoot.set_throttle]'s API so tests and the HUD can share code.
+func set_throttle(value: float) -> void:
+	if controlled_ai != null and is_instance_valid(controlled_ai) and controlled_ai.model != null:
+		controlled_ai.model.command.throttle = clampf(value, ThrottleLever.MIN_VALUE, 1.0)
+
+
+## Route a boost command to the controlled ship.
+func set_boosting(value: bool) -> void:
+	_button_boost = value
+
+
 # --- Per-frame --------------------------------------------------------------
 
 func _process(_delta: float) -> void:
@@ -174,8 +186,6 @@ func _process(_delta: float) -> void:
 	if controlled_ai != null and (not is_instance_valid(controlled_ai) or not controlled_ai._alive):
 		leave_control()
 	_constrain_to_arena()
-	if camera_rig != null and _view_light != null:
-		_view_light.global_transform = Transform3D(camera_rig.camera.global_transform.basis, Vector3.ZERO)
 
 
 func _physics_process(delta: float) -> void:
@@ -303,19 +313,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 # --- Environment -------------------------------------------------------------
 
-var _view_light: DirectionalLight3D
+var _rim_light: DirectionalLight3D
 
 
-## Shared empty-box lighting: the same cool ambient and two fixed lights the
-## flight test volume uses, plus a weak light aimed down the camera's own axis
-## so a hull is never a silhouette against the void from any viewing angle.
+## Shared empty-box lighting: the same balanced ambient, key, fill, and rim light
+## the flight test volume uses, carving out silhouettes without camera-axis flattening.
 func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color.BLACK
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.29, 0.35, 0.47)
-	env.ambient_light_energy = 0.5
+	env.ambient_light_color = Color(0.24, 0.28, 0.38)
+	env.ambient_light_energy = 0.6
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 4.0
 	var holder := WorldEnvironment.new()
@@ -325,9 +334,14 @@ func _build_environment() -> void:
 
 	var key := DirectionalLight3D.new()
 	key.name = "KeyLight"
-	key.light_energy = 2.1
+	key.light_energy = 2.4 if Session.enhanced_lighting else 2.0
 	key.light_color = Color("fff1de")
-	key.shadow_enabled = false
+	key.shadow_enabled = Session.enhanced_lighting
+	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	key.directional_shadow_max_distance = 180.0
+	key.directional_shadow_blend_splits = true
+	key.shadow_bias = 0.03
+	key.shadow_normal_bias = 1.2
 	key.look_at_from_position(Vector3.ZERO, Vector3(-0.55, -0.7, -0.45), Vector3.UP)
 	add_child(key)
 
@@ -340,10 +354,11 @@ func _build_environment() -> void:
 	fill.look_at_from_position(Vector3.ZERO, Vector3(0.6, 0.45, 0.65), Vector3.UP)
 	add_child(fill)
 
-	_view_light = DirectionalLight3D.new()
-	_view_light.name = "ViewLight"
-	_view_light.light_energy = 0.95
-	_view_light.light_color = Color("c8d4e8")
-	_view_light.light_specular = 0.25
-	_view_light.shadow_enabled = false
-	add_child(_view_light)
+	_rim_light = DirectionalLight3D.new()
+	_rim_light.name = "RimLight"
+	_rim_light.light_energy = 1.15 if Session.enhanced_lighting else 0.8
+	_rim_light.light_color = Color("9ec8ff")
+	_rim_light.light_specular = 0.75
+	_rim_light.shadow_enabled = false
+	_rim_light.look_at_from_position(Vector3.ZERO, Vector3(0.55, 0.4, 0.75), Vector3.UP)
+	add_child(_rim_light)

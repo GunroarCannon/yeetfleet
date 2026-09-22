@@ -272,6 +272,15 @@ func material_for(path: String) -> ShaderMaterial:
 	return part_materials.get(path, null) as ShaderMaterial
 
 
+## Updates the atmospheric re-entry burn glow across all part materials.
+func set_reentry_burn(amount: float) -> void:
+	for path: Variant in part_materials:
+		var mat := part_materials[path] as ShaderMaterial
+		if mat != null:
+			mat.set_shader_parameter("reentry_burn", amount)
+
+
+
 func mesh_for(path: String) -> MeshInstance3D:
 	return part_meshes.get(path, null) as MeshInstance3D
 
@@ -350,7 +359,7 @@ func _refresh_highlights() -> void:
 		# thing under the cursor.
 		var dim := 0.0
 		if _selected_path != "" and amount == 0.0:
-			dim = 0.35
+			dim = 0.12
 		ShipMaterials.set_dim(mat, dim)
 	_refresh_selection_cage()
 

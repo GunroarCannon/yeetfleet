@@ -130,14 +130,17 @@ func inv_mass() -> float:
 ## reads this and [method PhysWorld] writes [member node]'s position each step.
 func position() -> Vector3:
 	if node != null:
-		return node.global_position
+		return node.global_position if node.is_inside_tree() else node.position
 	push_error("PhysBody has no node and no standalone position — attach a Node3D")
 	return Vector3.ZERO
 
 
 func set_position(p: Vector3) -> void:
 	if node != null:
-		node.global_position = p
+		if node.is_inside_tree():
+			node.global_position = p
+		else:
+			node.position = p
 
 
 ## How far this body travelled last physics step, used to decide whether a

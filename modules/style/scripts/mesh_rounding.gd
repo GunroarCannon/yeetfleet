@@ -58,10 +58,13 @@ func apply(base_mesh: Mesh) -> Mesh:
 		verts = _apply_chunkiness(verts)
 
 	if roundness > 0.0:
+		verts = _apply_roundness(verts)
+		var face_norm := _face_normals(verts)
+		smooth = _smoothed_normals(verts, face_norm)
 		var blended := PackedVector3Array()
 		blended.resize(normals.size())
 		for i in normals.size():
-			blended[i] = normals[i].lerp(smooth[i], roundness * 0.85).normalized()
+			blended[i] = face_norm[i].lerp(smooth[i], clampf(roundness * 0.92, 0.0, 1.0)).normalized()
 		normals = blended
 
 	if wants_potato:
@@ -128,6 +131,90 @@ func _apply_chunkiness(verts: PackedVector3Array) -> PackedVector3Array:
 	for i in verts.size():
 		var v := verts[i] - center
 		out[i] = center + Vector3(v.x * scale.x, v.y * scale.y, v.z * scale.z)
+	return out
+
+
+## Displace vertices to round off sharp corners, bevel polygonal edges, and
+## softly curve silhouettes into a plump, rounded cartoon form.
+## Combines discrete surface Laplacian smoothing (which naturally pulls sharp
+## corners and edges inward along the surface) with a bounding superquadric pill
+## projection so adjacent faces stay watertight with zero seam gaps.
+func _apply_roundness(verts: PackedVector3Array) -> PackedVector3Array:
+	if verts.is_empty():
+		return verts
+
+	var box := AABB(verts[0], Vector3.ZERO)
+	for v in verts:
+		box = box.expand(v)
+	var center := box.position + box.size * 0.5
+	var half_size := box.size * 0.5
+	var safe_half := Vector3(maxf(half_size.x, 0.001), maxf(half_size.y, 0.001), maxf(half_size.z, 0.001))
+
+	# 1. Gather discrete surface neighbor connectivity (Laplacian)
+	# Coincident vertices across triangles are bucketed by _pos_key
+	var neighbors := {}
+	var pos_map := {}
+	var tri_count := verts.size() / 3
+	for t in tri_count:
+		var idx0 := t * 3
+		var idx1 := idx0 + 1
+		var idx2 := idx0 + 2
+		var k0 := _pos_key(verts[idx0])
+		var k1 := _pos_key(verts[idx1])
+		var k2 := _pos_key(verts[idx2])
+		pos_map[k0] = verts[idx0]
+		pos_map[k1] = verts[idx1]
+		pos_map[k2] = verts[idx2]
+
+		if not neighbors.has(k0): neighbors[k0] = []
+		if not neighbors.has(k1): neighbors[k1] = []
+		if not neighbors.has(k2): neighbors[k2] = []
+
+		if not (k1 in neighbors[k0]): neighbors[k0].append(k1)
+		if not (k2 in neighbors[k0]): neighbors[k0].append(k2)
+		if not (k0 in neighbors[k1]): neighbors[k1].append(k0)
+		if not (k2 in neighbors[k1]): neighbors[k1].append(k2)
+		if not (k0 in neighbors[k2]): neighbors[k2].append(k0)
+		if not (k1 in neighbors[k2]): neighbors[k2].append(k1)
+
+	# Precompute target rounded positions per unique vertex key
+	var rounded_pos := {}
+	for k in pos_map:
+		var p: Vector3 = pos_map[k]
+		# Normalized box coordinates: [-1, 1] on box boundaries
+		var d := p - center
+		var u := Vector3(d.x / safe_half.x, d.y / safe_half.y, d.z / safe_half.z)
+		var r := u.length()
+
+		# Pill / superquadric corner rounding:
+		# Edges and corners (r > 1.0) are pulled inward towards 1.0
+		var u_target := u
+		if r > 0.001:
+			var u_norm := u / r
+			var r_clamped := minf(r, 1.0)
+			u_target = u_norm * r_clamped
+
+		var pill_pos := center + Vector3(u_target.x * safe_half.x, u_target.y * safe_half.y, u_target.z * safe_half.z)
+
+		# Laplacian neighbor average
+		var n_list: Array = neighbors.get(k, [])
+		var lap_pos := p
+		if not n_list.is_empty():
+			var sum := Vector3.ZERO
+			for nk in n_list:
+				sum += pos_map[nk]
+			lap_pos = sum / float(n_list.size())
+
+		# Blend original with laplacian and pill rounding based on roundness dial
+		var smoothed := p.lerp(lap_pos, clampf(roundness * 0.40, 0.0, 0.65))
+		smoothed = smoothed.lerp(pill_pos, clampf(roundness * 0.55, 0.0, 0.80))
+		rounded_pos[k] = smoothed
+
+	var out := PackedVector3Array()
+	out.resize(verts.size())
+	for i in verts.size():
+		var k := _pos_key(verts[i])
+		out[i] = rounded_pos.get(k, verts[i])
 	return out
 
 

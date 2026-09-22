@@ -15,6 +15,8 @@
 class_name SpaceScene
 extends Node3D
 
+const VectorGrid = preload("res://modules/style/scripts/vector_grid.gd")
+
 ## Radius of the star dome. Far enough that no gameplay object reaches it, and
 ## the dome is re-centred on the camera every frame so it cannot be flown to.
 const SKY_RADIUS := 14000.0
@@ -70,6 +72,10 @@ var planet3_centre := PLANET3_CENTRE
 var planet3_radius := PLANET3_RADIUS
 
 var corona
+var _glare_nodes: Array[Node3D] = []
+var _cinematic_nodes: Array[Node3D] = []
+var _sun_light: DirectionalLight3D = null
+var _env_ref: Environment = null
 
 func _enter_tree() -> void:
 	var size_scale := Session.planet_scale
@@ -89,6 +95,7 @@ func _enter_tree() -> void:
 var landmarks: Array[Dictionary] = []
 
 var _sky: Node3D
+var _vector_grid: VectorGrid = null
 var _rng := RandomNumberGenerator.new()
 ## Positions and radii of every asteroid, stored from _build_belt so
 ## FlightModel can check collisions without touching MultiMesh instances.
@@ -141,6 +148,8 @@ func _ready() -> void:
 	_build_station()
 	_build_belt()
 	_build_floating_asteroids()
+	set_glare_enabled(Session.glare_enabled)
+	set_cinematic_lighting(Session.cinematic_lighting)
 	# Expose asteroid positions for collision in FlightModel.
 	set_meta("asteroid_data", asteroid_data)
 	set_meta("floating_asteroid_data", floating_asteroid_data)
@@ -149,6 +158,7 @@ func _ready() -> void:
 	# needs an explicit rebuild rather than a per-frame read.
 	StyleManager.instance().style_changed.connect(_on_style_changed)
 	StyleManager.instance().palette_changed.connect(_on_palette_changed)
+	StyleManager.instance().wireframe_changed.connect(_on_wireframe_changed)
 
 
 ## Called by FlightRoot to give the moon access to the gravity system.
@@ -300,7 +310,7 @@ func _process(delta: float) -> void:
 	# Knocked-loose rocks are written from their PhysBody node, which the physics
 	# world moves and rolls — so the rock on screen is the rock that flies.
 	for body in _live_rocks:
-		if body == null or body.node == null or not is_instance_valid(body.node):
+		if body == null or body.node == null or not is_instance_valid(body.node) or not body.node.is_inside_tree():
 			continue
 		var mm := body.node.get_meta("mm") as MultiMeshInstance3D
 		if mm == null or mm.multimesh == null:
@@ -355,9 +365,10 @@ func _build_environment() -> void:
 	# by reasoning (see `juice-and-more.md` §3.2). Kept subtle and thresholded
 	# well above 1.0 so it only catches emissives, never the diffuse hull.
 	env.glow_enabled = true
-	env.glow_intensity = 0.6
-	env.glow_hdr_threshold = 1.05
-	env.glow_bloom = 0.15
+	env.glow_intensity = 0.55
+	env.glow_hdr_threshold = 1.15
+	env.glow_bloom = 0.10
+	_env_ref = env
 	var holder := WorldEnvironment.new()
 	holder.name = "Environment"
 	holder.environment = env
@@ -365,12 +376,18 @@ func _build_environment() -> void:
 
 	var key := DirectionalLight3D.new()
 	key.name = "SunLight"
-	key.light_energy = 2.2 if Session.enhanced_lighting else 1.5
+	_sun_light = key
+	key.light_energy = 3.5 if Session.cinematic_lighting else (2.2 if Session.enhanced_lighting else 1.5)
 	# The palette's star colour, pulled most of the way to white: this is the
 	# light the star *casts*, not the star's own disc, and a saturated light
 	# tints every hull in the system.
-	key.light_color = Palette.color("star").lerp(Color.WHITE, 0.2 if Session.enhanced_lighting else 0.5)
-	key.shadow_enabled = Session.enhanced_lighting
+	key.light_color = Palette.color("star").lerp(Color.WHITE, 0.15 if Session.cinematic_lighting else (0.2 if Session.enhanced_lighting else 0.5))
+	key.shadow_enabled = Session.cinematic_lighting or Session.enhanced_lighting
+	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	key.directional_shadow_max_distance = 250.0
+	key.directional_shadow_blend_splits = true
+	key.shadow_bias = 0.03
+	key.shadow_normal_bias = 1.2
 	key.look_at_from_position(Vector3.ZERO, -SUN_DIR, Vector3.UP)
 	add_child(key)
 
@@ -384,24 +401,9 @@ func _build_environment() -> void:
 	fill.look_at_from_position(Vector3.ZERO, planet_centre.normalized(), Vector3.UP)
 	add_child(fill)
 
-	# Enhanced background: solar corona, a distant galaxy and nebula dust. A
-	# per-session toggle (Settings → Quality) so it can be switched off for a
-	# plain starfield; changed dials apply on the next scene restart.
+	# Enhanced background: distant galaxy and nebula dust.
+	# (Solar coronas are attached to _sky in _build_star so they align with the sun).
 	if Session.render_backdrop:
-		# Solar corona - extended glow around the sun
-		corona = _make_glow_sphere(800.0, Color(Palette.color("star"), 0.1), 3)
-		corona.name = "SolarCorona"
-		corona.position = Vector3.ZERO
-		corona.scale = Vector3.ONE * 2.0
-		add_child(corona)
-
-		# Inner corona - brighter and more compact
-		var inner_corona := _make_glow_sphere(
-			400.0, Color(Palette.color("star").lerp(Color.WHITE, 0.35), 0.2), 2
-		)
-		inner_corona.name = "InnerSolarCorona"
-		inner_corona.position = Vector3.ZERO
-		add_child(inner_corona)
 
 		# Space clouds - additional nebula layers for depth
 		var deep_space := Node3D.new()
@@ -428,6 +430,30 @@ func _build_sky() -> void:
 	add_child(_sky)
 	_sky.add_child(_make_starfield())
 	_sky.add_child(_make_nebula_band())
+	_sky.add_child(_make_nebula_clouds())
+	_sky.add_child(_make_spiral_galaxy_sky())
+	_vector_grid = VectorGrid.create(SKY_RADIUS * 0.92)
+	_vector_grid.name = "VectorGrid"
+	_vector_grid.visible = StyleManager.instance().is_wireframe()
+	_sky.add_child(_vector_grid)
+
+
+func _on_wireframe_changed(enabled: bool) -> void:
+	if _vector_grid != null:
+		_vector_grid.visible = enabled
+	var stars := _sky.get_node_or_null("Stars") if _sky != null else null
+	if stars != null:
+		stars.visible = not enabled
+	var nebula := _sky.get_node_or_null("Nebula") if _sky != null else null
+	if nebula != null:
+		nebula.visible = not enabled
+	var clouds := _sky.get_node_or_null("NebulaClouds") if _sky != null else null
+	if clouds != null:
+		clouds.visible = not enabled
+	var spiral := _sky.get_node_or_null("SpiralGalaxySky") if _sky != null else null
+	if spiral != null:
+		spiral.visible = not enabled
+	_restyle_scenery()
 
 
 ## Apply a look change to the sky and the scenery.
@@ -444,6 +470,7 @@ func _on_style_changed(_profile: StyleProfile) -> void:
 			_sky.remove_child(old)
 			old.free()
 		_sky.add_child(_make_starfield())
+	_on_wireframe_changed(StyleManager.instance().is_wireframe())
 	_restyle_scenery()
 
 
@@ -460,6 +487,18 @@ func _on_palette_changed(_palette: Palette) -> void:
 			_sky.remove_child(old_nebula)
 			old_nebula.free()
 		_sky.add_child(_make_nebula_band())
+
+		var old_clouds := _sky.get_node_or_null("NebulaClouds")
+		if old_clouds != null:
+			_sky.remove_child(old_clouds)
+			old_clouds.free()
+		_sky.add_child(_make_nebula_clouds())
+
+		var old_spiral := _sky.get_node_or_null("SpiralGalaxySky")
+		if old_spiral != null:
+			_sky.remove_child(old_spiral)
+			old_spiral.free()
+		_sky.add_child(_make_spiral_galaxy_sky())
 	_restyle_scenery()
 	var env_node := get_node_or_null("Environment") as WorldEnvironment
 	if env_node != null and env_node.environment != null:
@@ -533,11 +572,11 @@ func _make_starfield() -> MeshInstance3D:
 	# with a large size_mult is the friendly-look end of the dial.
 	var style := StyleManager.instance().current_profile
 	var base_count := STAR_COUNT
-	var size_mult := 1.0
+	var size_mult := 1.0 * Session.star_size_mult
 	var star_depth := 0.0
 	if style:
 		base_count = style.star_count
-		size_mult = style.star_size
+		size_mult = style.star_size * Session.star_size_mult
 		star_depth = style.star_five_point
 	# A star needs enough segments to resolve ten corners; a disc does not, and at
 	# 900 stars the difference is real.
@@ -547,10 +586,8 @@ func _make_starfield() -> MeshInstance3D:
 		# Mostly faint, a few bright. A uniform field looks like television
 		# static; a weighted one looks like a sky.
 		var bright: float = pow(_rng.randf(), 2.6)
-		# Small dots: a starfield is points, not blotches. Large discs read as
-		# noise and, piled up at the same depth, are the first thing to z-fight
-		# when the camera moves — smaller dots keep the sky crisp.
-		var size: float = SKY_RADIUS * (0.0006 + bright * 0.0016) * size_mult
+		# Distinct stars: a crisp, luminous sky with readable star sizes.
+		var size: float = SKY_RADIUS * (0.00095 + bright * 0.0024) * size_mult
 		var centre := dir * SKY_RADIUS
 		var right := dir.cross(Vector3.UP)
 		if right.length() < 0.001:
@@ -574,13 +611,11 @@ func _make_starfield() -> MeshInstance3D:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Palette.color("star").lerp(Color.WHITE, 0.45)
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	# The dome rides with the camera, so stars are always at the same depth.
-	# Disabling the depth test stops them z-fighting each other at 14 km — the
-	# coarse depth values there make them flicker as the camera moves. Drawn
-	# first (priority below everything) and never depth-tested, they still get
-	# correctly covered by anything closer that draws after.
-	mat.no_depth_test = true
-	mat.render_priority = -10
+	# The dome rides with the camera at SKY_RADIUS. Enabling depth testing
+	# ensures planets, moons, and nearfield craft properly occlude the stars.
+	mat.no_depth_test = false
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.render_priority = -20
 	inst.material_override = mat
 	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	inst.extra_cull_margin = SKY_RADIUS
@@ -697,33 +732,234 @@ func _band_point(angle: float, height: float) -> Vector3:
 	return Vector3(cos(angle), height, sin(angle)).normalized() * (SKY_RADIUS * 0.98)
 
 
+## Volumetric-looking organic fractal gas clouds scattered around celestial sphere.
+func _make_nebula_clouds() -> Node3D:
+	var seed_val := Session.seed if Session.seed != 0 else 7419
+	var gas := NebulaGas.build(seed_val, SKY_RADIUS * 0.94, 6, 8)
+	gas.name = "NebulaClouds"
+	return gas
+
+
+## Spiral galaxy background structure with dual logarithmic arms and color gradient.
+func _make_spiral_galaxy_sky() -> Node3D:
+	var root := Node3D.new()
+	root.name = "SpiralGalaxySky"
+	var shader := load(NebulaGas.SHADER_PATH) as Shader
+	if shader == null:
+		return root
+
+	# Scenic placement in the sky dome
+	var galaxy_center_dir := Vector3(-0.72, 0.45, -0.52).normalized()
+	var galaxy_pos := galaxy_center_dir * (SKY_RADIUS * 0.92)
+	var galaxy_normal := (-galaxy_center_dir).normalized()
+	var g_up := Vector3.UP
+	if absf(galaxy_normal.dot(g_up)) > 0.95:
+		g_up = Vector3.FORWARD
+	var g_right := galaxy_normal.cross(g_up).normalized()
+	g_up = g_right.cross(galaxy_normal).normalized()
+	var slant := Basis(galaxy_normal, deg_to_rad(35.0))
+	g_right = slant * g_right
+	g_up = slant * g_up
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 98124
+
+	# 1. Brilliant galactic core
+	var core_palette := {
+		"core": Color(1.0, 0.92, 0.70, 0.65),
+		"edge": Color(0.95, 0.55, 0.18, 0.25)
+	}
+	var core_quad := NebulaGas._make_quad(shader, core_palette, rng, SKY_RADIUS)
+	core_quad.position = galaxy_pos
+	core_quad.scale = Vector3.ONE * 0.75
+	root.add_child(core_quad)
+
+	var inner_palette := {
+		"core": Color(0.95, 0.65, 0.25, 0.50),
+		"edge": Color(0.85, 0.20, 0.65, 0.15)
+	}
+	var inner_quad := NebulaGas._make_quad(shader, inner_palette, rng, SKY_RADIUS)
+	inner_quad.position = galaxy_pos
+	inner_quad.scale = Vector3.ONE * 0.55
+	root.add_child(inner_quad)
+
+	# 2. Dual logarithmic spiral arms: r = a * exp(b * theta)
+	var arm_count := 2
+	var points_per_arm := 14
+	var a_param := SKY_RADIUS * 0.04
+	var b_param := 0.26
+	
+	for arm in arm_count:
+		var base_angle := float(arm) * PI
+		for i in points_per_arm:
+			var t := float(i) / float(points_per_arm)
+			var theta := base_angle + t * (TAU * 1.25)
+			var r := a_param * exp(b_param * (theta - base_angle))
+			if r > SKY_RADIUS * 0.38:
+				break
+
+			var disc_offset := g_right * (cos(theta) * r) + g_up * (sin(theta) * r)
+			var puff_pos := galaxy_pos + disc_offset
+
+			var arm_core: Color
+			var arm_edge: Color
+			if t < 0.30:
+				arm_core = Color(0.98, 0.65, 0.25, 0.45).lerp(Color(0.95, 0.25, 0.60, 0.38), t / 0.30)
+				arm_edge = Color(0.85, 0.20, 0.50, 0.15)
+			elif t < 0.70:
+				arm_core = Color(0.95, 0.25, 0.60, 0.38).lerp(Color(0.20, 0.85, 0.95, 0.32), (t - 0.30) / 0.40)
+				arm_edge = Color(0.40, 0.15, 0.80, 0.12)
+			else:
+				arm_core = Color(0.20, 0.85, 0.95, 0.32).lerp(Color(0.45, 0.25, 0.95, 0.25), (t - 0.70) / 0.30)
+				arm_edge = Color(0.15, 0.10, 0.50, 0.08)
+
+			var arm_palette := {"core": arm_core, "edge": arm_edge}
+			var puff := NebulaGas._make_quad(shader, arm_palette, rng, SKY_RADIUS)
+			var p_scale := lerpf(0.28, 0.55, t)
+			puff.position = puff_pos
+			puff.scale = Vector3.ONE * p_scale
+			root.add_child(puff)
+
+	return root
+
+
+## Enable or disable bright solar glare and coronas.
+func set_glare_enabled(enabled: bool) -> void:
+	Session.glare_enabled = enabled
+	for node in _glare_nodes:
+		if is_instance_valid(node):
+			node.visible = enabled
+	var env_node := get_node_or_null("Environment") as WorldEnvironment
+	if env_node != null and env_node.environment != null:
+		env_node.environment.glow_bloom = 0.15 if enabled else 0.0
+		env_node.environment.glow_intensity = 0.6 if enabled else 0.20
+
+
+## Toggle glare effects on/off live.
+func toggle_glare() -> bool:
+	set_glare_enabled(not Session.glare_enabled)
+	return Session.glare_enabled
+
+
+## Enable or disable cinematic Galaxy on Fire 2 style solar lighting (dramatic sun flare, radiant god-rays, deep contrast).
+func set_cinematic_lighting(enabled: bool) -> void:
+	Session.cinematic_lighting = enabled
+	for node in _cinematic_nodes:
+		if is_instance_valid(node):
+			node.visible = enabled
+	if _sun_light != null:
+		_sun_light.light_energy = 3.5 if enabled else (2.2 if Session.enhanced_lighting else 1.5)
+		_sun_light.light_color = Palette.color("star").lerp(Color.WHITE, 0.15 if enabled else (0.2 if Session.enhanced_lighting else 0.5))
+		_sun_light.shadow_enabled = enabled or Session.enhanced_lighting
+	if _env_ref != null:
+		_env_ref.glow_bloom = 0.15 if enabled else 0.10
+		_env_ref.glow_intensity = 0.70 if enabled else 0.55
+		_env_ref.glow_hdr_threshold = 1.12 if enabled else 1.15
+		_env_ref.ambient_light_energy = 0.65 if enabled else 0.85
+
+
+## Toggle cinematic lighting on/off live.
+func toggle_cinematic_lighting() -> bool:
+	set_cinematic_lighting(not Session.cinematic_lighting)
+	return Session.cinematic_lighting
+
+
 # --- Bodies -----------------------------------------------------------------
 
 func _build_star() -> void:
 	var pos := SUN_DIR.normalized() * (SKY_RADIUS * 0.9)
 	# On the sky node, so the star stays a fixed direction rather than something
 	# the player can fly to and discover is 240 metres wide.
-	var disc := _make_glow_sphere(120.0, Color("fff6e0"), 1)
+	var disc := _make_glow_sphere(220.0, Color("fff8e6"), 1)
 	disc.name = "Star"
 	disc.position = pos
 	_sky.add_child(disc)
-	var halo := _make_glow_sphere(300.0, Color(1.0, 0.85, 0.55, 0.18), 1)
+	var halo := _make_glow_sphere(550.0, Color(1.0, 0.88, 0.58, 0.20), 1)
 	halo.name = "StarHalo"
 	halo.position = pos
 	_sky.add_child(halo)
+	_glare_nodes.append(halo)
+
+	# Solar corona around the sun disc on _sky
+	if Session.render_backdrop:
+		corona = _make_glow_sphere(1200.0, Color(Palette.color("star"), 0.10), 1)
+		corona.name = "SolarCorona"
+		corona.position = pos
+		_sky.add_child(corona)
+		_glare_nodes.append(corona)
 
 	# A handful of billboarded petals around the disc, at increasing radius and
-	# falling opacity — a cheap stand-in for a true screen-space flare (which
-	# would need a camera-relative pass; not worth it while the disc itself is
-	# the thing selling "there is a sun here").
+	# falling opacity — a cheap stand-in for a true screen-space flare.
 	for i in 3:
 		var t := float(i) / 2.0
 		var petal := _make_flare_petal(
-			lerpf(70.0, 220.0, t), Color(1.0, 0.82, 0.6, 0.22 - t * 0.14)
+			lerpf(70.0, 220.0, t), Color(1.0, 0.82, 0.6, 0.18 - t * 0.10)
 		)
 		petal.name = "StarFlare%d" % i
 		petal.position = pos
 		_sky.add_child(petal)
+		_glare_nodes.append(petal)
+
+	# Cinematic Galaxy on Fire 2 style radiant solar starburst rays and core blaze
+	var sun_rays := _make_sun_rays(2400.0, 14, Color(1.0, 0.92, 0.65, 0.35), Color(1.0, 0.55, 0.1, 0.0))
+	sun_rays.name = "CinematicSunRays"
+	sun_rays.position = pos
+	_sky.add_child(sun_rays)
+	_cinematic_nodes.append(sun_rays)
+
+	var inner_blaze := _make_glow_sphere(500.0, Color(1.0, 0.95, 0.75, 0.45), 1)
+	inner_blaze.name = "CinematicInnerBlaze"
+	inner_blaze.position = pos
+	_sky.add_child(inner_blaze)
+	_cinematic_nodes.append(inner_blaze)
+
+
+func _make_sun_rays(max_radius: float, ray_count: int, core_color: Color, edge_color: Color) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in ray_count:
+		var angle := TAU * float(i) / float(ray_count)
+		var dir := Vector2(cos(angle), sin(angle))
+		var perp := Vector2(-dir.y, dir.x)
+		var length := max_radius * (0.65 + 0.35 * sin(float(i) * 3.7))
+		var w := length * 0.09
+		var v0 := Vector3.ZERO
+		var v_mid := Vector3(dir.x * length * 0.3, dir.y * length * 0.3, 0.0)
+		var v_left := v_mid + Vector3(perp.x * w, perp.y * w, 0.0)
+		var v_right := v_mid - Vector3(perp.x * w, perp.y * w, 0.0)
+		var v_tip := Vector3(dir.x * length, dir.y * length, 0.0)
+		# Inner quad
+		st.set_color(core_color); st.add_vertex(v0)
+		st.set_color(edge_color); st.add_vertex(v_left)
+		st.set_color(core_color); st.add_vertex(v_mid)
+		st.set_color(core_color); st.add_vertex(v0)
+		st.set_color(core_color); st.add_vertex(v_mid)
+		st.set_color(edge_color); st.add_vertex(v_right)
+		# Outer triangle to tip
+		st.set_color(core_color); st.add_vertex(v_mid)
+		st.set_color(edge_color); st.add_vertex(v_left)
+		st.set_color(edge_color); st.add_vertex(v_tip)
+		st.set_color(core_color); st.add_vertex(v_mid)
+		st.set_color(edge_color); st.add_vertex(v_tip)
+		st.set_color(edge_color); st.add_vertex(v_right)
+	var inst := MeshInstance3D.new()
+	inst.mesh = st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.disable_receive_shadows = true
+	mat.no_depth_test = false
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.render_priority = -20
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	inst.material_override = mat
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	inst.extra_cull_margin = max_radius
+	return inst
+
 
 
 func _make_flare_petal(radius: float, color: Color) -> MeshInstance3D:

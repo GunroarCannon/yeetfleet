@@ -93,7 +93,7 @@ var mode: int = GravityMode.NORMAL
 ## Whether bodies attract things in ("pull"). When false, gravity is orbit-only:
 ## bodies still exist and keep their own orbits, and a ship can still be given a
 ## circular-orbit velocity, but nothing is ever dragged *towards* a body — no
-## falling in. The player toggles this from the Gravity menu (or 6/…).
+## falling in. The game defaults this off via Session.gravity_pull.
 var pull_enabled := true
 ## Range multiplier: scales how far gravity reaches (applied to effective_dist).
 var range_multiplier := 1.0
@@ -147,6 +147,19 @@ func apply_law(new_g: float, new_falloff: float) -> void:
 ## Remove all registered bodies. Call on scene teardown.
 func clear() -> void:
 	_bodies.clear()
+
+
+## Remove a specific registered body.
+func remove_body(body: GravityBody) -> void:
+	_bodies.erase(body)
+
+
+## Remove any registered body whose centre is within radius of pos.
+func remove_body_near(pos: Vector3, radius: float = 500.0) -> void:
+	for i in range(_bodies.size() - 1, -1, -1):
+		if _bodies[i].position.distance_to(pos) <= radius:
+			_bodies.remove_at(i)
+
 
 
 # --- Dominant body selection --------------------------------------------------

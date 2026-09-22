@@ -5,11 +5,9 @@
 // outline.gdshader). See modules/style/scripts/nebula_gas.gd, which arranges
 // several of these per cloud cluster.
 shader_type spatial;
-// depth_test_disabled matters here, not just depth_draw_never: several huge,
-// overlapping additive quads at similar world depth otherwise depth-test
-// against each other inconsistently per pixel, which reads as a hard-edged
-// blocky patchwork instead of a smooth blended cloud.
-render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, blend_add;
+// depth_draw_never ensures that overlapping additive quads do not occlude each other,
+// while depth testing is enabled so planets and foreground craft properly occlude the gas.
+render_mode unshaded, cull_disabled, depth_draw_never, blend_add;
 
 uniform vec4 core_color : source_color = vec4(1.0, 0.6, 0.3, 1.0);
 uniform vec4 edge_color : source_color = vec4(0.3, 0.2, 0.8, 1.0);

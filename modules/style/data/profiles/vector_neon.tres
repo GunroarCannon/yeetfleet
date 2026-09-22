@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="StyleProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/style/scripts/style_profile.gd" id="1_vector_neon_profile"]
+
+[resource]
+script = ExtResource("1_vector_neon_profile")
+id = "vector_neon"
+display_name = "Vector Arcade"
+roundness = 0.0
+chunkiness = 0.0
+rock_potato = 0.0
+shading_bands = 0
+outline_width = 0.0
+outline_color = Color(0.15, 1.0, 0.45, 1)
+spec_amount = 0.0
+rim_amount = 0.0
+palette_saturation = 1.8
+palette_lift = 0.3
+planet_detail = 0.0
+planet_bands = 0.0
+star_count = 0
+star_size = 0.5
+star_five_point = 0.0
+squash_enabled = false
+wireframe = true

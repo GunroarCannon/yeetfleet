@@ -64,12 +64,15 @@ func _build_generator() -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("03050a")
+	env.background_color = Palette.color("background")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("2a3448")
-	env.ambient_light_energy = 0.9
+	env.ambient_light_color = Palette.color("ambient")
+	env.ambient_light_energy = 1.0
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 3.0
+	env.glow_enabled = true
+	env.glow_bloom = 0.20
+	env.glow_intensity = 0.70
 	var holder := WorldEnvironment.new()
 	holder.name = "Environment"
 	holder.environment = env
@@ -77,19 +80,27 @@ func _build_environment() -> void:
 
 	var key := DirectionalLight3D.new()
 	key.name = "KeyLight"
-	key.light_energy = 1.4
-	key.light_color = Color("fff2dd")
+	key.light_energy = 1.6
+	key.light_color = Color("fff8ee")
 	key.shadow_enabled = false
 	key.look_at_from_position(Vector3.ZERO, Vector3(-0.5, -0.6, -0.4), Vector3.UP)
 	add_child(key)
 
 	var fill := DirectionalLight3D.new()
 	fill.name = "FillLight"
-	fill.light_energy = 0.4
-	fill.light_color = Color("5f7fbf")
+	fill.light_energy = 0.6
+	fill.light_color = Color("d4deee")
 	fill.shadow_enabled = false
 	fill.look_at_from_position(Vector3.ZERO, Vector3(0.5, 0.4, 0.5), Vector3.UP)
 	add_child(fill)
+
+	var rim := DirectionalLight3D.new()
+	rim.name = "RimLight"
+	rim.light_energy = 0.65
+	rim.light_color = Color("eaf2ff")
+	rim.shadow_enabled = false
+	rim.look_at_from_position(Vector3.ZERO, Vector3(0.4, 0.6, 0.7), Vector3.UP)
+	add_child(rim)
 
 
 func _build_camera() -> void:

@@ -68,7 +68,10 @@ func _check_session_parsing() -> void:
 ## The registry must answer both directions — a module id to its scene, and the
 ## answer to "is this module real" — and every scene it points at must exist.
 func _check_registry() -> void:
-	var expected := ["ship_builder", "flight", "arena"]
+	var expected := [
+		"ship_builder", "flight", "arena", "physics_lab", "style_lab",
+		"solar_system_gen", "large_craft_gen", "destruction_lab"
+	]
 	_check(ModuleRegistry.ids() == expected, "ids() is %s, expected %s" % [
 		ModuleRegistry.ids(), expected,
 	])
@@ -79,6 +82,11 @@ func _check_registry() -> void:
 		"ship_builder": "res://modules/ship_builder/ship_builder.tscn",
 		"flight": "res://modules/flight/flight_test.tscn",
 		"arena": "res://modules/arena/arena.tscn",
+		"physics_lab": "res://modules/physics_lab/physics_lab.tscn",
+		"style_lab": "res://modules/style_lab/style_lab.tscn",
+		"solar_system_gen": "res://modules/solar_system_gen/solar_system_gen_lab.tscn",
+		"large_craft_gen": "res://modules/large_craft_gen/large_craft_gen_lab.tscn",
+		"destruction_lab": "res://modules/destruction_lab/destruction_lab.tscn",
 	}
 	for id in expected:
 		var path := ModuleRegistry.scene_path(id)

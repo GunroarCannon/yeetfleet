@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://bdix8yc231d5e"]
+
+[ext_resource type="Script" uid="uid://dwgsxiv2xfmc5" path="res://modules/destruction_lab/scripts/destruction_lab_root.gd" id="1"]
+
+[node name="DestructionLabRoot" type="Node3D"]
+script = ExtResource("1")

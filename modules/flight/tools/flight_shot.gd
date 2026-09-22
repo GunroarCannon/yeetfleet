@@ -56,11 +56,33 @@ func _initialize() -> void:
 			SpaceScene.PLANET_RADIUS * 3.4
 		)
 		f.model.look_at_from_position(eye, SpaceScene.PLANET_CENTRE, Vector3.UP)
-		# Generation runs on a worker pool, so without this the shot can catch a
-		# planet that has no surfaces yet — a black hole where the world should be.
 		var body := f.space.get_node_or_null("Planet/Body") as Planet
 		if body != null:
 			await body.wait_for_build()
+	if extra == "large_craft":
+		f.set_throttle(0.0)
+		f.set_stick(Vector2.ZERO)
+		f.set_boosting(false)
+		f.set_firing(false)
+		f.spawn_large_craft(LargeCraftGenerator.Archetype.MOTHERSHIP)
+		# Aim ship toward the spawned structure
+		if not f._large_craft.is_empty():
+			var gen: LargeCraftGenerator = f._large_craft[0]
+			var dir := (gen.global_position - f.model.global_position).normalized()
+			f.model.look_at_from_position(f.model.global_position, f.model.global_position + dir, Vector3.UP)
+	if extra == "shatter":
+		f.set_throttle(0.0)
+		f.set_stick(Vector2.ZERO)
+		f.set_boosting(false)
+		f.set_firing(false)
+		var eye := SpaceScene.PLANET_CENTRE + Vector3(0.95, 0.34, 1.1).normalized() * (
+			SpaceScene.PLANET_RADIUS * 2.5
+		)
+		f.model.look_at_from_position(eye, SpaceScene.PLANET_CENTRE, Vector3.UP)
+		var body := f.space.get_node_or_null("Planet/Body") as Planet
+		if body != null:
+			await body.wait_for_build()
+		f.shatter_nearest_planet()
 	for i in warm:
 		await process_frame
 	var img := root.get_texture().get_image()

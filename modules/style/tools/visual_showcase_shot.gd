@@ -59,10 +59,10 @@ func _initialize() -> void:
 
 	# Camera with mobile-fit framing
 	var cam := Camera3D.new()
-	cam.position = Vector3(0.0, 0.5, 9.0)
-	cam.fov = 60.0
+	cam.position = Vector3(0.0, -0.4, 8.2)
+	cam.fov = 58.0
 	world.add_child(cam)
-	cam.look_at_from_position(cam.position, Vector3(0.0, -0.8, 0.0), Vector3.UP)
+	cam.look_at_from_position(cam.position, Vector3(0.0, -1.8, 0.0), Vector3.UP)
 	cam.current = true
 
 	# Assemble a player ship with cartoony rounded style
@@ -75,7 +75,7 @@ func _initialize() -> void:
 		design.refresh_palette()
 		var ship_view := ShipAssembler.assemble(design, lib, 0.0, false, false)
 		ship_view.restyle(true)
-		ship_view.root.position = Vector3(0.0, -0.8, 0.0)
+		ship_view.root.position = Vector3(0.0, -1.8, 0.0)
 		ship_view.root.rotation_degrees = Vector3(12.0, -40.0, 5.0)
 		world.add_child(ship_view.root)
 

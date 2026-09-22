@@ -34,6 +34,7 @@ var gravity: GravitySystem = null
 
 var _stepped_pairs := 0
 var _resolved_pairs := 0
+var _movers_buf: Array[PhysBody] = []
 
 
 func _init(p: PhysProfile = null) -> void:
@@ -82,20 +83,20 @@ func step(delta: float) -> void:
 	# mover against every rock (O(ships × 270 rocks) every step — plan §3.1 #10,
 	# and a measured ~10 ms/tick) the scenery is spatially indexed once and a
 	# mover is tested against the few rocks in its neighbourhood.
-	var movers: Array[PhysBody] = []
+	_movers_buf.clear()
 	for body in bodies:
 		if not body.kinematic:
-			movers.append(body)
+			_movers_buf.append(body)
 
 	_stepped_pairs = 0
 	_resolved_pairs = 0
 	var budget := profile.max_pairs_per_step
-	if movers.size() >= 2:
-		for pair in Broadphase.pairs(movers):
-			budget = _try_pair(movers[pair[0]], movers[pair[1]], delta, budget)
+	if _movers_buf.size() >= 2:
+		for pair in Broadphase.pairs(_movers_buf):
+			budget = _try_pair(_movers_buf[pair[0]], _movers_buf[pair[1]], delta, budget)
 	# Huge scenery (planets, the station, the moon): a handful, direct-tested.
 	for s in _scenery_large:
-		for m in movers:
+		for m in _movers_buf:
 			budget = _try_pair(s, m, delta, budget)
 			if budget <= 0:
 				break
@@ -103,9 +104,8 @@ func step(delta: float) -> void:
 			break
 	# Small scenery (rocks): look up only the cells near each mover. Skipped
 	# entirely when there is none — the per-mover cell probe is cheap only when
-	# it returns rocks.
-	if movers.size() > 0 and not _scenery_grid.is_empty():
-		for m in movers:
+	if _movers_buf.size() > 0 and not _scenery_grid.is_empty():
+		for m in _movers_buf:
 			budget = _query_scenery(m, delta, budget)
 			if budget <= 0:
 				break
@@ -225,10 +225,16 @@ func _layers_touch(a: PhysBody, b: PhysBody) -> bool:
 func _integrate(body: PhysBody, delta: float) -> void:
 	if body.kinematic or body.driven or body.node == null:
 		return
+	var in_tree := body.node.is_inside_tree()
+	var pos := body.node.global_position if in_tree else body.node.position
 	# Free bodies feel the scene's gravity (a knocked-loose rock falls and orbits).
 	if gravity != null and gravity.mode != GravitySystem.GravityMode.OFF:
-		body.velocity += gravity.compute_gravity(body.node.global_position) * delta
-	body.node.global_position += body.velocity * delta
+		body.velocity += gravity.compute_gravity(pos) * delta
+	pos += body.velocity * delta
+	if in_tree:
+		body.node.global_position = pos
+	else:
+		body.node.position = pos
 	_roll(body, delta)
 	_apply_angular_damping(body, delta)
 
@@ -236,11 +242,17 @@ func _integrate(body: PhysBody, delta: float) -> void:
 func _roll(body: PhysBody, delta: float) -> void:
 	if body.angular.length_squared() < 1e-12:
 		return
-	var basis := body.node.global_transform.basis
+	var in_tree := body.node.is_inside_tree()
+	var xform := body.node.global_transform if in_tree else body.node.transform
+	var basis := xform.basis
 	basis = basis.rotated(Vector3.RIGHT, body.angular.x * delta)
 	basis = basis.rotated(Vector3.UP, body.angular.y * delta)
 	basis = basis.rotated(Vector3.BACK, body.angular.z * delta)
-	body.node.global_transform = Transform3D(basis.orthonormalized(), body.node.global_position)
+	var new_xform := Transform3D(basis.orthonormalized(), body.node.global_position if in_tree else body.node.position)
+	if in_tree:
+		body.node.global_transform = new_xform
+	else:
+		body.node.transform = new_xform
 
 
 func _apply_angular_damping(body: PhysBody, delta: float) -> void:

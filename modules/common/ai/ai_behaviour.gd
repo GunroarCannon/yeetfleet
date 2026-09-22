@@ -33,6 +33,12 @@ enum State {
 	PURSUIT,
 	## Holding position — defense grid, leapfrog cover.
 	HOLD,
+	## Engaged in active combat dogfight
+	ENGAGE,
+	## Evasive break maneuver away from incoming fire or obstacles
+	EVASIVE_BREAK,
+	## Re-engaging with wingman spacing after an evasive break
+	RE_ENGAGE,
 }
 
 
@@ -51,10 +57,15 @@ var _patrol_centre := Vector3.ZERO
 var _state_timer := 0.0
 var _current_throttle := 0.0
 var _rng := RandomNumberGenerator.new()
+var _evasive_dir := Vector3.UP
 
 ## Set by [AiShip]; the behaviour reads this to decide state transitions.
 var player_position := Vector3.ZERO
 var player_visible := false
+
+## Dynamic obstacle avoidance and raycast context
+var ship_node_ref: Node3D = null
+var asteroid_data_ref: Array = []
 
 ## Group context: set by [AiShip.tick_ai] before calling update().
 var group_members: Array = []  # Array of AiGroupBehaviour.Member
@@ -72,6 +83,7 @@ var threat_position := Vector3.ZERO
 var threat_detected := false
 ## Gravity system reference, set by [AiShip] so behaviour can do gravity-aware throttle.
 var gravity_ref: GravitySystem = null
+
 
 
 func _init() -> void:
@@ -124,18 +136,41 @@ func update(delta: float, ship_pos: Vector3, ship_basis: Basis, top_speed: float
 			target_pos = group_centre
 		State.ORBIT:
 			desired_throttle = 0.5
-		State.PURSUIT:
-			desired_throttle = 0.9
+		State.PURSUIT, State.ENGAGE:
+			desired_throttle = 0.95
 			desired_boost = true
 			target_pos = threat_position if threat_detected else player_position
+			var d_target := ship_pos.distance_to(target_pos)
+			# Knife-fight proximity: break into evasive roll so ships joust rather than collide
+			if d_target < 95.0:
+				state = State.EVASIVE_BREAK
+				_state_timer = 0.0
+				var sign_x := 1.0 if _rng.randf() > 0.5 else -1.0
+				_evasive_dir = (ship_basis.x * sign_x + ship_basis.y * 0.45).normalized()
 			# Turret/sniper combat style: inside weapons range the ship stops
 			# chasing and holds nearly still, rotating fully onto the target so
 			# its guns land. The steering below still points at the target; only
 			# the closing speed dies.
-			if archetype_data != null and archetype_data.hold_to_aim \
-				and ship_pos.distance_to(target_pos) < 500.0:
+			elif archetype_data != null and archetype_data.hold_to_aim and d_target < 500.0:
 				desired_throttle = 0.05
 				desired_boost = false
+		State.EVASIVE_BREAK:
+			desired_throttle = 1.0
+			desired_boost = true
+			target_pos = ship_pos + _evasive_dir * 350.0
+			if _state_timer > 1.8:
+				state = State.RE_ENGAGE
+				_state_timer = 0.0
+		State.RE_ENGAGE:
+			desired_throttle = 0.85
+			desired_boost = false
+			var enemy_pos := threat_position if threat_detected else player_position
+			var wing_spacing := 65.0 * float(my_index_in_group + 1)
+			var side_vec := (ship_pos - enemy_pos).normalized().cross(Vector3.UP)
+			target_pos = enemy_pos + side_vec * wing_spacing + Vector3.UP * 45.0
+			if _state_timer > 2.8 or ship_pos.distance_to(enemy_pos) > 350.0:
+				state = State.ENGAGE
+				_state_timer = 0.0
 		State.HOLD:
 			desired_throttle = 0.05
 			target_pos = ship_pos
@@ -164,6 +199,12 @@ func update(delta: float, ship_pos: Vector3, ship_basis: Basis, top_speed: float
 			group_weight = 0.0
 
 	var blended := individual_force * (1.0 - group_weight) + group_force * group_weight
+
+	# Dynamic obstacle & debris avoidance (5-whisper probes)
+	var avoid := _compute_obstacle_avoidance(ship_pos, ship_basis)
+	if avoid.length_squared() > 0.001:
+		blended = blended * 0.25 + avoid * 0.75
+
 
 	# Gravity-aware throttle reduction: when near a dominant body, the ship
 	# can let gravity do some of the work. Civilian and mining archetypes
@@ -268,6 +309,55 @@ func _compute_group_force(ship_pos: Vector3, ship_basis: Basis, delta: float) ->
 	return force
 
 
+## 5-whisper raycast probes and asteroid avoidance force calculation.
+func _compute_obstacle_avoidance(ship_pos: Vector3, ship_basis: Basis) -> Vector3:
+	var avoid_vec := Vector3.ZERO
+	var fwd := -ship_basis.z
+
+	# 1. Belt asteroids check
+	if not asteroid_data_ref.is_empty():
+		for rock in asteroid_data_ref:
+			var r_pos: Vector3 = rock.get("position", Vector3.ZERO)
+			var r_radius: float = float(rock.get("radius", 10.0))
+			var d_sq := ship_pos.distance_squared_to(r_pos)
+			var check_r := r_radius + 35.0
+			if d_sq < check_r * check_r:
+				var dist := sqrt(d_sq)
+				var to_ship := (ship_pos - r_pos).normalized()
+				var urgency := 1.0 - (dist / check_r)
+				avoid_vec += to_ship * (urgency * 2.5)
+
+	# 2. 5-whisper Physics Raycast probes against collision meshes/structures
+	if ship_node_ref != null and is_instance_valid(ship_node_ref) and ship_node_ref.is_inside_tree():
+		var w3d := ship_node_ref.get_world_3d()
+		if w3d != null and w3d.direct_space_state != null:
+			var space_state := w3d.direct_space_state
+			var whispers: Array[Vector3] = [
+				fwd * 95.0,
+				(fwd.rotated(ship_basis.y, 0.45)) * 65.0,
+				(fwd.rotated(ship_basis.y, -0.45)) * 65.0,
+				(fwd.rotated(ship_basis.x, 0.40)) * 55.0,
+				(fwd.rotated(ship_basis.x, -0.40)) * 55.0,
+			]
+			var excludes: Array[RID] = []
+			if ship_node_ref.has_method("get_rid"):
+				excludes.append(ship_node_ref.get_rid())
+
+			for ray_vec in whispers:
+				var query := PhysicsRayQueryParameters3D.create(ship_pos, ship_pos + ray_vec)
+				query.exclude = excludes
+				query.collision_mask = 1 | 4
+				var hit := space_state.intersect_ray(query)
+				if not hit.is_empty():
+					var hit_norm: Vector3 = hit.get("normal", Vector3.UP)
+					var hit_pos: Vector3 = hit.get("position", ship_pos)
+					var dist := ship_pos.distance_to(hit_pos)
+					var push := (hit_norm + (ship_pos - hit_pos).normalized()).normalized()
+					avoid_vec += push * (1.0 - clampf(dist / ray_vec.length(), 0.0, 1.0)) * 2.0
+
+	return avoid_vec.normalized() if avoid_vec.length_squared() > 0.001 else Vector3.ZERO
+
+
 func _steer_toward(ship_pos: Vector3, ship_basis: Basis, target_pos: Vector3) -> Vector3:
 	var to_target := (target_pos - ship_pos).normalized()
 	return to_target
@@ -289,10 +379,13 @@ func _evaluate_transitions(ship_pos: Vector3) -> void:
 			if dist_to_player > FLEE_RANGE * 2.5:
 				state = State.CRUISE
 				_pick_cruise_waypoint(ship_pos)
-		State.PURSUIT:
+		State.PURSUIT, State.ENGAGE:
 			if dist_to_player > DETECTION_RANGE * 1.5:
 				state = State.CRUISE
 				_pick_cruise_waypoint(ship_pos)
+		State.EVASIVE_BREAK, State.RE_ENGAGE:
+			pass
+
 		_:
 			# Individual state transitions based on player proximity.
 			if archetype_data != null and archetype_data.aggression >= 1.0:

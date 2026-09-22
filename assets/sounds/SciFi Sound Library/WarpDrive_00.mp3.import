@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://38afaf3c6tsn"
+path="res://.godot/imported/WarpDrive_00.mp3-e4dc0e5a12666dbb84efd27a8f814b69.mp3str"
+
+[deps]
+
+source_file="res://assets/sounds/SciFi Sound Library/WarpDrive_00.mp3"
+dest_files=["res://.godot/imported/WarpDrive_00.mp3-e4dc0e5a12666dbb84efd27a8f814b69.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

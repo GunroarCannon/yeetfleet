@@ -761,6 +761,31 @@ static func _saucer_sector(lp: LowPoly, spec: Dictionary) -> Dictionary:
 
 		# Outer edge vertical band
 		lp.add_quad(out_rim0, out_rim1, bot_rim1, bot_rim0, LowPoly.CH_TRIM)
+
+		# Inner core vertical collar
+		lp.add_quad(in_core1, in_core0, bot_core0, bot_core1, LowPoly.CH_TRIM)
+
+	# Radial start end cap
+	var d_start := Vector3(cos(center_angle - angle_span * 0.5), 0.0, sin(center_angle - angle_span * 0.5))
+	var s_in_top := d_start * mid_r + Vector3(0, height * 0.35, 0)
+	var s_in_core := d_start * inner_r + Vector3(0, height * 0.5, 0)
+	var s_out_mid := d_start * mid_r + Vector3(0, height * 0.12, 0)
+	var s_out_rim := d_start * outer_r + Vector3(0, 0.0, 0)
+	var s_bot_core := d_start * inner_r + Vector3(0, -height * 0.45, 0)
+	var s_bot_rim := d_start * outer_r + Vector3(0, -height * 0.15, 0)
+	lp.add_quad(s_in_top, s_in_core, s_bot_core, s_out_mid, LowPoly.CH_TRIM)
+	lp.add_quad(s_out_mid, s_bot_core, s_bot_rim, s_out_rim, LowPoly.CH_TRIM)
+
+	# Radial end cap
+	var d_end := Vector3(cos(center_angle + angle_span * 0.5), 0.0, sin(center_angle + angle_span * 0.5))
+	var e_in_top := d_end * mid_r + Vector3(0, height * 0.35, 0)
+	var e_in_core := d_end * inner_r + Vector3(0, height * 0.5, 0)
+	var e_out_mid := d_end * mid_r + Vector3(0, height * 0.12, 0)
+	var e_out_rim := d_end * outer_r + Vector3(0, 0.0, 0)
+	var e_bot_core := d_end * inner_r + Vector3(0, -height * 0.45, 0)
+	var e_bot_rim := d_end * outer_r + Vector3(0, -height * 0.15, 0)
+	lp.add_quad(e_in_core, e_in_top, e_out_mid, e_bot_core, LowPoly.CH_TRIM)
+	lp.add_quad(e_bot_core, e_out_mid, e_out_rim, e_bot_rim, LowPoly.CH_TRIM)
 	lp.end_shape(false)
 
 	# Window stripe decals on the trench step wall
@@ -777,6 +802,14 @@ static func _saucer_sector(lp: LowPoly, spec: Dictionary) -> Dictionary:
 		var w_bot0 := d0 * (mid_r + 0.02) + Vector3(0, height * 0.18, 0)
 		var w_bot1 := d1 * (mid_r + 0.02) + Vector3(0, height * 0.18, 0)
 		lp.add_decal_quad(w_top0, w_top1, w_bot1, w_bot0, LowPoly.CH_ACCENT)
+
+		# Outer rim navigation beacon stripes on alternating segments
+		if i % 2 == 0:
+			var r_top0 := d0 * (outer_r + 0.02) + Vector3(0, -height * 0.02, 0)
+			var r_top1 := d1 * (outer_r + 0.02) + Vector3(0, -height * 0.02, 0)
+			var r_bot0 := d0 * (outer_r + 0.02) + Vector3(0, -height * 0.12, 0)
+			var r_bot1 := d1 * (outer_r + 0.02) + Vector3(0, -height * 0.12, 0)
+			lp.add_decal_quad(r_top0, r_top1, r_bot1, r_bot0, LowPoly.CH_ACCENT)
 	lp.end_shape(false)
 	return {}
 
@@ -865,6 +898,20 @@ static func _hangar_bay(lp: LowPoly, spec: Dictionary) -> Dictionary:
 	lp.add_box(Vector3(0, 0, -depth), Vector3(width, height, 0.4), LowPoly.CH_TRIM)
 
 	lp.add_box(Vector3(0, -hh + 0.22, -depth * 0.5), Vector3(width * 0.15, 0.05, depth * 0.85), LowPoly.CH_ACCENT)
+	# Ceiling approach guidance light strip
+	lp.add_box(Vector3(0, hh - 0.22, -depth * 0.5), Vector3(width * 0.15, 0.05, depth * 0.85), LowPoly.CH_ACCENT)
+
+	# Gateway entrance portal indicator chevrons
+	lp.begin_shape()
+	for sx in [-1.0, 1.0]:
+		lp.add_decal_quad(
+			Vector3(sx * (hw + frame_thick * 0.2), hh + frame_thick * 0.8, 0.02),
+			Vector3(sx * (hw + frame_thick * 0.8), hh + frame_thick * 0.8, 0.02),
+			Vector3(sx * (hw + frame_thick * 0.8), hh + frame_thick * 0.2, 0.02),
+			Vector3(sx * (hw + frame_thick * 0.2), hh + frame_thick * 0.2, 0.02),
+			LowPoly.CH_ACCENT
+		)
+	lp.end_shape(false)
 
 	return {"dock": [_marker(Vector3(0.0, -hh + 0.3, -depth * 0.6), Vector3.FORWARD)]}
 

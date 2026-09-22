@@ -159,6 +159,9 @@ func generate() -> void:
 	_pad_for_part.clear()
 	_debris.clear()
 	_turrets.clear()
+	_inst_mat_hull = null
+	_inst_mat_greeble = null
+	_inst_mat_glow = null
 	_rng.seed = craft_seed
 
 	match archetype:
@@ -215,6 +218,18 @@ func _generate_mothership() -> void:
 			"width": w, "height": w * hull_height_ratio,
 			"corner": w * 0.15, "taper": 0.88,
 		}, Transform3D(Basis(), Vector3(0, 0, z)))
+
+	# Recessed flank hangar bays on forward command spine
+	var bay_w := hull_width * 0.36
+	var bay_h := bay_w * 0.55
+	var bay_d := SEGMENT_LENGTH * 1.8
+	var bay_z := bow_length * 0.45
+	_add_part("hangar_bay", {
+		"width": bay_w, "height": bay_h, "depth": bay_d,
+	}, Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(hull_width * 0.4, 0.0, bay_z)))
+	_add_part("hangar_bay", {
+		"width": bay_w, "height": bay_h, "depth": bay_d,
+	}, Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(-hull_width * 0.4, 0.0, bay_z)))
 
 	# Aft stern engineering hull / engine block
 	var stern_length := saucer_r * 0.85
@@ -380,6 +395,19 @@ func _generate_dreadnought() -> void:
 			"span": mid_r * 1.8, "chord": SEGMENT_LENGTH * 2.5, "thickness": mid_r * 0.08, "side": side,
 		}, Transform3D(Basis(), Vector3(side * mid_r * 0.9, mid_r * 0.3, mid_z - SEGMENT_LENGTH * 2.5)))
 
+	# Ventral assault hangar bay under the midsection spine
+	_add_part("hangar_bay", {
+		"width": mid_r * 0.75, "height": mid_r * 0.45, "depth": SEGMENT_LENGTH * 2.2,
+	}, Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, -mid_r * hull_height_ratio * 0.95, mid_z)))
+
+	# Capital stern energy ring thrusters at the aft
+	var stern: Dictionary = spine[spine.size() - 1]
+	var stern_r := float(stern["radius"])
+	var stern_z := float(stern["z"])
+	_add_part("energy_ring", {
+		"radius": stern_r * 0.85, "tube_radius": stern_r * 0.18, "sides": 8, "segments": 14,
+	}, Transform3D(Basis(), Vector3(0.0, 0.0, stern_z - SEGMENT_LENGTH * 0.6)))
+
 	# Launch / docking bays
 	_mount_dock_arms_on_spine(spine)
 
@@ -452,6 +480,17 @@ func _generate_ring_station() -> void:
 	# 1. Central glowing geodesic biosphere dome / core station hub (Ref 1)
 	_add_part("biosphere_dome", {"radius": hub_radius, "sides": 14, "steps": 6, "flip": 0.0}, Transform3D())
 	_add_part("dome", {"radius": hub_radius * 0.95, "sides": 14, "steps": 5, "flip": 1.0}, Transform3D())
+
+	# Hub arrival hangar bays facing outward from central hub
+	var bay_w := hub_radius * 0.45
+	var bay_h := bay_w * 0.6
+	var bay_d := hub_radius * 0.8
+	_add_part("hangar_bay", {
+		"width": bay_w, "height": bay_h, "depth": bay_d,
+	}, Transform3D(Basis(Vector3.UP, 0.0), Vector3(0.0, 0.0, hub_radius * 0.92)))
+	_add_part("hangar_bay", {
+		"width": bay_w, "height": bay_h, "depth": bay_d,
+	}, Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, 0.0, -hub_radius * 0.92)))
 
 	# 2. Multi-tier outer torus ring with convex hull collision
 	var ring_basis := Basis(Vector3(1, 0, 0), PI * 0.5)
@@ -543,6 +582,12 @@ func _generate_gate_frame() -> void:
 		_add_part("truss_spine", {
 			"length": width + pylon_w * 2.0, "width": pylon_w * 0.8, "height": pylon_d * 0.7, "bays": 6,
 		}, Transform3D(_radial_basis(Vector3.RIGHT), Vector3(-(hx + pylon_w), py, 0.0)))
+
+		# Flanking energizing capacitor banks on the lintels
+		for x_side: float in [1.0, -1.0]:
+			_add_part("fuel_cluster", {
+				"length": width * 0.28, "tank_radius": pylon_w * 0.20, "count": 3,
+			}, Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(x_side * hx * 0.5, py + y_side * pylon_w * 0.5, 0.0)))
 
 	# 3. Tiered suspended circular energy rings inside the portal opening (Ref 0)
 	var ring_tiers := maxi(segment_count / 6, 3)
@@ -649,10 +694,14 @@ func _generate_tower_cluster() -> void:
 			"bays": 2,
 		}, Transform3D(_radial_basis(bridge_dir), bridge_mount), true)
 
-	# 4. Spire crown at the apex
+	# 4. Spire crown at the apex with observation biosphere dome
+	_add_part("biosphere_dome", {
+		"radius": core_width * 0.95, "sides": 12, "steps": 5, "flip": 0.0,
+	}, Transform3D(Basis(), Vector3(0.0, tower_height, 0.0)))
+
 	_add_part("spire", {
-		"height": hull_width * 1.2, "base_radius": core_width * 0.6, "sides": 8,
-	}, Transform3D(_radial_up_basis(Vector3.UP), Vector3(0.0, tower_height, 0.0)))
+		"height": hull_width * 1.2, "base_radius": core_width * 0.45, "sides": 8,
+	}, Transform3D(_radial_up_basis(Vector3.UP), Vector3(0.0, tower_height + core_width * 0.8, 0.0)))
 
 	# 5. Observation biosphere dome on the lower terrace
 	_add_part("biosphere_dome", {
@@ -763,13 +812,29 @@ func _add_part(kind: String, spec: Dictionary, local_xform: Transform3D, cosmeti
 	var body := StaticBody3D.new()
 	body.name = "%s_%d" % [kind, _next_id]
 	body.transform = local_xform
+	body.set_meta("aabb", built.aabb)
 
 	var mesh_inst := MeshInstance3D.new()
 	mesh_inst.name = "Mesh"
 	mesh_inst.mesh = built.mesh
-	mesh_inst.material_override = _metal_material(cosmetic)
+	if kind == "plasma_core" or kind == "energy_ring":
+		mesh_inst.material_override = _glow_material()
+	else:
+		mesh_inst.material_override = _metal_material(cosmetic)
 	mesh_inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	body.add_child(mesh_inst)
+
+	if kind == "spire":
+		var h: float = float(spec.get("height", 3.0))
+		var beacon := MeshInstance3D.new()
+		beacon.name = "Beacon"
+		var s := SphereMesh.new()
+		s.radius = 0.35
+		s.height = 0.7
+		beacon.mesh = s
+		beacon.material_override = _glow_material()
+		beacon.position = Vector3(0.0, h * 0.95, 0.0)
+		body.add_child(beacon)
 
 	var shape := CollisionShape3D.new()
 	shape.name = "Shape"
@@ -814,11 +879,17 @@ static func refresh_materials() -> void:
 
 func restyle() -> void:
 	refresh_materials()
+	_inst_mat_hull = null
+	_inst_mat_greeble = null
+	_inst_mat_glow = null
 	for part in _parts.values():
 		if is_instance_valid(part.node):
 			var mesh_inst: MeshInstance3D = part.node.get_node_or_null("Mesh")
 			if mesh_inst != null:
-				mesh_inst.material_override = _metal_material(part.cosmetic)
+				if part.kind == "plasma_core" or part.kind == "energy_ring":
+					mesh_inst.material_override = _glow_material()
+				else:
+					mesh_inst.material_override = _metal_material(part.cosmetic)
 
 
 ## Bakes static structure parts into unified meshes for low draw calls on mobile.
@@ -885,19 +956,100 @@ func bake_structure_meshes() -> void:
 		_parts_root.add_child(mi_greeble)
 
 
-func _metal_material(cosmetic: bool) -> ShaderMaterial:
-	if cosmetic:
-		if _mat_greeble == null:
-			_mat_greeble = _build_material(
-				Palette.color("metal_mid"), Palette.color("ui_warn"), Palette.color("metal_dark")
-			)
-		return _mat_greeble
-	if _mat_hull == null:
-		_mat_hull = _build_material(
-			Palette.color("metal_light"), Palette.color("beam"), Palette.color("metal_dark")
-		)
-	return _mat_hull
+func _palette_for_archetype() -> Dictionary:
+	match archetype:
+		Archetype.DREADNOUGHT:
+			return {
+				"hull_primary": Color(0.24, 0.25, 0.28),
+				"hull_accent": Color(1.0, 0.22, 0.10),
+				"hull_trim": Color(0.11, 0.11, 0.13),
+				"greeble_primary": Color(0.36, 0.38, 0.44),
+				"greeble_accent": Color(1.0, 0.65, 0.15),
+				"greeble_trim": Color(0.10, 0.10, 0.12),
+				"glow": Color(1.0, 0.36, 0.08),
+			}
+		Archetype.MOTHERSHIP:
+			return {
+				"hull_primary": Color(0.26, 0.38, 0.58),
+				"hull_accent": Color(1.0, 0.82, 0.20),
+				"hull_trim": Color(0.14, 0.18, 0.28),
+				"greeble_primary": Color(0.40, 0.50, 0.66),
+				"greeble_accent": Color(0.30, 0.92, 1.0),
+				"greeble_trim": Color(0.16, 0.20, 0.30),
+				"glow": Color(0.25, 0.95, 1.0),
+			}
+		Archetype.RING_STATION:
+			return {
+				"hull_primary": Color(0.92, 0.94, 0.98),
+				"hull_accent": Color(0.10, 0.70, 1.0),
+				"hull_trim": Color(0.28, 0.32, 0.40),
+				"greeble_primary": Color(0.76, 0.80, 0.88),
+				"greeble_accent": Color(0.15, 1.0, 0.65),
+				"greeble_trim": Color(0.22, 0.25, 0.32),
+				"glow": Color(0.20, 1.0, 0.70),
+			}
+		Archetype.GATE_FRAME:
+			return {
+				"hull_primary": Color(0.28, 0.20, 0.45),
+				"hull_accent": Color(1.0, 0.25, 0.90),
+				"hull_trim": Color(0.15, 0.10, 0.25),
+				"greeble_primary": Color(0.42, 0.32, 0.60),
+				"greeble_accent": Color(0.95, 0.50, 1.0),
+				"greeble_trim": Color(0.16, 0.12, 0.28),
+				"glow": Color(1.0, 0.30, 0.95),
+			}
+		Archetype.TOWER_CLUSTER:
+			return {
+				"hull_primary": Color(0.60, 0.45, 0.32),
+				"hull_accent": Color(1.0, 0.58, 0.05),
+				"hull_trim": Color(0.24, 0.18, 0.15),
+				"greeble_primary": Color(0.68, 0.55, 0.42),
+				"greeble_accent": Color(1.0, 0.85, 0.15),
+				"greeble_trim": Color(0.22, 0.18, 0.16),
+				"glow": Color(1.0, 0.65, 0.15),
+			}
+		_:
+			return {
+				"hull_primary": Palette.color("metal_light"),
+				"hull_accent": Palette.color("beam"),
+				"hull_trim": Palette.color("metal_dark"),
+				"greeble_primary": Palette.color("metal_mid"),
+				"greeble_accent": Palette.color("ui_warn"),
+				"greeble_trim": Palette.color("metal_dark"),
+				"glow": Color(0.5, 0.8, 1.0),
+			}
 
+
+var _inst_mat_hull: ShaderMaterial = null
+var _inst_mat_greeble: ShaderMaterial = null
+var _inst_mat_glow: StandardMaterial3D = null
+
+func _metal_material(cosmetic: bool) -> ShaderMaterial:
+	var pal := _palette_for_archetype()
+	if cosmetic:
+		if _inst_mat_greeble == null:
+			_inst_mat_greeble = _build_material(
+				pal["greeble_primary"], pal["greeble_accent"], pal["greeble_trim"]
+			)
+		return _inst_mat_greeble
+	if _inst_mat_hull == null:
+		_inst_mat_hull = _build_material(
+			pal["hull_primary"], pal["hull_accent"], pal["hull_trim"]
+		)
+	return _inst_mat_hull
+
+func _glow_material() -> StandardMaterial3D:
+	if _inst_mat_glow == null:
+		var pal := _palette_for_archetype()
+		var col: Color = pal["glow"]
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = col
+		mat.emission_enabled = true
+		mat.emission = col
+		mat.emission_energy_multiplier = 4.5
+		_inst_mat_glow = mat
+	return _inst_mat_glow
 
 static func _build_material(primary: Color, accent: Color, trim: Color) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
@@ -905,12 +1057,17 @@ static func _build_material(primary: Color, accent: Color, trim: Color) -> Shade
 	mat.set_shader_parameter("primary_color", Palette.get_sat_lifted_color(primary))
 	mat.set_shader_parameter("accent_color", Palette.get_sat_lifted_color(accent))
 	mat.set_shader_parameter("trim_color", Palette.get_sat_lifted_color(trim))
-	mat.set_shader_parameter("metallic_amount", 0.3)
-	mat.set_shader_parameter("roughness_amount", 0.75)
-	mat.set_shader_parameter("specular_amount", 0.25)
-	mat.set_shader_parameter("rim_strength", 0.16)
-	mat.set_shader_parameter("ao_strength", 0.32)
-	mat.set_shader_parameter("solidity", 0.2)
+	mat.set_shader_parameter("metallic_amount", 0.10)
+	mat.set_shader_parameter("roughness_amount", 0.60)
+	mat.set_shader_parameter("specular_amount", 0.18)
+	mat.set_shader_parameter("rim_strength", 0.22)
+	mat.set_shader_parameter("rim_power", 5.0)
+	mat.set_shader_parameter("rim_color", Palette.get_sat_lifted_color(accent))
+	mat.set_shader_parameter("ao_strength", 0.35)
+	mat.set_shader_parameter("solidity", 0.12)
+	mat.set_shader_parameter("plate_variation", 0.12)
+	mat.set_shader_parameter("weathering", 0.05)
+	mat.set_shader_parameter("panel_scale", 4.0)
 	ShipMaterials.apply_style_dials(mat)
 	ShipMaterials.apply_outline(mat)
 	return mat
@@ -983,6 +1140,39 @@ func _detach_part(id: int, hit_dir: Vector3) -> RigidBody3D:
 	_parts.erase(id)
 	part_detached.emit(part.kind, rigid)
 	return rigid
+
+
+## Detaches parts in a radius around [param epicentre], flinging them as physics debris
+func shatter_at(epicentre: Vector3, radius: float, impulse := Vector3.ZERO) -> Array[RigidBody3D]:
+	var detached: Array[RigidBody3D] = []
+	var to_detach: Array[int] = []
+	for id: int in _parts.keys():
+		var part: Part = _parts[id]
+		if not is_instance_valid(part.node):
+			continue
+		var dist := part.node.global_position.distance_to(epicentre)
+		if dist <= radius:
+			to_detach.append(id)
+	
+	for id in to_detach:
+		var part: Part = _parts.get(id)
+		if part == null or not is_instance_valid(part.node):
+			continue
+		var dir := (part.node.global_position - epicentre).normalized()
+		if dir.length_squared() < 0.001:
+			dir = Vector3.UP
+		var blast := (dir * 30.0 + impulse * 0.4)
+		var rb := _detach_part(id, blast.normalized())
+		if rb != null:
+			rb.linear_velocity = blast
+			detached.append(rb)
+			Juice.burst(BurstPresets.Preset.SPARKS, rb.global_transform, 1.5, Color(1.0, 0.6, 0.2))
+			Juice.burst(BurstPresets.Preset.EMBERS, rb.global_transform, 1.0, Color(1.0, 0.4, 0.1))
+	
+	if not detached.is_empty():
+		Juice.shake(clampf(float(detached.size()) * 0.08, 0.2, 1.0))
+		Juice.light_pop(epicentre, Color(1.0, 0.6, 0.2), 35.0, 0.5)
+	return detached
 
 
 # --- Queries -----------------------------------------------------------------
@@ -1126,7 +1316,7 @@ func get_collision_spheres() -> Array[Dictionary]:
 			for i in count:
 				var a := TAU * float(i) / float(count)
 				hull.append({
-					"center": Vector3(cos(a) * r, sin(a) * r, 0.0),
+					"offset": Vector3(cos(a) * r, sin(a) * r, 0.0),
 					"radius": tr * 1.5
 				})
 		elif part.kind == "ring_segment":
@@ -1140,9 +1330,98 @@ func get_collision_spheres() -> Array[Dictionary]:
 				var t := float(i) / float(count)
 				var a := ca - span * 0.5 + span * t
 				hull.append({
-					"center": Vector3(cos(a) * r, sin(a) * r, 0.0),
+					"offset": Vector3(cos(a) * r, sin(a) * r, 0.0),
 					"radius": tr * 1.2
 				})
+		elif part.kind == "dock_ramp":
+			var length := float(part.spec.get("length", 12.0))
+			var width := float(part.spec.get("width", 6.0))
+			hull.append({
+				"offset": Vector3(0.0, -0.4, -length * 0.4),
+				"radius": maxf(width * 0.45, 1.0)
+			})
+		elif part.kind == "hangar_bay":
+			var h := float(part.spec.get("height", 8.0))
+			var w := float(part.spec.get("width", 12.0))
+			var d := float(part.spec.get("depth", 16.0))
+			var rad := minf(h * 0.35, w * 0.35)
+			hull.append({"offset": Vector3(0.0, -h * 0.45, -d * 0.5), "radius": rad})
+			hull.append({"offset": Vector3(0.0, h * 0.45, -d * 0.5), "radius": rad})
+			hull.append({"offset": Vector3(-w * 0.45, 0.0, -d * 0.5), "radius": rad})
+			hull.append({"offset": Vector3(w * 0.45, 0.0, -d * 0.5), "radius": rad})
+			hull.append({"offset": Vector3(0.0, 0.0, -d * 0.9), "radius": rad})
+		elif part.kind == "saucer_sector":
+			var ca: float = float(part.spec.get("center_angle", 0.0))
+			var in_r: float = float(part.spec.get("inner_r", 6.0))
+			var out_r: float = float(part.spec.get("outer_r", 30.0))
+			var h: float = float(part.spec.get("height", 8.0))
+			var span_r := out_r - in_r
+			var steps := 3
+			for i in steps:
+				var t := (float(i) + 0.5) / float(steps)
+				var r := in_r + span_r * t
+				hull.append({
+					"offset": Vector3(cos(ca) * r, 0.0, sin(ca) * r),
+					"radius": minf(h * 0.45, span_r * 0.22),
+				})
+		elif part.kind == "wing":
+			var span := float(part.spec.get("span", 8.0))
+			var root_chord := float(part.spec.get("root_chord", 6.0))
+			var tip_chord := float(part.spec.get("tip_chord", 2.0))
+			var sweep := float(part.spec.get("sweep", 3.0))
+			var dihedral := float(part.spec.get("dihedral", 0.6))
+			var side := signf(float(part.spec.get("side", 1.0)))
+			if is_zero_approx(side):
+				side = 1.0
+			var count := 3
+			for i in count:
+				var t := (float(i) + 0.5) / float(count)
+				var chord := lerpf(root_chord, tip_chord, t)
+				hull.append({
+					"offset": Vector3(side * span * t, dihedral * t, -sweep * t),
+					"radius": maxf(chord * 0.4, 0.8),
+				})
+		elif part.kind == "tail_fin":
+			var height := float(part.spec.get("height", 5.0))
+			var root_chord := float(part.spec.get("root_chord", 5.0))
+			var tip_chord := float(part.spec.get("tip_chord", 1.5))
+			var sweep := float(part.spec.get("sweep", 2.5))
+			var count := 3
+			for i in count:
+				var t := (float(i) + 0.5) / float(count)
+				var chord := lerpf(root_chord, tip_chord, t)
+				hull.append({
+					"offset": Vector3(0.0, height * t, -sweep * t),
+					"radius": maxf(chord * 0.4, 0.8),
+				})
+		elif part.kind == "radiator_wing":
+			var span := float(part.spec.get("span", 18.0))
+			var chord := float(part.spec.get("chord", 10.0))
+			var side := signf(float(part.spec.get("side", 1.0)))
+			if is_zero_approx(side):
+				side = 1.0
+			var count := 3
+			for i in count:
+				var t := (float(i) + 0.5) / float(count)
+				hull.append({
+					"offset": Vector3(side * span * t, 0.0, -chord * 0.42),
+					"radius": maxf(chord * 0.4, 1.0),
+				})
+		elif part.kind == "biosphere_dome":
+			var radius := float(part.spec.get("radius", 8.0))
+			var flip := float(part.spec.get("flip", 0.0)) > 0.5
+			var y_sign := -1.0 if flip else 1.0
+			hull.append({
+				"offset": Vector3(0.0, radius * 0.45 * y_sign, 0.0),
+				"radius": radius * 0.65,
+			})
+		elif part.kind == "plasma_core":
+			var radius := float(part.spec.get("radius", 12.0))
+			var depth := float(part.spec.get("depth", 6.0))
+			hull.append({
+				"offset": Vector3(0.0, -depth * 0.5, 0.0),
+				"radius": minf(radius * 0.85, maxf(depth * 0.55, 1.0)),
+			})
 		else:
 			hull = HullFit.spheres_for_box(part.aabb)
 			

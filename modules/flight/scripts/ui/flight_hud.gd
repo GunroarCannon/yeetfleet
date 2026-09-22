@@ -45,6 +45,7 @@ var _overlay: Control
 var _menu: FlightMenu
 var _fire_button: Button
 var _boost_button: Button
+var _weapon_button: Button
 var _assist_chip: Button
 var _view_chip: Button
 var _speed_label: Label
@@ -61,7 +62,19 @@ var _debug_panel: VBoxContainer = null
 var _debug_toggles: Dictionary = {}
 var _event_container: CenterContainer = null
 
+## Floating arcade damage numbers & health ghost bars
+var _damage_numbers: Array[Dictionary] = []
+var _hp_ghost := 1.0
+var _shield_ghost := 1.0
+var _game_over_modal: Control = null
+
+## Modular HUD components
+var _radar_display: RadarDisplay = null
+var _combat_modal: CombatSettingsModal = null
+var _weapon_selector: WeaponSelector = null
+
 ## Visual & Palette controls
+
 var _palette_chip: Button = null
 var _palette_preview_dots: HBoxContainer = null
 var _style_chip: Button = null
@@ -77,6 +90,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	theme = FlightTheme.create_theme(size, Session.mobile_view_fit)
 	_build()
 
 
@@ -99,6 +113,9 @@ func _build() -> void:
 	_build_event_container()
 	_build_debug_panel()
 	_build_rear_view_display()
+	_build_game_over_modal()
+	_build_radar()
+	_build_combat_modal()
 
 
 func _build_event_container() -> void:
@@ -150,6 +167,11 @@ func _build_debug_panel() -> void:
 	_add_debug_toggle("Markers", Session.hud_markers)
 	_add_debug_toggle("ShipGeo", true)
 	_add_debug_toggle("!!! ALL !!!", true)
+	# Effect layers, each independently switchable so the new audio/VFX/toon
+	# work can be compared against the original look without a code change.
+	_add_debug_toggle("SciFiSfx", FxSettings.library_sounds)
+	_add_debug_toggle("AddonVFX", FxSettings.addon_vfx)
+	_add_debug_toggle("Toon", ToonOverride.enabled())
 
 	# D key toggles the panel.
 
@@ -188,6 +210,15 @@ func _on_debug_toggle(label: String, on: bool) -> void:
 		"Drift": _root.set_debug_visible("drift", on)
 		"Reticle": Session.hud_reticle = on
 		"Markers": Session.hud_markers = on
+		"SciFiSfx":
+			FxSettings.set_library_sounds(on)
+			if _root.audio != null:
+				_root.audio.refresh_bank()
+		"AddonVFX": FxSettings.set_addon_vfx(on)
+		"Toon":
+			# set_toon_shading re-applies the style, which FlightRoot listens for
+			# and restyles the hull from — no manual push needed here.
+			ToonOverride.set_enabled(on)
 
 
 func toggle_debug_panel() -> void:
@@ -227,7 +258,9 @@ func _fill_settings_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_separator()
 	var ship_slider := popup.add_slider_row(
 		"Ship size", 0.5, 10.0, 0.5, Session.ship_scale,
-		func(v: float) -> void: Session.ship_scale = v,
+		func(v: float) -> void:
+			Session.ship_scale = v
+			Session.save_to_disk(),
 		"×%.1f"
 	)
 	ship_slider.drag_ended.connect(func(_changed: bool) -> void: _apply_ship_size())
@@ -241,21 +274,67 @@ func _fill_settings_popup(popup: FlightMenu.DraggablePopup) -> void:
 		)
 	popup.add_action_row("Restart with this scale", func() -> void: _root.restart_scene())
 
+	# Planetary destruction fineness dial
+	popup.add_separator()
+	popup.add_section("Planetary destruction")
+	popup.add_slider_row(
+		"Break fineness", 0.5, 3.0, 0.25, Session.planet_break_fineness,
+		func(v: float) -> void:
+			Session.planet_break_fineness = v
+			Session.save_to_disk()
+			show_hint("Planet break fineness: ×%.2f" % v),
+		"×%.2f"
+	)
+	popup.add_check_row(
+		"Radiant mantle glow", Session.planet_debris_glow,
+		func(on: bool) -> void:
+			Session.planet_debris_glow = on
+			Session.save_to_disk()
+			PlanetDebrisBuilder.set_debris_glow_enabled(on, _root)
+			show_hint("Planet debris glow: %s" % ("ON" if on else "OFF (Max FPS)"))
+	)
+	popup.add_help_row(
+		"Controls piece count and radiant emission when a planet breaks. "
+		+ "Disable glow if experiencing frame drops near shattered debris."
+	)
+	popup.add_action_row("💥 Shatter nearest planet (Shift+P)", func() -> void:
+		_root.shatter_nearest_planet()
+	)
+
 	# World-build quality dials: read while the scene builds, so changing them
 	# needs a restart (the scale presets above set the precedent).
 	popup.add_section("Quality (restart to apply)")
 	popup.add_slider_row(
 		"Star density", 0.25, 2.0, 0.25, Session.star_density,
-		func(v: float) -> void: Session.star_density = v, "×%.2f"
+		func(v: float) -> void:
+			Session.star_density = v
+			Session.save_to_disk(),
+		"×%.2f"
+	)
+	popup.add_slider_row(
+		"Star size", 0.5, 3.0, 0.25, Session.star_size_mult,
+		func(v: float) -> void:
+			Session.star_size_mult = v
+			Session.save_to_disk(),
+		"×%.2f"
 	)
 	popup.add_slider_row(
 		"Distant rocks", 0.0, 2.0, 0.25, Session.asteroid_density,
-		func(v: float) -> void: Session.asteroid_density = v, "×%.2f"
+		func(v: float) -> void:
+			Session.asteroid_density = v
+			Session.save_to_disk(),
+		"×%.2f"
 	)
 	popup.add_check_row("Backdrop (corona, galaxy, dust)", Session.render_backdrop,
-		func(on: bool) -> void: Session.render_backdrop = on)
+		func(on: bool) -> void:
+			Session.render_backdrop = on
+			Session.save_to_disk())
 	popup.add_check_row("Enhanced lighting (shadows, rim)", Session.enhanced_lighting,
-		func(on: bool) -> void: Session.enhanced_lighting = on)
+		func(on: bool) -> void:
+			Session.enhanced_lighting = on
+			Session.save_to_disk())
+	popup.add_check_row("Cinematic sun lighting (Galaxy on Fire)", Session.cinematic_lighting,
+		func(_on: bool) -> void: _root.toggle_cinematic_lighting())
 	popup.add_separator()
 	popup.add_section("Star Style (live)")
 	var current_style = StyleManager.instance().current_profile
@@ -340,6 +419,7 @@ func _apply_feel_mult(damping: bool, mult: float) -> void:
 		Session.damping_mult = mult
 	else:
 		Session.assist_mult = mult
+	Session.save_to_disk()
 	if _root.model != null:
 		_root.model.set_control_mode(_root.model.control_mode)
 	show_hint("%s ×%.2f" % ["Damping" if damping else "Assist authority", mult])
@@ -388,6 +468,7 @@ func _profile_display() -> String:
 ## "×3" means nothing without knowing what it is three times.
 func _apply_arcade_pivot(mult: float) -> void:
 	Session.arcade_pivot = mult
+	Session.save_to_disk()
 	if _root.model == null:
 		return
 	_root.model.set_control_mode(_root.model.control_mode)
@@ -398,6 +479,7 @@ func _apply_arcade_pivot(mult: float) -> void:
 ## orbiting change speed the moment it flips.
 func _set_fast_orbits(on: bool) -> void:
 	Session.fast_orbits = on
+	Session.save_to_disk()
 	show_hint("Fast orbits: %s" % ("ON" if on else "OFF"))
 
 
@@ -406,6 +488,7 @@ func _set_fast_orbits(on: bool) -> void:
 ## stays the same circle — just taken sooner.
 func _set_orbit_speed(scale: float) -> void:
 	Session.orbit_speed_scale = maxf(scale, 1.0)
+	Session.save_to_disk()
 	show_hint("Orbit speed ×%.0f" % Session.orbit_speed_scale)
 
 
@@ -435,6 +518,238 @@ func _build_rear_view_display() -> void:
 	pass
 
 
+func _build_game_over_modal() -> void:
+	_game_over_modal = Control.new()
+	_game_over_modal.name = "GameOverModal"
+	_game_over_modal.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_game_over_modal.mouse_filter = Control.MOUSE_FILTER_STOP
+	_game_over_modal.visible = false
+
+	# Dark backdrop
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.02, 0.03, 0.06, 0.8)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_game_over_modal.add_child(bg)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_game_over_modal.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(460, 240)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("0d111a")
+	sb.border_color = Color("ff4d4d")
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(14)
+	sb.set_content_margin_all(24)
+	sb.shadow_color = Color(0.8, 0.1, 0.1, 0.35)
+	sb.shadow_size = 22
+	panel.add_theme_stylebox_override("panel", sb)
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "💥 SHIP DESTROYED 💥"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color("ff5252"))
+	vbox.add_child(title)
+
+	var sub := Label.new()
+	sub.text = "Hull integrity failed — vessel disintegrated into space."
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 14)
+	sub.add_theme_color_override("font_color", BuilderTheme.text_dim())
+	vbox.add_child(sub)
+
+	var hint := Label.new()
+	hint.text = "Press [R] or Space to Respawn • [B] for Ship Builder"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", BuilderTheme.warn())
+	vbox.add_child(hint)
+
+	var btn_box := HBoxContainer.new()
+	btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_box.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_box)
+
+	var b_respawn := Button.new()
+	b_respawn.text = "↺ RESPAWN (R)"
+	b_respawn.custom_minimum_size = Vector2(170, 48)
+	b_respawn.add_theme_font_size_override("font_size", 15)
+	var r_style := StyleBoxFlat.new()
+	r_style.bg_color = Color("1e6b45")
+	r_style.border_color = Color("46ff9b")
+	r_style.set_border_width_all(2)
+	r_style.set_corner_radius_all(8)
+	b_respawn.add_theme_stylebox_override("normal", r_style)
+	b_respawn.add_theme_color_override("font_color", Color.WHITE)
+	b_respawn.pressed.connect(func() -> void:
+		if _root != null:
+			_root.respawn_player_ship()
+	)
+	btn_box.add_child(b_respawn)
+
+	var b_hangar := Button.new()
+	b_hangar.text = "🛠 BUILDER (B)"
+	b_hangar.custom_minimum_size = Vector2(170, 48)
+	b_hangar.add_theme_font_size_override("font_size", 15)
+	var h_style := StyleBoxFlat.new()
+	h_style.bg_color = Color("232938")
+	h_style.border_color = Color("8899aa")
+	h_style.set_border_width_all(2)
+	h_style.set_corner_radius_all(8)
+	b_hangar.add_theme_stylebox_override("normal", h_style)
+	b_hangar.add_theme_color_override("font_color", Color.WHITE)
+	b_hangar.pressed.connect(func() -> void:
+		if _root != null:
+			_root.return_to_hangar()
+	)
+	btn_box.add_child(b_hangar)
+
+	add_child(_game_over_modal)
+
+
+func _build_radar() -> void:
+	_radar_display = RadarDisplay.new()
+	_radar_display.name = "RadarDisplay"
+	_radar_display.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_radar_display.target_selected.connect(func(target: Node3D) -> void:
+		if _root != null and target != null and is_instance_valid(target):
+			_root.locked_target = target
+			_root.facing_target = true
+			var t_name: String = target.preset_name if target is AiShip else target.name
+			show_hint("Target Locked: %s" % t_name)
+	)
+	add_child(_radar_display)
+
+
+func _build_combat_modal() -> void:
+	_combat_modal = CombatSettingsModal.new()
+	_combat_modal.name = "CombatSettingsModal"
+	_combat_modal.set_anchors_preset(Control.PRESET_CENTER)
+	_combat_modal.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_combat_modal.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_combat_modal.visible = false
+	_combat_modal.setting_changed.connect(_on_combat_setting_changed)
+	_combat_modal.action_triggered.connect(_on_combat_action_triggered)
+	add_child(_combat_modal)
+
+
+func toggle_combat_modal() -> void:
+	if _combat_modal == null:
+		return
+	_combat_modal.visible = not _combat_modal.visible
+	if _combat_modal.visible and _root != null:
+		_combat_modal.update_state(_root.locked_target != null, _root.facing_target, Session.ship_headlights)
+
+
+func _on_combat_setting_changed(setting_name: String, value: Variant) -> void:
+	if _root == null:
+		return
+	match setting_name:
+		"facing_target":
+			_root.facing_target = bool(value)
+			show_hint("Auto-Face Target: %s" % ("ON" if value else "OFF"))
+		"lead_reticle":
+			Session.hud_reticle = bool(value)
+			Session.save_to_disk()
+			show_hint("Predictive Lead Reticle: %s" % ("ON" if value else "OFF"))
+		"ship_headlights":
+			if Session.ship_headlights != bool(value):
+				_root.toggle_headlights()
+		"debris_glow":
+			Session.planet_debris_glow = bool(value)
+			Session.save_to_disk()
+			PlanetDebrisBuilder.set_debris_glow_enabled(bool(value), _root)
+			show_hint("Planet debris glow: %s" % ("ON" if value else "OFF (Max FPS)"))
+
+
+func _on_combat_action_triggered(action_name: String, params: Dictionary) -> void:
+	if _root == null:
+		return
+	match action_name:
+		"toggle_lock":
+			_root.toggle_lock()
+		"spawn_ai":
+			_spawn_quick(int(params.get("count", 1)))
+		"spawn_mother":
+			var ok := _root.spawn_mother_ship()
+			show_hint("Mother ship launched" if ok else "No room for a mother ship")
+		"clear_ai":
+			_kill_all_ai()
+		"shatter_planet":
+			_root.shatter_nearest_planet()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			if _radar_display != null and _radar_display.handle_click(mb.position):
+				get_viewport().set_input_as_handled()
+
+
+func show_game_over() -> void:
+	if _game_over_modal == null:
+		return
+	_game_over_modal.visible = true
+	_game_over_modal.modulate.a = 0.0
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(_game_over_modal, "modulate:a", 1.0, 0.35)
+
+
+func hide_game_over() -> void:
+	if _game_over_modal != null:
+		_game_over_modal.visible = false
+
+
+## Spawn a bouncy floating damage number or status pop (e.g. "-45", "-120 CRIT!", "DETACHED!")
+func spawn_damage_number(amount: int, is_hull: bool, is_crit: bool, world_pos := Vector3.ZERO, custom_text := "") -> void:
+	var text := ""
+	if custom_text != "":
+		text = custom_text
+	elif is_hull:
+		text = ("💥 -" if is_crit else "-") + str(amount)
+	else:
+		text = "-" + str(amount) + " SHIELD"
+
+	var screen_pos := size * 0.5 + Vector2(randf_range(-30, 30), randf_range(-20, 20))
+	if world_pos != Vector3.ZERO and _root != null:
+		var cam := _root.camera_node()
+		if cam != null and not cam.is_position_behind(world_pos):
+			screen_pos = cam.unproject_position(world_pos)
+			screen_pos += Vector2(randf_range(-25, 25), randf_range(-15, 15))
+
+	var col := Color("ffcc33")
+	if custom_text != "":
+		col = Color("ffb000")
+	elif not is_hull:
+		col = Color("00e5ff")
+	elif is_crit:
+		col = Color("ff4433")
+	else:
+		col = Color("ff8844")
+
+	_damage_numbers.append({
+		"text": text,
+		"pos": screen_pos,
+		"vel": Vector2(randf_range(-25, 25), randf_range(-65, -95)),
+		"color": col,
+		"life": 0.85,
+		"max_life": 0.85,
+		"is_crit": is_crit or custom_text != "",
+	})
+
+
 func _build_top_bar() -> void:
 	var bar := HBoxContainer.new()
 	bar.name = "TopBar"
@@ -443,6 +758,7 @@ func _build_top_bar() -> void:
 	bar.offset_right = -BuilderTheme.PAD
 	bar.offset_top = BuilderTheme.PAD
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.z_index = 10
 	add_child(bar)
 
 	# The icon toolbar, top-left: one button per menu category, each opening a
@@ -563,14 +879,21 @@ func toggle_mobile_view() -> void:
 
 func toggle_mesh_baking() -> void:
 	Session.mesh_baking_enabled = not Session.mesh_baking_enabled
+	Session.save_to_disk()
 	if _root != null and _root.view != null:
 		_root.view.enable_baked_mesh(Session.mesh_baking_enabled)
 	show_hint("Mesh Baking: %s" % ("ENABLED (consolidated draw calls)" if Session.mesh_baking_enabled else "OFF (individual parts)"))
 
 
+func toggle_wireframe_mode() -> void:
+	var on: bool = StyleManager.instance().toggle_wireframe()
+	show_hint("⚡ Vector Arcade (Wireframe): %s" % ("ON (Geometry Wars neon vector style)" if on else "OFF"))
+
+
 func update_mobile_view(enabled: bool) -> void:
 	if _mobile_chip != null:
 		_mobile_chip.text = "📱 Mobile" if enabled else "🖥 Desktop"
+	theme = FlightTheme.create_theme(size, enabled)
 	_layout_controls()
 
 
@@ -680,6 +1003,11 @@ func _build_palette_drawer() -> void:
 	bake_toggle_btn.text = "⚡ Bake Meshes & Collisions"
 	bake_toggle_btn.pressed.connect(toggle_mesh_baking)
 	toggles_box.add_child(bake_toggle_btn)
+
+	var wire_toggle_btn := Button.new()
+	wire_toggle_btn.text = "🌐 Vector Arcade (Wireframe) (F6)"
+	wire_toggle_btn.pressed.connect(toggle_wireframe_mode)
+	toggles_box.add_child(wire_toggle_btn)
 
 	main_vbox.add_child(toggles_box)
 	add_child(_palette_drawer)
@@ -836,6 +1164,20 @@ func _build_controls() -> void:
 	_boost_button.button_up.connect(func() -> void: _root.set_boosting(false))
 	add_child(_boost_button)
 
+	_weapon_button = Button.new()
+	_weapon_button.name = "WeaponButton"
+	_weapon_button.text = "[F] WEP"
+	_weapon_button.tooltip_text = "Switch Weapon (F)"
+	_weapon_button.focus_mode = Control.FOCUS_NONE
+	_weapon_button.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+	_weapon_button.add_theme_font_size_override("font_size", 11)
+	_weapon_button.add_theme_color_override("font_color", BuilderTheme.accent())
+	_weapon_button.pressed.connect(func() -> void:
+		if _root != null and _root.has_method("cycle_weapon"):
+			_root.cycle_weapon()
+	)
+	add_child(_weapon_button)
+
 	_layout_controls()
 	resized.connect(_layout_controls)
 
@@ -852,13 +1194,14 @@ func _hold_button(text: String, tooltip: String, tint: Color) -> Button:
 	return b
 
 
-## Positions the four thumb controls. Everything is anchored to a corner and
+## Positions the thumb controls. Everything is anchored to a corner and
 ## sized from the shorter screen edge, so the layout is identical in portrait,
 ## landscape and on a desktop window — only the gaps grow.
 func _layout_controls() -> void:
 	if _stick == null:
 		return
 	var is_mob := Session.mobile_view_fit
+	theme = FlightTheme.create_theme(size, is_mob)
 	var pad := float(BuilderTheme.PAD)
 	var short_edge := minf(size.x, size.y)
 	var stick_size := clampf(short_edge * 0.30, 110.0, 190.0) * (1.15 if is_mob else 1.0)
@@ -878,6 +1221,10 @@ func _layout_controls() -> void:
 	_boost_button.position = Vector2(stack_x, size.y - button_h - pad)
 	_fire_button.size = Vector2(button_w, button_h)
 	_fire_button.position = Vector2(stack_x, size.y - button_h * 2.0 - pad * 2.0)
+	if _weapon_button != null:
+		var wep_w := maxf(button_w, 120.0 if is_mob else 105.0)
+		_weapon_button.size = Vector2(wep_w, button_h)
+		_weapon_button.position = Vector2(stack_x, size.y - button_h * 3.0 - pad * 3.0)
 
 	var spd_w := 200.0 if is_mob else 160.0
 	_speed_label.size = Vector2(spd_w, 48 if is_mob else 40)
@@ -893,6 +1240,18 @@ func _layout_controls() -> void:
 
 	_damage_label.size = Vector2(260, 20)
 	_damage_label.position = Vector2(pad, size.y * 0.5 + 30)
+
+
+## Update active weapon badge on HUD with name and color indicator.
+func update_weapon_badge(weapon: Dictionary) -> void:
+	if _weapon_button == null:
+		return
+	var wname: String = weapon.get("name", "Pulse Laser")
+	var color: Color = weapon.get("color", BuilderTheme.text())
+	_weapon_button.text = "[F] " + wname
+	_weapon_button.tooltip_text = "Switch Weapon (F)\n%s" % weapon.get("desc", "")
+	_weapon_button.add_theme_color_override("font_color", color)
+
 
 
 # --- Menu popups --------------------------------------------------------------
@@ -943,6 +1302,11 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 		"Chase distance", 0.5, 2.0, 0.05, Session.camera_chase,
 		func(v: float) -> void: _root.set_camera_chase(v), "×%.2f"
 	)
+	popup.add_check_row(
+		"Hold camera on spin-out",
+		_root.ooc_camera_hold_on(),
+		func(_on: bool) -> void: _root.toggle_ooc_camera_hold()
+	)
 
 	# Render toggles.
 	popup.add_section("Render")
@@ -952,19 +1316,28 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_check_row("High contrast", BuilderTheme.high_contrast, func(_on: bool) -> void: _root.toggle_high_contrast())
 	popup.add_check_row("Test volume (restart)", not _root.location_is_space(), func(_on: bool) -> void: _root.toggle_location())
 	popup.add_check_row("Planet pointer (J)", _root.planet_pointer_on(), func(_on: bool) -> void: _root.toggle_planet_pointer())
+	popup.add_check_row("Cinematic sun lighting (Galaxy on Fire)", _root.cinematic_lighting_on(), func(_on: bool) -> void: _root.toggle_cinematic_lighting())
+
 
 	# Visual & Palette Style
 	popup.add_section("Visual & Palette Style")
 	popup.add_action_row("Open Palette Menu & Swatches (F10)", func() -> void: toggle_palette_menu())
 	popup.add_check_row("Mobile View Fit (closer framing, responsive)", Session.mobile_view_fit, func(on: bool) -> void: toggle_mobile_view())
 	popup.add_check_row("Cartoony & Rounded Style", StyleManager.instance().current_profile != null and StyleManager.instance().current_profile.id == "cartoony", func(_on: bool) -> void: toggle_art_style())
+	popup.add_check_row("Vector Arcade (Wireframe Neon) (F6)", StyleManager.instance().is_wireframe(), func(_on: bool) -> void: toggle_wireframe_mode())
 	popup.add_check_row("Bake Meshes (Draw call optimization)", Session.mesh_baking_enabled, func(_on: bool) -> void: toggle_mesh_baking())
 
 	# HUD clutter (persisted).
 	popup.add_section("HUD overlay")
-	popup.add_check_row("Reticle", Session.hud_reticle, func(on: bool) -> void: Session.hud_reticle = on)
-	popup.add_check_row("Markers & brackets", Session.hud_markers, func(on: bool) -> void: Session.hud_markers = on)
-	popup.add_check_row("Player indicator", Session.hud_indicators, func(on: bool) -> void: Session.hud_indicators = on)
+	popup.add_check_row("Reticle", Session.hud_reticle, func(on: bool) -> void:
+		Session.hud_reticle = on
+		Session.save_to_disk())
+	popup.add_check_row("Markers & brackets", Session.hud_markers, func(on: bool) -> void:
+		Session.hud_markers = on
+		Session.save_to_disk())
+	popup.add_check_row("Player indicator", Session.hud_indicators, func(on: bool) -> void:
+		Session.hud_indicators = on
+		Session.save_to_disk())
 
 
 func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
@@ -1063,11 +1436,18 @@ func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 
 	# Ship & scene actions.
 	popup.add_separator()
-	popup.add_check_row("Warp (X)", _root.model != null and _root.model.warp_active, func(on: bool) -> void:
+	popup.add_check_row("Warp (Z)", _root.model != null and _root.model.warp_active, func(on: bool) -> void:
 		if _root.model != null:
 			_root.model.warp_active = on
 			show_hint("Warp %s — 8× speed" % ("ON" if on else "OFF")))
 	popup.add_separator()
+	popup.add_check_row("Solar Glare (F7)", Session.glare_enabled, func(on: bool) -> void:
+		Session.glare_enabled = on
+		Session.save_to_disk()
+		if _root.space != null and _root.space.has_method("set_glare_enabled"):
+			_root.space.set_glare_enabled(on)
+			show_hint("Solar Glare: %s" % ("ON" if on else "OFF"))
+	)
 	popup.add_action_row("Rebuild ship in orbit (F4)", func() -> void: _root.respawn_player_ship())
 	popup.add_action_row("Return to start point (R)", func() -> void: _root.respawn())
 	popup.add_action_row("Restart scene (F5)", func() -> void: _root.restart_scene())
@@ -1075,12 +1455,25 @@ func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 
 func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Combat"
+	var sys := _root.active_systems()
+	if sys != null:
+		var wep_names: Array[String] = []
+		for w in SystemsSim.WEAPONS:
+			wep_names.append(w.name)
+		popup.add_option_row(
+			"Active weapon (F)", wep_names, sys.active_weapon_index,
+			func(idx: int) -> void:
+				_root.set_weapon_index(idx)
+		)
+		popup.add_separator()
 	popup.add_value_row("AI ships alive", str(_root.ai_live_count()))
 	popup.add_action_row(
 		"Lock nearest ship (T)" if _root.locked_target == null else "Release lock (T)",
 		func() -> void: _root.toggle_lock()
 	)
 	popup.add_check_row("Face locked target", _root.facing_target, func(on: bool) -> void: _root.facing_target = on)
+	popup.add_action_row("Tactical Headlights (L)", func() -> void: _root.toggle_headlights())
+	popup.add_action_row("Open Tactical Combat Panel", func() -> void: toggle_combat_modal())
 	popup.add_separator()
 	popup.add_action_row("Spawn 1 AI ship", func() -> void: _spawn_quick(1))
 	popup.add_action_row("Spawn 3 AI ships", func() -> void: _spawn_quick(3))
@@ -1135,6 +1528,25 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 		if _root.incident_director != null:
 			_root.incident_director.clear_all()
 			show_hint("All active incidents cleared"))
+
+	# Planetary destruction suite
+	popup.add_separator()
+	popup.add_section("Planetary destruction")
+	popup.add_slider_row(
+		"Break fineness", 0.5, 3.0, 0.25, Session.planet_break_fineness,
+		func(v: float) -> void:
+			Session.planet_break_fineness = v
+			show_hint("Planet break fineness: ×%.2f" % v),
+		"×%.2f"
+	)
+	popup.add_check_row(
+		"Radiant mantle glow", Session.planet_debris_glow,
+		func(on: bool) -> void:
+			PlanetDebrisBuilder.set_debris_glow_enabled(on, _root)
+			show_hint("Planet debris glow: %s" % ("ON" if on else "OFF (Max FPS)"))
+	)
+	popup.add_action_row("Fire heavy weapon (X)", func() -> void: _root._fire_heavy_weapon())
+	popup.add_action_row("💥 Shatter nearest planet (Shift+P)", func() -> void: _root.shatter_nearest_planet())
 
 
 func _trigger_incident(type_name: String) -> void:
@@ -1266,7 +1678,10 @@ func _fill_trails_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_section("Appearance")
 	var len_slider := popup.add_slider_row(
 		"Trail length", 0.5, 2.0, 0.1, Session.trail_length,
-		func(v: float) -> void: Session.trail_length = v, "×%.1f"
+		func(v: float) -> void:
+			Session.trail_length = v
+			Session.save_to_disk(),
+		"×%.1f"
 	)
 	# Trails read the length when built, so re-create the enabled ones on release.
 	len_slider.drag_ended.connect(func(_changed: bool) -> void: _root.refresh_trails())
@@ -1274,9 +1689,34 @@ func _fill_trails_popup(popup: FlightMenu.DraggablePopup) -> void:
 
 # --- Per-frame sync ---------------------------------------------------------
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _root == null or _root.model == null:
 		return
+
+	# Update floating damage numbers
+	var live_numbers: Array[Dictionary] = []
+	for dn in _damage_numbers:
+		dn["pos"] += dn["vel"] * delta
+		dn["vel"] *= (1.0 - 1.2 * delta)
+		dn["life"] -= delta
+		if dn["life"] > 0.0:
+			live_numbers.append(dn)
+	_damage_numbers = live_numbers
+
+	# Smooth ghost trails for health & shield bars
+	if _root != null:
+		var target_hp := clampf(_root.player_hp / maxf(_root.player_max_hp, 1.0), 0.0, 1.0)
+		if target_hp < _hp_ghost:
+			_hp_ghost = maxf(_hp_ghost - 0.45 * delta, target_hp)
+		else:
+			_hp_ghost = target_hp
+
+		var target_shield := clampf(_root.player_shield / maxf(_root.player_max_shield, 1.0), 0.0, 1.0)
+		if target_shield < _shield_ghost:
+			_shield_ghost = maxf(_shield_ghost - 0.65 * delta, target_shield)
+		else:
+			_shield_ghost = target_shield
+
 	# active_model() is the controlled AI ship when the player is piloting one.
 	var model := _root.active_model()
 	var speed := model.forward_speed()
@@ -1309,10 +1749,15 @@ func _process(_delta: float) -> void:
 			_assist_chip.text = "MANUAL"
 			_assist_chip.add_theme_color_override("font_color", BuilderTheme.warn())
 	_target_label.text = _root.target_line()
-	# Show damage status if any parts have been broken off.
+	# Show out of control warning or damage status if parts lost.
 	var dmg := _root.damage
-	if dmg != null and dmg.broken_count() > 0:
+	if model.out_of_control:
+		_damage_label.text = "⚠️ TUMBLING OUT OF CONTROL!"
+		_damage_label.add_theme_color_override("font_color", Color(1.0, 0.25, 0.15))
+		_damage_label.visible = true
+	elif dmg != null and dmg.broken_count() > 0:
 		_damage_label.text = "⚠ %d part(s) lost" % dmg.broken_count()
+		_damage_label.add_theme_color_override("font_color", BuilderTheme.warn())
 		_damage_label.visible = true
 	else:
 		_damage_label.visible = false
@@ -1344,6 +1789,24 @@ func _draw_instruments() -> void:
 	var centre := size * 0.5
 	if Session.hud_reticle:
 		_draw_reticle(centre)
+		if _root.locked_target != null and is_instance_valid(_root.locked_target):
+			var p_pos := camera.global_position
+			var p_vel := _root.model.velocity if _root.model != null else Vector3.ZERO
+			var t_node := _root.locked_target
+			var t_pos := t_node.global_position
+			var t_vel := Vector3.ZERO
+			if t_node is CharacterBody3D:
+				t_vel = (t_node as CharacterBody3D).velocity
+			elif t_node is RigidBody3D:
+				t_vel = (t_node as RigidBody3D).linear_velocity
+			elif t_node.get("velocity") != null:
+				t_vel = t_node.get("velocity")
+			var p_speed := 1100.0
+			var sys := _root.active_systems()
+			if sys != null and sys.has_method("get_active_weapon"):
+				var cur_wep: Dictionary = sys.get_active_weapon()
+				p_speed = float(cur_wep.get("speed", 1100.0))
+			TargetLeadReticle.draw_lead_reticle(_overlay, camera, p_pos, p_vel, t_pos, t_vel, p_speed, centre)
 	_draw_drift(camera, centre)
 	if Session.hud_markers:
 		_draw_markers(camera)
@@ -1354,6 +1817,7 @@ func _draw_instruments() -> void:
 		_draw_player_indicator(camera)
 		_draw_edge_indicators(camera, centre)
 		_draw_minimap(camera)
+	_draw_damage_numbers()
 
 
 ## The gunsight. An open cross rather than a dot: a dot vanishes against a bright
@@ -1499,13 +1963,73 @@ func _draw_ai_lock_brackets(camera: Camera3D) -> void:
 ## Capacitor and heat, as two short bars beneath the speed readout. They share the
 ## corner with the speed because they answer the same question — can I do the
 ## thing I am about to do.
+## Health, shield, capacitor and heat bars beneath the speed readout.
 func _draw_power_bars() -> void:
-	var w := 118.0
+	var w := 120.0
 	var h := 7.0
+	var gap := 11.0
 	var x := size.x - w - float(BuilderTheme.PAD)
-	var y := size.y * 0.5 - 16.0
-	_draw_bar(Rect2(x, y, w, h), _energy, BuilderTheme.accent(), "CAP")
-	_draw_bar(Rect2(x, y + h + 12.0, w, h), _heat, BuilderTheme.gauge_color(1.0 - _heat), "HEAT")
+	var y := size.y * 0.5 - 54.0
+
+	var hp_frac := 1.0
+	var shield_frac := 1.0
+	if _root != null:
+		hp_frac = clampf(_root.player_hp / maxf(_root.player_max_hp, 1.0), 0.0, 1.0)
+		shield_frac = clampf(_root.player_shield / maxf(_root.player_max_shield, 1.0), 0.0, 1.0)
+
+	# HULL with ghost lag
+	_draw_ghost_bar(Rect2(x, y, w, h), hp_frac, _hp_ghost, BuilderTheme.gauge_color(hp_frac), "HULL")
+	# SHIELD with ghost lag
+	_draw_ghost_bar(Rect2(x, y + gap + h, w, h), shield_frac, _shield_ghost, Color("00d4ff"), "SHIELD")
+	# CAP
+	_draw_bar(Rect2(x, y + (gap + h) * 2.0, w, h), _energy, BuilderTheme.accent(), "CAP")
+	# HEAT
+	_draw_bar(Rect2(x, y + (gap + h) * 3.0, w, h), _heat, BuilderTheme.gauge_color(1.0 - _heat), "HEAT")
+
+
+func _draw_ghost_bar(rect: Rect2, fraction: float, ghost: float, color: Color, label: String) -> void:
+	_overlay.draw_rect(rect, Color(BuilderTheme.bg_deep(), 0.65), true)
+	if ghost > fraction:
+		_overlay.draw_rect(
+			Rect2(rect.position, Vector2(rect.size.x * clampf(ghost, 0.0, 1.0), rect.size.y)),
+			Color(1.0, 0.8, 0.4, 0.55), true
+		)
+	_overlay.draw_rect(
+		Rect2(rect.position, Vector2(rect.size.x * clampf(fraction, 0.0, 1.0), rect.size.y)),
+		color, true
+	)
+	_overlay.draw_rect(rect, BuilderTheme.border(), false, 1.0)
+	_overlay.draw_string(
+		get_theme_default_font(), rect.position + Vector2(0.0, -3.0), label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, BuilderTheme.text_dim()
+	)
+
+
+func _draw_damage_numbers() -> void:
+	if _damage_numbers.is_empty():
+		return
+	var font := get_theme_default_font()
+	for dn in _damage_numbers:
+		var pos: Vector2 = dn["pos"]
+		var text: String = dn["text"]
+		var color: Color = dn["color"]
+		var life: float = dn["life"]
+		var max_life: float = dn["max_life"]
+		var is_crit: bool = dn["is_crit"]
+		var alpha := clampf(life / 0.35, 0.0, 1.0)
+		var pop := 1.0 + 0.3 * clampf(life / max_life, 0.0, 1.0)
+		var font_size := roundi((17 if is_crit else 13) * pop)
+
+		var draw_col := Color(color, alpha)
+		# Shadow for contrast against bright stars and planets
+		_overlay.draw_string(
+			font, pos + Vector2(1.5, 1.5), text,
+			HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, Color(0, 0, 0, alpha * 0.9)
+		)
+		_overlay.draw_string(
+			font, pos, text,
+			HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, draw_col
+		)
 
 
 func _draw_bar(rect: Rect2, fraction: float, color: Color, label: String) -> void:
@@ -1645,59 +2169,16 @@ func _draw_edge_indicators(camera: Camera3D, centre: Vector2) -> void:
 			col.a = clampf(1.0 - (dist / max_range), 0.2, 0.8)
 			_draw_indicator_arrow(edge_pos, arrow_dir.angle(), 8.0, col, Color.BLACK)
 
-func _draw_minimap(camera: Camera3D) -> void:
-	var player_ship = _root.active_ship_node()
+func _draw_minimap(_camera: Camera3D) -> void:
+	if _radar_display == null:
+		return
+	var player_ship: Node3D = _root.active_ship_node()
 	if player_ship == null:
 		return
-		
-	var r := 75.0
-	var centre := Vector2(size.x - r - 20.0, r + 70.0) # Down a bit from top-right to avoid menu
-	var max_range := 5000.0
-	
-	_overlay.draw_circle(centre, r, Color(0, 0, 0, 0.4))
-	_overlay.draw_arc(centre, r, 0.0, TAU, 32, BuilderTheme.text_dim(), 1.0, true)
-	
-	# Draw player
-	_overlay.draw_circle(centre, 3.0, BuilderTheme.text_strong_color())
-	
-	var player_pos: Vector3 = player_ship.global_position
-	# For minimap rotation, we want up to be player forward
-	var player_fwd: Vector3 = -player_ship.global_transform.basis.z
-	var player_right: Vector3 = player_ship.global_transform.basis.x
-	
-	# Draw AI ships
+
+	var r := _radar_display.radar_radius
+	var centre := Vector2(size.x - r - 20.0, r + 70.0)
+	var ai_list: Array = []
 	if _root._ai_spawner != null:
-		for ship in _root._ai_spawner._ships:
-			if not is_instance_valid(ship) or not ship._alive or ship == player_ship:
-				continue
-			var dist: float = player_pos.distance_to(ship.global_position)
-			if dist > max_range:
-				continue
-			
-			var offset_world = ship.global_position - player_pos
-			# Project to XZ plane relative to player
-			var dot_fwd = offset_world.dot(player_fwd)
-			var dot_right = offset_world.dot(player_right)
-			
-			var map_pos = centre + Vector2(dot_right, -dot_fwd) / max_range * r
-			if map_pos.distance_to(centre) <= r:
-				var col = BuilderTheme.good() if ship.team_id == 1 else BuilderTheme.warn()
-				_overlay.draw_circle(map_pos, 2.5, col)
-				
-	# Draw planets
-	for landmark in _root.landmarks():
-		var pos: Vector3 = landmark["position"]
-		var dist: float = player_pos.distance_to(pos)
-		var offset_world = pos - player_pos
-		var dot_fwd = offset_world.dot(player_fwd)
-		var dot_right = offset_world.dot(player_right)
-		var dir = Vector2(dot_right, -dot_fwd).normalized()
-		
-		var col: Color = landmark["color"]
-		if dist <= max_range:
-			var map_pos = centre + dir * (dist / max_range * r)
-			_overlay.draw_circle(map_pos, 4.0, col)
-		else:
-			# Draw on edge
-			var map_pos = centre + dir * r
-			_overlay.draw_arc(map_pos, 3.0, 0.0, TAU, 8, col, 1.5, true)
+		ai_list = _root._ai_spawner._ships
+	_radar_display.draw_radar(_overlay, player_ship, ai_list, _root.landmarks(), centre, _root.locked_target)

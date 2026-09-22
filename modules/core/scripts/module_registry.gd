@@ -59,6 +59,12 @@ const MODULES: Array[Dictionary] = [
 		"scene": "res://modules/large_craft_gen/large_craft_gen_lab.tscn",
 		"tagline": "Modular capital ships, carriers, stations, and docking pads.",
 	},
+	{
+		"id": "destruction_lab",
+		"name": "Destruction & Effects Lab",
+		"scene": "res://modules/destruction_lab/destruction_lab.tscn",
+		"tagline": "Explosion & destruction testbed — spawn targets, click & trigger blast waves, impacts, shatter.",
+	},
 ]
 
 

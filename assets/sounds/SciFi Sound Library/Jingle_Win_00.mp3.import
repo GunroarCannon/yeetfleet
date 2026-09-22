@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://va0g6crcqlo2"
+path="res://.godot/imported/Jingle_Win_00.mp3-025afdc52bdad188de0ef4559aeba4b4.mp3str"
+
+[deps]
+
+source_file="res://assets/sounds/SciFi Sound Library/Jingle_Win_00.mp3"
+dest_files=["res://.godot/imported/Jingle_Win_00.mp3-025afdc52bdad188de0ef4559aeba4b4.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

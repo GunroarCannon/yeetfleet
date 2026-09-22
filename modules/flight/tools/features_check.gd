@@ -2,7 +2,7 @@
 ## drift field (default on + disc + streaks), default assist, and the gravity-viz
 ## vertex-colour fix.
 ##
-##     godot --path . --rendering-driver opengl3 --script modules/flight/tools/features_check.gd
+##     godot --path . --headless --script modules/flight/tools/features_check.gd
 ##
 ## Stepped from _process, same pattern as flight_smoke.gd (which is the one the
 ## repo's SceneTree tools rely on; awaiting in _initialize proved fragile).
@@ -32,10 +32,12 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	_frames += 1
 	# The streak phase samples every frame to catch the stretch peak as the ship
-	# decelerates under assist, then advances once it has 15 samples.
+	# accelerates under manual mode, then advances once it has 15 samples.
 	if _phase == PH_STREAKS_CHECK:
 		_streak_max = maxf(_streak_max, _root._mote_stretch)
 		if _frames >= 15:
+			# Restore the assist so later checks see the default state.
+			_root.model.set_assist_mode(2)
 			_check_streaks()
 			_phase = PH_DONE
 		return false
@@ -58,7 +60,15 @@ func _process(_delta: float) -> bool:
 			# brakes the ship toward orbit speed and the stretch never ramps.
 			if _root.gravity != null:
 				_root.gravity.mode = GravitySystem.GravityMode.OFF
-			_root.model.velocity = Vector3(0.0, 0.0, -420.0)
+			# Manual mode: the throttle is a thrust lever and nothing slows you down.
+			# The fly-by-wire assist (mode 2) would brake toward zero throttle, so the
+			# speed has to be set in a mode that honours it.
+			_root.model.set_assist_mode(0)
+			_root.model.set_velocity(Vector3(0.0, 0.0, -420.0))
+			# Reset the streak tracker so the measurement starts fresh.
+			_root._mote_stretch = 0.0
+			_root._mote_stretch_written = 0.0
+			_root._mote_writing_streak = false
 			_streak_max = 0.0
 			_phase = PH_STREAKS_CHECK
 		PH_DONE:
@@ -79,12 +89,16 @@ func _check_baseline() -> void:
 
 	# Drift field is on by default and circular (a disc, not a cube).
 	_check(_root.drift_field_on(), "drift field was off at spawn")
-	var mm: MultiMesh = _root._motes.multimesh
+	# Read the CPU-side copy, not the GPU MultiMesh buffer: the headless dummy
+	# renderer returns zeros from [method MultiMesh.get_instance_transform], so
+	# a geometry check against it would always report "no thickness". The build
+	# writes the same array to both (see [method FlightRoot._build_drift_field]).
+	var positions := _root._mote_positions
 	var radius := 0.0
 	var max_y := 0.0
 	var min_r := INF
-	for i in mm.instance_count:
-		var p: Vector3 = mm.get_instance_transform(i).origin
+	for i in positions.size():
+		var p: Vector3 = positions[i]
 		var r := Vector2(p.x, p.z).length()
 		radius = maxf(radius, r)
 		min_r = minf(min_r, r)

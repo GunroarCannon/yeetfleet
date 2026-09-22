@@ -38,6 +38,12 @@ var current_palette: Palette
 # Signal for modules to listen to
 signal style_changed(new_profile: StyleProfile)
 signal palette_changed(new_palette: Palette)
+## Fires when the global toon override is flipped. Consumers read
+## [ToonOverride.enabled] rather than the argument, since the setting is owned
+## by [StyleSettings].
+signal toon_changed(enabled: bool)
+## Fires when wireframe mode is toggled.
+signal wireframe_changed(enabled: bool)
 
 func _init() -> void:
 	if _instance:
@@ -49,6 +55,7 @@ static func instance() -> StyleManager:
 	if not _instance:
 		# Auto-create on first access (lazy singleton)
 		_instance = StyleManager.new()
+		_instance.load_saved()
 	return _instance
 
 
@@ -58,12 +65,13 @@ static func instance() -> StyleManager:
 ## cache cleared and live ships re-assembled first, or a mesh built for the old
 ## look is reused under the new one — see [method requires_reload].
 func set_profile(profile: StyleProfile, persist := true) -> void:
-	if profile == null or profile == current_profile:
+	if profile == null:
 		return
+	var changed := profile != current_profile
 	current_profile = profile
 	if persist:
 		StyleSettings.set_profile_id(profile.id)
-	if requires_reload_of(profile):
+	if changed and requires_reload_of(profile):
 		_reload_geometry()
 	apply()
 
@@ -71,12 +79,38 @@ func set_profile(profile: StyleProfile, persist := true) -> void:
 ## Switch to [param palette] and push it everywhere. Purely a recolour — no mesh
 ## carries a palette colour, so nothing is rebuilt.
 func set_palette(palette: Palette, persist := true) -> void:
-	if palette == null or palette == current_palette:
+	if palette == null:
 		return
 	current_palette = palette
 	if persist:
 		StyleSettings.set_palette_id(palette.id)
 	apply()
+
+
+## Force toon shading on or off globally and push the change everywhere, the same
+## way a profile or palette change does. Stored on [StyleSettings] so it survives
+## a restart.
+func set_toon_shading(value: bool) -> void:
+	StyleSettings.set_toon_shading(value)
+	apply()
+	emit_signal("toon_changed", value)
+
+
+## True if wireframe mode is active either via StyleSettings toggle or profile.
+func is_wireframe() -> bool:
+	return StyleSettings.wireframe_mode or (current_profile != null and current_profile.wireframe)
+
+
+func set_wireframe(value: bool) -> void:
+	StyleSettings.set_wireframe_mode(value)
+	apply()
+	emit_signal("wireframe_changed", value)
+
+
+func toggle_wireframe() -> bool:
+	var next_val := not is_wireframe()
+	set_wireframe(next_val)
+	return next_val
 
 
 ## Switch to palette with id [param palette_id].
@@ -105,10 +139,14 @@ func toggle_art_style() -> StyleProfile:
 ## any scene builds its materials.
 func load_saved() -> void:
 	StyleSettings.load_from_disk()
-	if StyleSettings.profile_id != "":
-		var profile := find_profile(StyleSettings.profile_id)
-		if profile != null:
-			current_profile = profile
+	var target_id := StyleSettings.profile_id
+	if target_id == "":
+		target_id = "cartoony"
+	var profile := find_profile(target_id)
+	if profile != null:
+		current_profile = profile
+	if current_profile == null:
+		current_profile = find_profile("cartoony")
 	if StyleSettings.palette_id != "":
 		var palette := Palette.find_by_id(StyleSettings.palette_id)
 		if palette != null:
@@ -144,11 +182,13 @@ func _reload_geometry() -> void:
 # --- Applying ---------------------------------------------------------------
 
 func apply() -> void:
-	# Modules call this to get the current profile
-	if current_profile:
-		_push_to_planets(current_profile)
+	# Modules call this to get the current profile. Planets are pushed even with
+	# no profile, because the toon override and the palette do not need one.
+	_push_to_planets(current_profile)
 	emit_signal("style_changed", current_profile)
 	emit_signal("palette_changed", current_palette)
+	emit_signal("toon_changed", ToonOverride.enabled())
+	emit_signal("wireframe_changed", is_wireframe())
 
 
 ## Push the planet shading dials onto every live [Planet], mirroring
@@ -156,14 +196,22 @@ func apply() -> void:
 ## precedent this module was built to subsume (see class doc). Both dials are
 ## shading dials (apply live, no mesh reload), so a [method Planet.refresh_appearance]
 ## is enough.
+##
+## Also walks the palette and the toon override down to the worlds, which is what
+## makes "a palette change reaches every game element" true for planets as well
+## as hulls: [method Planet.apply_palette] remaps the authored colours onto the
+## palette's planet roles, and toon mode flattens the surface into bands.
 func _push_to_planets(style: StyleProfile) -> void:
 	var loop := Engine.get_main_loop()
 	if loop == null:
 		return
+	var toon := ToonOverride.enabled()
 	for node in loop.get_nodes_in_group("planets"):
 		if node is Planet and node.data != null:
-			node.data.detail_strength = style.planet_detail
-			node.data.band_count = lerpf(2.0, 20.0, style.planet_bands)
+			if style != null:
+				node.data.detail_strength = 0.0 if toon else style.planet_detail
+				node.data.band_count = 14.0 if toon else lerpf(2.0, 20.0, style.planet_bands)
+			node.apply_palette()
 			node.refresh_appearance()
 
 # Convenience for modules that want to check if a dial requires reload

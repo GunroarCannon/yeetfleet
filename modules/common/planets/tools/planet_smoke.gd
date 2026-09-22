@@ -28,6 +28,7 @@ func _initialize() -> void:
 	await _check_editor_terrain_slider()
 	_check_library_round_trip()
 	await _check_flight_scene_planet()
+	await _check_planet_palette_recolour()
 	_finish()
 
 
@@ -424,6 +425,61 @@ func _check_flight_scene_planet() -> void:
 	_check(body.data.planet_name == "Tarn IV", "flight scene planet is not Tarn IV")
 	_done("Flight scene renders saved planets")
 	scene.queue_free()
+	await process_frame
+
+
+## A palette switch has to reach the worlds, not just the hulls. A planet keeps a
+## snapshot of its authored colours, so this also checks that pushing a palette
+## twice restates the blend rather than compounding it.
+func _check_planet_palette_recolour() -> void:
+	var mgr := StyleManager.instance()
+	var saved := mgr.current_palette
+	var toon := Palette.find_by_id("toon")
+	if toon == null:
+		_check(false, "no palette with id 'toon' to recolour a planet against")
+		_done("Palette reaches planets")
+		return
+
+	var planet := Planet.new()
+	root.add_child(planet)
+	await process_frame
+	var d := PlanetData.new()
+	d.planet_radius = 3.0
+	d.sphere_resolution = 16
+	d.primary_color = Color(0.9, 0.1, 0.1)
+	d.secondary_color = Color(0.8, 0.2, 0.2)
+	d.water_color = Color(0.1, 0.1, 0.9)
+	var authored := d.primary_color
+
+	# No palette active: the authored colours must survive untouched, including
+	# through configure. This is what keeps an unconfigured game looking exactly
+	# as it did before palettes.
+	mgr.current_palette = null
+	planet.configure(d)
+	await planet.wait_for_build()
+	_check(
+		d.primary_color.is_equal_approx(authored),
+		"a planet was recoloured while no palette was active"
+	)
+
+	mgr.current_palette = toon
+	planet.apply_palette()
+	var once := d.primary_color
+	_check(not once.is_equal_approx(authored), "a palette switch did not recolour the planet")
+	_check(
+		Color(authored).lerp(Palette.color("planet_primary"), Planet.PALETTE_MIX).is_equal_approx(once),
+		"planet ground is not the documented authored-to-palette blend"
+	)
+	# Applying twice must land on the same colour, not blend from the last result.
+	planet.apply_palette()
+	_check(
+		d.primary_color.is_equal_approx(once),
+		"a second palette push compounded instead of restating the blend"
+	)
+	_done("Palette reaches planets")
+
+	mgr.current_palette = saved
+	planet.queue_free()
 	await process_frame
 
 

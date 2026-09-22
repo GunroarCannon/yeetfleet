@@ -2,46 +2,95 @@
   "_comment": "Faction colour sets. Applying one writes the three palette channels and the material preset, leaving per-part colour overrides untouched, so a faction repaint never destroys hand-picked detail colours.",
   "factions": [
     {
+      "id": "crimson_toybox",
+      "name": "Crimson Vanguard",
+      "desc": "Punchy racecar red with bright canary yellow armor plates and dark slate trim. Classic bold cartoon red faction.",
+      "palette": {"primary": "ff1c2e", "accent": "ffea00", "trim": "141822"},
+      "material": "gloss"
+    },
+    {
+      "id": "solar_raiders",
+      "name": "Solar Corsairs",
+      "desc": "Blazing hotrod orange with sunshine yellow panels and sleek gloss obsidian trim. Bold cartoon orange faction.",
+      "palette": {"primary": "ff5500", "accent": "ffd000", "trim": "1a1a24"},
+      "material": "gloss"
+    },
+    {
+      "id": "cobalt_vanguard",
+      "name": "Cobalt Federation",
+      "desc": "Heroic brilliant royal blue with safety orange wings and arctic white trim. Bold cartoon blue faction.",
+      "palette": {"primary": "0062ff", "accent": "ff7700", "trim": "f4f8ff"},
+      "material": "gloss"
+    },
+    {
+      "id": "emerald_warlords",
+      "name": "Emerald Syndicate",
+      "desc": "Vibrant cartoon lime-green with royal purple armor plates and gold trim. Bold cartoon green faction.",
+      "palette": {"primary": "00cf40", "accent": "7f00ff", "trim": "ffd500"},
+      "material": "gloss"
+    },
+    {
+      "id": "amethyst_void",
+      "name": "Amethyst Void",
+      "desc": "Deep royal electric purple with hot magenta flares and electric cyan edges. Bold cartoon purple faction.",
+      "palette": {"primary": "8e15f5", "accent": "ff1493", "trim": "00ffff"},
+      "material": "gloss"
+    },
+    {
+      "id": "cyber_teal",
+      "name": "Cyber Teal Enforcers",
+      "desc": "Fluorescent cyan-teal with hot coral pink striping and glossy midnight trim.",
+      "palette": {"primary": "00e5c8", "accent": "ff0066", "trim": "0f1420"},
+      "material": "gloss"
+    },
+    {
+      "id": "vega_industrial",
+      "name": "Vega Yellow Fleet",
+      "desc": "High-visibility bumblebee yellow with bold hazard black panels and safety orange highlights.",
+      "palette": {"primary": "ffbe00", "accent": "22242e", "trim": "ff5500"},
+      "material": "industrial"
+    },
+    {
+      "id": "neon_turbo",
+      "name": "Neon Turbo Racers",
+      "desc": "High-octane electric magenta with neon cyan and laser yellow trim. Flashy, vibrant, and impossible to miss.",
+      "palette": {"primary": "ff007f", "accent": "00f0ff", "trim": "ffff00"},
+      "material": "gloss"
+    },
+    {
       "id": "terran_coalition",
       "name": "Terran Coalition Navy",
-      "desc": "Institutional grey-blue with gold trim. Built in state yards, inspected twice, painted exactly to spec.",
-      "palette": {"primary": "3c4a5e", "accent": "d8a63c", "trim": "8e9aa8"},
+      "desc": "Deep royal navy blue with electric cyan accents and clean white hull plates.",
+      "palette": {"primary": "0d3268", "accent": "00e5ff", "trim": "e8edf8"},
       "material": "gloss"
     },
     {
       "id": "free_traders",
       "name": "Free Traders' Union",
-      "desc": "Cream hulls and union green. Cheerful, slightly shabby, and welcome at every independent dock in the sector.",
-      "palette": {"primary": "d8d4c4", "accent": "3f8f5c", "trim": "5a5f68"},
-      "material": "weathered"
+      "desc": "Warm golden amber with jade green flashes and slate structural trim.",
+      "palette": {"primary": "e59400", "accent": "00b866", "trim": "252830"},
+      "material": "gloss"
     },
     {
       "id": "crimson_reach",
-      "name": "Crimson Reach",
-      "desc": "Scavenged plate in oxide red with hazard orange flashes. Nothing matches; that is the point.",
-      "palette": {"primary": "6e2b26", "accent": "e07a2c", "trim": "2b2b2f"},
-      "material": "weathered"
-    },
-    {
-      "id": "vega_industrial",
-      "name": "Vega Industrial",
-      "desc": "Contractor yellow over bare structural grey. Every panel stencilled, every warning label present and legible.",
-      "palette": {"primary": "c9a227", "accent": "2f3338", "trim": "9aa3ab"},
-      "material": "industrial"
+      "name": "Crimson Outlaws",
+      "desc": "High-contrast vermilion red with hazard yellow stripes and soot black plates.",
+      "palette": {"primary": "ff1122", "accent": "ffbb00", "trim": "181820"},
+      "material": "gloss"
     },
     {
       "id": "kethral_compact",
       "name": "Kethral Compact",
-      "desc": "Deep violet shell with cyan channel lines. Non-human yards, non-human proportions, unmistakable at any range.",
-      "palette": {"primary": "3b2a56", "accent": "4fe0d0", "trim": "8f7fc0"},
+      "desc": "Deep alien violet shell with glowing turquoise channel lines and magenta trim.",
+      "palette": {"primary": "520099", "accent": "00ffee", "trim": "ff33aa"},
       "material": "gloss"
     },
     {
       "id": "unpainted",
-      "name": "Unpainted / Yard Fresh",
-      "desc": "Primer grey with a single safety stripe. What a hull looks like before anyone has decided who it belongs to.",
-      "palette": {"primary": "7d838c", "accent": "b8bdc4", "trim": "4a4f56"},
-      "material": "matte"
+      "name": "Arctic Interceptors",
+      "desc": "Crisp stormtrooper white hull with electric blue racing stripes and dark carbon trim.",
+      "palette": {"primary": "f0f4fa", "accent": "0088ff", "trim": "1c202a"},
+      "material": "gloss"
     }
   ]
 }

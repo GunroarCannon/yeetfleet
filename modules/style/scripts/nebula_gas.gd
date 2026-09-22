@@ -60,6 +60,7 @@ static func _make_quad(shader: Shader, palette: Dictionary, rng: RandomNumberGen
 	mat.set_shader_parameter("noise_scale", rng.randf_range(2.0, 5.0))
 	mat.set_shader_parameter("seed_offset", rng.randf_range(0.0, 100.0))
 	mat.set_shader_parameter("rotation", rng.randf_range(0.0, TAU))
+	mat.render_priority = -12
 	var inst := MeshInstance3D.new()
 	inst.mesh = mesh
 	inst.material_override = mat

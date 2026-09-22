@@ -20,7 +20,10 @@
 //
 // Still unshaded, and still one texture-free draw, for GL Compatibility.
 shader_type spatial;
-render_mode unshaded;
+render_mode unshaded, cull_disabled;
+
+// Vector Arcade wireframe mode
+uniform float wireframe_mode : hint_range(0.0, 1.0) = 0.0;
 
 uniform vec4 primary_color : source_color = vec4(0.3, 0.5, 0.8, 1.0);
 uniform vec4 secondary_color : source_color = vec4(0.7, 0.4, 0.2, 1.0);
@@ -44,6 +47,9 @@ uniform float ice_amount : hint_range(0.0, 1.0) = 0.5;
 uniform float relief : hint_range(0.0, 1.0) = 1.0;
 // World-space direction light arrives from. Set by [Planet] to match the scene.
 uniform vec3 sun_direction = vec3(0.42, 0.28, 0.86);
+// Optional offset for planetary crust debris fragments, mapping chunk vertices
+// back to their exact geographic location on the parent planet.
+uniform vec3 sphere_center_offset = vec3(0.0);
 
 // Model-space position, for latitude and longitude: the built-in VERTEX is in
 // view space by the time fragment() runs, which is the wrong frame for it.
@@ -89,10 +95,10 @@ float fbm(vec2 p) {
 }
 
 void vertex() {
-	v_local = VERTEX;
+	v_local = VERTEX + sphere_center_offset;
 	// Displacement runs along the outward direction, so normalising the model-space
 	// position recovers the sphere normal whatever the terrain did to it.
-	v_world_smooth = normalize((MODEL_MATRIX * vec4(normalize(VERTEX), 0.0)).xyz);
+	v_world_smooth = normalize((MODEL_MATRIX * vec4(normalize(v_local), 0.0)).xyz);
 }
 
 void fragment() {
@@ -225,4 +231,28 @@ void fragment() {
 	float spec = pow(max(dot(n, h), 0.0), 90.0) * gloss * step(0.001, ndotl);
 
 	ALBEDO = albedo * diffuse + vec3(spec);
+
+	if (wireframe_mode > 0.5) {
+		// Neon latitude and longitude vector grid rings for planets (Geometry Wars / Vector Arcade)
+		float lat_dist = abs(fract(lat * 18.0) - 0.5);
+		float lat_ring = 1.0 - smoothstep(0.0, fwidth(lat * 18.0) * 1.8 + 0.035, lat_dist);
+		float lon_dist = abs(fract(lon * 24.0) - 0.5);
+		float lon_ring = 1.0 - smoothstep(0.0, fwidth(lon * 24.0) * 1.8 + 0.035, lon_dist);
+		float rings = max(lat_ring, lon_ring);
+
+		float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
+		float limb = pow(1.0 - facing, 2.5);
+		float edge = max(rings * 1.4, limb * 1.1);
+
+		if (edge < 0.18) {
+			discard;
+		}
+
+		vec3 neon_planet = mix(primary_color.rgb, secondary_color.rgb, lat);
+		float max_c = max(neon_planet.r, max(neon_planet.g, neon_planet.b));
+		if (max_c > 0.01) {
+			neon_planet = neon_planet / max_c;
+		}
+		ALBEDO = neon_planet * (edge * 1.6);
+	}
 }

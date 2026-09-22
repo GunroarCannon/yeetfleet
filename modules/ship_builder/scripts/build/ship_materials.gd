@@ -105,7 +105,10 @@ static func apply_palette(mat: ShaderMaterial, design: ShipDesign, overrides: Di
 	var params := design.material_params()
 	mat.set_shader_parameter("roughness_amount", float(params.get("roughness", 0.88)))
 	mat.set_shader_parameter("metallic_amount", float(params.get("metallic", 0.0)))
-	mat.set_shader_parameter("specular_amount", float(params.get("specular", 0.2)))
+	var spec := float(params.get("specular", 0.2))
+	if Session.cinematic_lighting:
+		spec *= 1.35
+	mat.set_shader_parameter("specular_amount", spec)
 	mat.set_shader_parameter("weathering", float(params.get("weathering", 0.0)))
 	# The rim is silhouette definition, not a look. High contrast mode is allowed
 	# a brighter edge because separating parts from the background matters more
@@ -113,13 +116,15 @@ static func apply_palette(mat: ShaderMaterial, design: ShipDesign, overrides: Di
 	var rim := 0.34 if high_contrast else 0.16
 	if Session.enhanced_lighting:
 		rim += 0.25
+	if Session.cinematic_lighting:
+		rim += 0.35
 	mat.set_shader_parameter("rim_strength", rim)
 	# Occlusion and the self-lit floor are two halves of one decision. Crushing
 	# the down-facing plates to black against a black stage is what made the
 	# ships read as see-through, so the occlusion is gentler than it was and the
 	# floor guarantees the darkest facet still out-values the void behind it.
 	mat.set_shader_parameter("ao_strength", 0.24 if high_contrast else 0.32)
-	mat.set_shader_parameter("solidity", 0.45 if high_contrast else 0.42)
+	mat.set_shader_parameter("solidity", 0.80 if high_contrast else 0.72)
 	apply_style_dials(mat)
 
 
@@ -130,12 +135,21 @@ static func apply_palette(mat: ShaderMaterial, design: ShipDesign, overrides: Di
 static func apply_style_dials(mat: ShaderMaterial) -> void:
 	if mat == null:
 		return
+	# The global toon override is set first and independently of the profile: it
+	# has to survive a profile being absent, and it is the one flag that reaches
+	# every surface sharing this shader (hulls, asteroids, station shells).
+	mat.set_shader_parameter("toon_override", 1.0 if ToonOverride.enabled() else 0.0)
+	var is_wf: bool = StyleManager.instance().is_wireframe()
+	mat.set_shader_parameter("wireframe_mode", 1.0 if is_wf else 0.0)
+	if is_wf:
+		mat.set_shader_parameter("wireframe_color", Color(1.0, 0.88, 0.18, 1.0))
 	var style := StyleManager.instance().current_profile
 	if not style:
 		return
 	mat.set_shader_parameter("shading_bands", float(style.shading_bands))
 	mat.set_shader_parameter("spec_mult", style.spec_amount)
 	mat.set_shader_parameter("rim_mult", style.rim_amount)
+
 
 
 ## Attaches the ink-outline pass (see outline.gdshader) as [member Material.next_pass]
@@ -146,13 +160,15 @@ static func apply_outline(mat: ShaderMaterial) -> void:
 	if mat == null:
 		return
 	var style := StyleManager.instance().current_profile
-	if not style or style.outline_width <= 0.0:
+	var width := style.outline_width if style != null else 0.0
+	var col := style.outline_color if style != null else Color.BLACK
+	if width <= 0.0:
 		mat.next_pass = null
 		return
 	var outline := ShaderMaterial.new()
 	outline.shader = outline_shader()
-	outline.set_shader_parameter("outline_color", style.outline_color)
-	outline.set_shader_parameter("outline_width", style.outline_width)
+	outline.set_shader_parameter("outline_color", col)
+	outline.set_shader_parameter("outline_width", width)
 	mat.next_pass = outline
 
 

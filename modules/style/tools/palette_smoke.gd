@@ -89,23 +89,31 @@ func _test_default_palette_matches_defaults() -> void:
 func _test_switching_changes_colour() -> void:
 	var mgr := StyleManager.instance()
 	var saved := mgr.current_palette
+	var saved_id := StyleSettings.palette_id
 	var fired := {"count": 0}
 	mgr.palette_changed.connect(func(_p: Palette) -> void: fired["count"] += 1)
 
 	var before := Palette.color("hull_primary")
-	var toon := Palette.find_by_id("toon")
-	if toon == null:
-		_failures.append("no palette with id 'toon'")
+	# Reach for a palette that is genuinely different from the active one. The
+	# player may already have any palette selected, including this test's first
+	# choice — and switching to the palette you are already on changes nothing,
+	# which would read as a failure of the code rather than of the fixture.
+	var target := Palette.find_by_id("toon")
+	if target == null or target == mgr.current_palette:
+		target = Palette.find_by_id("mono")
+	if target == null:
+		_failures.append("no palette to switch to")
 	else:
 		# persist = false: this test must not overwrite the player's real setting.
-		mgr.set_palette(toon, false)
+		mgr.set_palette(target, false)
 		if fired["count"] == 0:
 			_failures.append("set_palette did not emit palette_changed")
 		if Palette.color("hull_primary").is_equal_approx(before):
-			_failures.append("switching to 'toon' did not change hull_primary")
-		if StyleSettings.palette_id == "toon":
-			_failures.append("set_palette(persist=false) still wrote the saved id")
-		# A role the toon palette inherits from nothing must still resolve.
+			_failures.append("switching to '%s' did not change hull_primary" % target.id)
+		# persist=false must leave the saved id exactly as it was.
+		if StyleSettings.palette_id != saved_id:
+			_failures.append("set_palette(persist=false) wrote the saved id")
+		# A role the target palette inherits from nothing must still resolve.
 		if Palette.color("ui_text").a <= 0.0:
 			_failures.append("an inherited UI role came back fully transparent")
 

@@ -22,6 +22,7 @@ func _initialize() -> void:
 		lab.generator.archetype = arch_idx as LargeCraftGenerator.Archetype
 		lab.generator.generate()
 		lab._sync_archetype_option()
+		lab._frame_camera_to_craft()
 	if args.size() >= 6 and String(args[5]) != "":
 		StyleManager.instance().set_palette_by_id(String(args[5]))
 		lab.generator.refresh_materials()

@@ -49,6 +49,18 @@ func _orbit_angle() -> float:
 
 func _process(_delta: float) -> bool:
 	_frames += 1
+	# Orbit mechanics need gravity that actually pulls, and the first frame is the
+	# first moment the system exists to be asked: the scene's own _ready, which
+	# sets pull from Session, has not run yet while _initialize does.
+	#
+	# The game ships with pull off ("orbit only": bodies keep their own orbits and
+	# nothing falls in), and the orbital assist deliberately stands down in that
+	# mode — with no radial force there is no rail to hold and catching a ship onto
+	# one would only drift it outward. This check is about the rail, so it turns
+	# pull on for the run, exactly as a player does from the Gravity menu.
+	if _frames == 1:
+		_root.gravity.pull_enabled = true
+		Session.gravity_pull = true
 	var d := _root.model.global_position.distance_to(SpaceScene.PLANET_CENTRE)
 	var moon := _root.space.get_node_or_null("Planet/Moon") as Node3D
 	match _phase:

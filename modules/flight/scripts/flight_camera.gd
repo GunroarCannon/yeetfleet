@@ -174,6 +174,12 @@ var _snap := true
 ## it false; [method recentre] restores it.
 var _free_follow := true
 
+## When true, the chase (and cockpit) cameras freeze their smoothed position/aim
+## while the ship is [member FlightModel.out_of_control], letting the hull tumble
+## away from frame until the player regains control — a dramatic "watch it spin"
+## beat. When false (the default) the camera follows normally throughout the OOC.
+var ooc_camera_hold := false
+
 
 func _ready() -> void:
 	camera = Camera3D.new()
@@ -387,6 +393,16 @@ func _update_chase(delta: float) -> void:
 	if model != null and model.top_speed > 0.0:
 		speed_fraction = clampf(absf(model.forward_speed()) / model.top_speed, 0.0, 1.0)
 
+	# ── OOC camera hold ──────────────────────────────────────────────────────
+	# When the player opts into this mode, freeze the camera while the ship is
+	# tumbling out of control. The hull drifts away from frame; the snap flag
+	# is set here so re-acquisition is instant once control returns.
+	if ooc_camera_hold and model != null and model.out_of_control:
+		_snap = true   # queue a re-lock for the next in-control frame
+		_apply_head(deg_to_rad(look_yaw), deg_to_rad(look_pitch))
+		return
+	# ─────────────────────────────────────────────────────────────────────────
+
 	_update_bank_and_lag(delta)
 	# Eased on the way in, snapped forward on release — boost is a decision, and
 	# the release should read as instant, not as another thing settling.
@@ -444,6 +460,7 @@ func _update_chase(delta: float) -> void:
 
 	_apply_head(deg_to_rad(look_yaw), deg_to_rad(look_pitch))
 	_relax_freelook(delta)
+
 
 
 ## Bank into a sustained turn and let the view trail hard pitch, both eased

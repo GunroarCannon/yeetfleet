@@ -56,10 +56,15 @@ var _fire_timer := 0.0
 var player_ref: Node3D = null
 
 ## Team and aggression, used by the AI test arena. team_id 0 = None/neutral.
-var team_id := 0
+var team_id := 0:
+	set(val):
+		team_id = val
+		_apply_team_faction(val)
+
 ## Teams this ship attacks. Empty = no team warfare configured (the pre-arena
 ## behaviour, where aggressive ships just hunt the player).
 var aggressive_to: Array[int] = []
+
 ## Reference to the [AiSpawner], so the ship can enumerate other live ships and
 ## pick the nearest enemy to engage.
 var spawner_ref: Node = null
@@ -95,6 +100,10 @@ func _init() -> void:
 	# Hashed with the instance ID so every ship gets a different stream without
 	# calling randomize(), which would break determinism.
 	_rng.seed = hash(Session.seed ^ get_instance_id())
+
+
+func _ready() -> void:
+	add_to_group("ai_ships")
 
 
 ## Build this ship from a random preset. Called once after [method add_child]
@@ -162,13 +171,16 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 
 	# Create and initialise the behaviour.
 	behaviour = AiBehaviour.new()
+	behaviour.ship_node_ref = self
+	behaviour.asteroid_data_ref = _get_asteroid_data()
 	behaviour.initialise(spawn_xform.origin)
 	# Gravity will be set later by set_gravity() if available.
 
 	# Set up collision: the AI ship bounces off planets/asteroids the same way
 	# the player's ship does, via FlightModel._check_collision().
 	if _view.resolution.stats.get_stat("sensor_range") > 0.0:
-		model._asteroid_data = _get_asteroid_data()
+		model._asteroid_data = behaviour.asteroid_data_ref
+
 
 
 ## Set the gravity system for this ship. Called by [AiSpawner] after spawning.
@@ -251,7 +263,7 @@ func set_group_context(
 ## same as the player's ship. This method only drives the command and fires
 ## weapons — it does not duplicate the physics pipeline.
 func tick_ai(delta: float) -> void:
-	if not _alive or model == null or behaviour == null:
+	if not _alive or model == null or behaviour == null or not is_inside_tree() or not model.is_inside_tree():
 		return
 
 	# Update detection — pick the nearest enemy (a ship on an aggressive team, or
@@ -263,7 +275,7 @@ func tick_ai(delta: float) -> void:
 		systems.target_ref = target
 	var target_pos := Vector3.ZERO
 	var target_visible := false
-	if target != null:
+	if target != null and is_instance_valid(target) and target.is_inside_tree():
 		target_pos = target.global_position
 		target_visible = global_position.distance_to(target_pos) < AiBehaviour.DETECTION_RANGE
 
@@ -337,19 +349,21 @@ func marker_height(margin: float) -> float:
 
 
 func _find_enemy() -> Node3D:
+	if not is_inside_tree():
+		return null
 	var best: Node3D = null
 	var best_d := INF
 	if spawner_ref != null and is_instance_valid(spawner_ref):
 		var ships: Array = spawner_ref._ships
 		for other in ships:
-			if not is_instance_valid(other) or not other._alive or other == self:
+			if not is_instance_valid(other) or not other._alive or other == self or not other.is_inside_tree():
 				continue
 			if other.team_id != 0 and aggressive_to.has(other.team_id):
 				var d := global_position.distance_squared_to(other.global_position)
 				if d < best_d:
 					best_d = d
 					best = other
-	if player_ref != null and is_instance_valid(player_ref):
+	if player_ref != null and is_instance_valid(player_ref) and player_ref.is_inside_tree():
 		var player_team_id: int = int(player_ref.get_meta("team", 0))
 		if aggressive_to.is_empty() or (player_team_id != 0 and aggressive_to.has(player_team_id)):
 			var d := global_position.distance_squared_to(player_ref.global_position)
@@ -363,7 +377,7 @@ func _update_combat(delta: float, target: Node3D) -> void:
 		systems.set_firing(false)
 		locked_enemy = null
 		return
-	if target == null:
+	if target == null or not is_instance_valid(target) or not target.is_inside_tree():
 		systems.set_firing(false)
 		locked_enemy = null
 		_fire_timer = 0.0
@@ -377,6 +391,17 @@ func _update_combat(delta: float, target: Node3D) -> void:
 	# Roughly aligned (the enemy is ahead) as well as in range.
 	var ahead := (-global_transform.basis.z).dot(to_target.normalized())
 	var should_fire := dist < WEAPON_RANGE and ahead > 0.2
+	# Evasive break countermeasure deployment (defensive flak & chaff)
+	if behaviour != null and behaviour.state == AiBehaviour.State.EVASIVE_BREAK:
+		if _fire_timer <= 0.0:
+			_fire_timer = 0.55
+			var audio := SpaceAudio.instance()
+			var flak_pos := global_position - global_transform.basis.z * 10.0
+			if audio != null:
+				audio.play_flak_detonation(flak_pos)
+			Juice.burst(BurstPresets.Preset.VAPOUR, Transform3D(global_transform.basis, flak_pos), 2.0, Color(0.55, 0.55, 0.6, 0.65))
+			Juice.burst(BurstPresets.Preset.SPARKS, Transform3D(global_transform.basis, flak_pos), 1.5, Color(1.0, 0.65, 0.2))
+
 	if should_fire:
 		if _fire_timer <= 0.0:
 			systems.set_firing(true)
@@ -388,12 +413,18 @@ func _update_combat(delta: float, target: Node3D) -> void:
 		_fire_timer = maxf(_fire_timer - delta, 0.0)
 
 
+
 func _apply_combat_damage(target: Node3D, delta: float) -> void:
+	var dmg := WEAPON_DPS * delta
 	if target is AiShip:
-		(target as AiShip).take_damage(WEAPON_DPS * delta)
-	else:
-		# The player: no HP system, so a hit flash so getting shot is legible.
-		Juice.flash(Color("ff6644"), 0.06, 0.1)
+		(target as AiShip).take_damage(dmg)
+	elif target != null:
+		if target.has_method("take_damage"):
+			target.take_damage(dmg, global_position)
+		elif target.get_parent() != null and target.get_parent().has_method("take_damage"):
+			target.get_parent().take_damage(dmg, global_position)
+		else:
+			Juice.flash(Color("ff6644"), 0.06, 0.1)
 
 
 ## Apply damage to this ship. Called by [FlightModel] when it hits something
@@ -402,8 +433,68 @@ func take_damage(amount: float) -> void:
 	if not _alive:
 		return
 	hp -= amount
+
+	# Floating damage number
+	var root := get_parent()
+	if root != null:
+		if root.has_method("spawn_damage_number"):
+			root.spawn_damage_number(roundi(amount), true, amount > 35.0, global_position)
+		elif root.get_node_or_null("HUD") != null and root.get_node_or_null("HUD").has_method("spawn_damage_number"):
+			root.get_node_or_null("HUD").spawn_damage_number(roundi(amount), true, amount > 35.0, global_position)
+
+	# When heavily damaged, chance to lose an outer part
+	if hp < max_hp * 0.45 and _rng.randf() < 0.25:
+		break_random_part()
+
 	if hp <= 0.0:
 		_destroy()
+
+
+## Detach a random part and fling it into space as debris.
+func break_random_part() -> void:
+	if _view == null or _view.part_nodes.is_empty():
+		return
+	var candidate_paths: Array = []
+	for path in _view.part_nodes.keys():
+		if path == "" or path == "chassis":
+			continue
+		candidate_paths.append(path)
+	if candidate_paths.is_empty():
+		return
+	var chosen_path: String = candidate_paths[_rng.randi() % candidate_paths.size()]
+	var node: Node3D = _view.part_nodes.get(chosen_path)
+	if node != null and is_instance_valid(node):
+		var orig_xform := node.global_transform
+		if node.get_parent() != null:
+			node.get_parent().remove_child(node)
+		var world_parent := get_parent()
+		if world_parent != null:
+			world_parent.add_child(node)
+		node.global_transform = orig_xform
+		for child in node.get_children():
+			if child is Area3D:
+				child.collision_layer = 0
+				child.collision_mask = 0
+
+		var out_dir := (orig_xform.origin - global_position).normalized()
+		if out_dir.length_squared() < 0.01:
+			out_dir = Vector3(_rng.randf() - 0.5, _rng.randf() - 0.5, _rng.randf() - 0.5).normalized()
+		var speed := _rng.randf_range(14.0, 32.0)
+		var drift_vel := out_dir * speed + (model.velocity * 0.3 if model != null else Vector3.ZERO)
+
+		if world_parent != null and world_parent.has_method("register_debris"):
+			world_parent.register_debris(node, drift_vel)
+		else:
+			var tw := create_tween()
+			tw.tween_property(node, "scale", Vector3.ZERO, 5.0)
+			tw.tween_callback(node.queue_free)
+
+		_view.part_nodes.erase(chosen_path)
+		_view.part_meshes.erase(chosen_path)
+		_view.part_materials.erase(chosen_path)
+
+		Juice.burst(BurstPresets.Preset.SPARKS, orig_xform, 1.2, Color("ff9933"))
+		Juice.light_pop(orig_xform.origin, Color("ffaa44"), 4.0, 0.12)
 
 
 func _destroy() -> void:
@@ -418,15 +509,54 @@ func _destroy() -> void:
 	if model != null:
 		model.clear_phys_world()
 
-	# Explosion juice: the full stack.
-	Juice.burst(BurstPresets.Preset.SPARKS, global_transform, 2.0, Color("ff8844"))
-	Juice.burst(BurstPresets.Preset.EMBERS, global_transform, 1.5)
-	Juice.burst(BurstPresets.Preset.DEBRIS, global_transform, 1.0)
-	Juice.light_pop(global_position, Color("ffcc66"), 8.0, 0.25)
-	Juice.ring(global_transform, 3.0, Color("ffaa44"), 0.5)
-	Juice.shake(0.5)
-	Juice.flash(Color("ff8844"), 0.4, 0.3)
-	Juice.hitstop(0.04, 0.2)
+	# Scatter all remaining parts into tumbling debris
+	if _view != null and not _view.part_nodes.is_empty():
+		var world_parent := get_parent()
+		for path in _view.part_nodes.keys():
+			var node: Node3D = _view.part_nodes.get(path)
+			if node != null and is_instance_valid(node):
+				var orig_xform := node.global_transform
+				if node.get_parent() != null:
+					node.get_parent().remove_child(node)
+				if world_parent != null:
+					world_parent.add_child(node)
+				node.global_transform = orig_xform
+				for child in node.get_children():
+					if child is Area3D:
+						child.collision_layer = 0
+						child.collision_mask = 0
+				var out_dir := (orig_xform.origin - global_position).normalized()
+				if out_dir.length_squared() < 0.01:
+					out_dir = Vector3(_rng.randf() - 0.5, _rng.randf() - 0.5, _rng.randf() - 0.5).normalized()
+				var speed := _rng.randf_range(20.0, 52.0)
+				var drift_vel := out_dir * speed + (model.velocity * 0.4 if model != null else Vector3.ZERO)
+				if world_parent != null and world_parent.has_method("register_debris"):
+					world_parent.register_debris(node, drift_vel, _rng.randf_range(3.0, 8.0))
+				else:
+					var tw := create_tween()
+					tw.tween_property(node, "scale", Vector3.ZERO, 6.0)
+					tw.tween_callback(node.queue_free)
+		_view.part_nodes.clear()
+		_view.part_meshes.clear()
+		_view.part_materials.clear()
+
+	# Explosion juice: the full stack, with BinbunVFX addon explosion layer.
+	if is_inside_tree():
+		var my_pos := global_position
+		var my_xform := global_transform
+		var world_host: Node = get_parent()
+		if world_host != null and world_host.is_inside_tree():
+			AddonVfx.explosion(world_host, my_pos, 2.5, true, Color("ff8844"))
+		Juice.burst(BurstPresets.Preset.RING_SPARK, my_xform, 2.5, Color("ffaa44"))
+		Juice.burst(BurstPresets.Preset.SPARKS, my_xform, 2.5, Color("ff8844"))
+		Juice.burst(BurstPresets.Preset.EMBERS, my_xform, 1.8)
+		Juice.burst(BurstPresets.Preset.DEBRIS, my_xform, 1.5)
+		Juice.burst(BurstPresets.Preset.VAPOUR, my_xform, 2.0)
+		Juice.light_pop(my_pos, Color("ffcc66"), 12.0, 0.3)
+		Juice.ring(my_xform, 4.0, Color("ffaa44"), 0.5)
+		Juice.shake(0.5)
+		Juice.flash(Color("ff8844"), 0.4, 0.3)
+		Juice.hitstop(0.04, 0.2)
 
 	destroyed.emit(self)
 
@@ -436,7 +566,7 @@ func _destroy() -> void:
 ## those same values for plume visuals. This mirrors what FlightRoot._physics_process
 ## does for the player's ship.
 func _physics_process(_delta: float) -> void:
-	if model == null or systems == null:
+	if model == null or systems == null or not is_inside_tree() or not model.is_inside_tree():
 		return
 	systems.set_throttle(clampf(absf(model.command.throttle), 0.0, 1.0))
 	systems.set_boost(model.command.boost)
@@ -447,6 +577,25 @@ func _physics_process(_delta: float) -> void:
 
 
 ## Build a completely random ship design: random chassis, random parts in
+func _apply_team_faction(t: int) -> void:
+	if _library == null or _design == null:
+		return
+	var fid := ""
+	match t:
+		1: fid = "cobalt_vanguard"   # Blue
+		2: fid = "crimson_toybox"    # Red
+		3: fid = "amethyst_void"     # Purple
+		4: fid = "solar_raiders"     # Orange
+		5: fid = "emerald_warlords"  # Green
+		_: fid = ""
+	if fid != "":
+		_library.apply_faction(_design, fid)
+		faction_name = fid
+		if _view != null:
+			_view.restyle(false)
+
+
+## Build a completely random design for an AI ship: random chassis, parts for
 ## every socket, random faction paint. Every AI ship is unique.
 func _build_random_design(library: PartLibrary) -> ShipDesign:
 	# Pick a random chassis.
@@ -456,13 +605,41 @@ func _build_random_design(library: PartLibrary) -> ShipDesign:
 		return null
 	var chassis: ShipPart = chassis_list[randi() % chassis_list.size()]
 	var design := ShipDesign.create(chassis.id)
-	var faction_names: Array[String] = []
-	for f: Dictionary in library.factions:
-		faction_names.append(String(f.get("id", "")))
-	# Apply a random faction paint.
-	if not faction_names.is_empty():
-		var fid: String = faction_names[randi() % faction_names.size()]
-		library.apply_faction(design, fid)
+
+	# Cartoon factions: basic bold colors (Red, Orange, Blue, Green, Purple, Teal, Yellow)
+	var cartoon_factions: Array[String] = [
+		"crimson_toybox",   # Bold Red
+		"solar_raiders",    # Bold Orange
+		"cobalt_vanguard",  # Bold Blue
+		"emerald_warlords", # Bold Green
+		"amethyst_void",    # Bold Purple
+		"cyber_teal",       # Bold Teal
+		"vega_industrial",  # Bold Yellow
+		"neon_turbo"        # Hot Magenta
+	]
+	var fid := ""
+	match team_id:
+		1: fid = "cobalt_vanguard"
+		2: fid = "crimson_toybox"
+		3: fid = "amethyst_void"
+		4: fid = "solar_raiders"
+		5: fid = "emerald_warlords"
+		_:
+			fid = cartoon_factions[randi() % cartoon_factions.size()]
+
+	library.apply_faction(design, fid)
+
+	# 50% chance for extra saturated cartoon toy pops on primary/accent/trim
+	if randf() < 0.50:
+		var hue := randf()
+		var primary_col := Color.from_hsv(hue, randf_range(0.85, 1.0), randf_range(0.90, 1.0))
+		var accent_col := Color.from_hsv(fmod(hue + randf_range(0.25, 0.45), 1.0), randf_range(0.88, 1.0), 1.0)
+		var trim_col := Color.from_hsv(fmod(hue + 0.65, 1.0), randf_range(0.80, 0.95), randf_range(0.90, 1.0))
+		design.set_color("primary", primary_col)
+		design.set_color("accent", accent_col)
+		design.set_color("trim", trim_col)
+		design.material_preset = "gloss"
+
 	# Fill every socket with a random compatible part. Required sockets
 	# always get filled; optional sockets have a 50% chance.
 	for _pass in 6:
@@ -490,10 +667,15 @@ func _build_random_design(library: PartLibrary) -> ShipDesign:
 	return design
 
 
+
 ## Clean up and free this ship's resources.
 func teardown() -> void:
 	_alive = false
+	set_physics_process(false)
+	set_process(false)
 	if model != null:
+		model.set_physics_process(false)
+		model.set_process(false)
 		model.clear_phys_world()
 	if systems != null:
 		systems.stop_all()

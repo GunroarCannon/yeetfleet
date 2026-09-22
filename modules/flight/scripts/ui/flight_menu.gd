@@ -26,7 +26,7 @@ var _open_id := -1
 
 func _ready() -> void:
 	add_theme_constant_override("separation", BuilderTheme.GAP)
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
 ## Attach the HUD the popups are created under (they float over the instruments).
@@ -92,6 +92,9 @@ func _open(id: int) -> void:
 	if _backdrop != null:
 		_backdrop.visible = true
 		_backdrop.move_to_front()
+	var top_bar := _hud.get_node_or_null("TopBar") as Control
+	if top_bar != null:
+		top_bar.move_to_front()
 	_open_id = id
 	# Fill the content, show a first pass, then re-measure and re-place on the
 	# next frame — row minimums are not reliable until a layout pass has run, and

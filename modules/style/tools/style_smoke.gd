@@ -136,15 +136,15 @@ func _test_mesh_rounding_geometry() -> void:
 	var base_verts: PackedVector3Array = base_arrays[Mesh.ARRAY_VERTEX]
 	var base_normals: PackedVector3Array = base_arrays[Mesh.ARRAY_NORMAL]
 
-	# roundness: reorients normals toward the smoothed average, leaves verts alone.
+	# roundness: rounds vertices toward a smooth profile and reorients normals.
 	var mr_round := MeshRounding.new()
 	mr_round.roundness = 1.0
 	var rounded := mr_round.apply(base_mesh)
 	var r_arrays: Array = rounded.surface_get_arrays(0)
 	var r_verts: PackedVector3Array = r_arrays[Mesh.ARRAY_VERTEX]
 	var r_normals: PackedVector3Array = r_arrays[Mesh.ARRAY_NORMAL]
-	if r_verts != base_verts:
-		_failures.append("roundness moved vertices (should only reorient normals)")
+	if r_verts == base_verts:
+		_failures.append("roundness=1.0 did not move any vertices to round the mesh")
 	var normals_changed := false
 	for i in r_normals.size():
 		if not r_normals[i].is_equal_approx(base_normals[i]):

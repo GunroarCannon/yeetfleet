@@ -41,6 +41,8 @@ enum EffectType {
 	BOOST_LOST,
 	## Energy generation halved (lost a radiator or reactor part).
 	POWER_CUT,
+	## Weapon hardpoint or turret broken off.
+	WEAPON_LOST,
 	## The ship's mass drops slightly (lost a heavy piece), making it more
 	## manoeuvrable but also more fragile-looking.
 	MASS_REDUCTION,
@@ -163,19 +165,100 @@ func _break_off(placement: Placement, speed_fraction: float) -> void:
 	broken.drift_dir = -_model.global_transform.basis.z
 	broken.drift_speed = _model.velocity.length() * 0.3 + randf_range(5.0, 20.0)
 
-	# Remove the node visually. Node names are sanitised by the assembler
-	# ("/" -> "__"), so we must match that.
-	if _hull_holder != null:
+	# Remove the node visually by finding it in _view.part_nodes or _hull_holder.
+	var node: Node3D = null
+	if _view != null and _view.part_nodes.has(path):
+		node = _view.part_nodes[path] as Node3D
+	elif _hull_holder != null:
 		var safe_name := "chassis" if path == "" else path.replace("/", "__")
-		var node := _hull_holder.get_node_or_null(safe_name)
-		if node != null:
-			# Move it to world space first so it can drift freely.
-			_hull_holder.remove_child(node)
-			_model.get_parent().add_child(node)
-			node.global_position = broken.world_pos
-			broken.debris_node = node
-	# Remove from the view registry.
-	_view.part_nodes.erase(path)
+		node = _hull_holder.get_node_or_null(safe_name) as Node3D
+
+	if node != null and is_instance_valid(node):
+		var orig_xform := node.global_transform
+		var parent := node.get_parent()
+		if parent != null:
+			parent.remove_child(node)
+		
+		# Disable any pick Area3D inside the detached part so it doesn't intercept clicks
+		for child in node.get_children():
+			if child is Area3D:
+				child.collision_layer = 0
+				child.collision_mask = 0
+
+		# Physical impulse away from the ship centre plus slight lateral tumble
+		var out_dir := (orig_xform.origin - _model.global_position).normalized()
+		if out_dir.length_squared() < 0.01:
+			out_dir = -_model.global_transform.basis.z
+		broken.drift_dir = (out_dir + Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * 0.4).normalized()
+		broken.drift_speed = randf_range(14.0, 32.0)
+		broken.world_pos = orig_xform.origin
+
+		# Wrap into a collidable RigidBody3D so detached pieces become physical, collidable debris
+		var rb := RigidBody3D.new()
+		var s_name := "chassis" if path == "" else path.replace("/", "__")
+		rb.name = "Debris_" + s_name
+		rb.top_level = true
+		rb.collision_layer = 4
+		rb.collision_mask = 1 | 2 | 4
+
+		var col_shape := CollisionShape3D.new()
+		var box_shape := BoxShape3D.new()
+		var b_size := Vector3(1.5, 0.8, 1.8)
+		for child in node.get_children():
+			if child is MeshInstance3D and child.mesh != null:
+				var maabb: AABB = child.mesh.get_aabb()
+				b_size = maabb.size.clamp(Vector3(0.5, 0.5, 0.5), Vector3(8.0, 8.0, 8.0))
+				break
+		box_shape.size = b_size
+		col_shape.shape = box_shape
+		rb.add_child(col_shape)
+
+		node.transform = Transform3D.IDENTITY
+		rb.add_child(node)
+
+		if _model != null and _model.get_parent() != null:
+			_model.get_parent().add_child(rb)
+			rb.global_transform = orig_xform
+
+		var base_vel: Vector3 = _model.velocity if _model != null else Vector3.ZERO
+		rb.linear_velocity = base_vel + broken.drift_dir * broken.drift_speed
+		rb.angular_velocity = Vector3(randf_range(-4.0, 4.0), randf_range(-4.0, 4.0), randf_range(-4.0, 4.0))
+		broken.debris_node = rb
+
+		# Self-cleanup after 35s to prevent debris accumulation
+		var tw := rb.create_tween()
+		tw.tween_interval(35.0)
+		tw.tween_callback(rb.queue_free)
+
+	# Remove from the view registry, including pruning muzzles and exhausts
+	if _view != null:
+		_view.part_nodes.erase(path)
+		_view.part_meshes.erase(path)
+		_view.part_materials.erase(path)
+
+		# Prune muzzles belonging to this detached part so broken guns cannot fire:
+		var filtered_muzzles: Array[Dictionary] = []
+		for m in _view.muzzles:
+			if m.get("path", "") != path:
+				filtered_muzzles.append(m)
+		_view.muzzles = filtered_muzzles
+
+		# Prune exhausts belonging to this detached engine:
+		var filtered_exhausts: Array[Dictionary] = []
+		for e in _view.exhausts:
+			if e.get("path", "") != path:
+				filtered_exhausts.append(e)
+		_view.exhausts = filtered_exhausts
+
+	# Wing detachment causes asymmetric drag imbalance (pulls yaw and roll)
+	if category == "wing" and _model != null:
+		var is_left := placement.xform.origin.x < -0.15 or path.contains("_l") or path.contains("left")
+		if is_left:
+			_model.asymmetric_drag.z += 0.85
+			_model.asymmetric_drag.y += 0.40
+		else:
+			_model.asymmetric_drag.z -= 0.85
+			_model.asymmetric_drag.y -= 0.40
 
 	# Compute effects.
 	var effects := _effects_for_category(category, part)
@@ -199,6 +282,7 @@ func _effects_for_category(category: String, part: ShipPart) -> Array[DamageEffe
 			out.append(_make_effect(EffectType.CONTROL_HALF_LOST, 0.0, "Control severely degraded — lost cockpit systems"))
 			out.append(_make_effect(EffectType.SPEED_PENALTY, 0.1, "Speed reduced — navigation systems damaged"))
 		"weapon":
+			out.append(_make_effect(EffectType.WEAPON_LOST, 1.0, "Weapon destroyed — gun mount lost"))
 			out.append(_make_effect(EffectType.POWER_CUT, 0.15, "Power systems strained — lost weapon mount"))
 		"wing":
 			out.append(_make_effect(EffectType.CONTROL_LOSS, 0.4, "Turn rate reduced — lost a wing"))
@@ -281,3 +365,57 @@ func broken_count() -> int:
 func reset() -> void:
 	_active_effects.clear()
 	_effect_list.clear()
+	if _model != null:
+		_model.asymmetric_drag = Vector3.ZERO
+		_model.out_of_control = false
+		_model._out_of_control_timer = 0.0
+
+
+## Break off ALL remaining parts (used on total destruction / game over).
+## Returns the list of all BrokenPart objects created.
+func break_all_parts() -> Array[BrokenPart]:
+	var out: Array[BrokenPart] = []
+	if _view == null or _model == null:
+		return out
+	var placements := _view.resolution.placements
+	for placement in placements:
+		var path := placement.path
+		var node: Node3D = null
+		if _view.part_nodes.has(path):
+			node = _view.part_nodes[path] as Node3D
+		elif _hull_holder != null:
+			var safe_name := "chassis" if path == "" else path.replace("/", "__")
+			node = _hull_holder.get_node_or_null(safe_name) as Node3D
+
+		if node != null and is_instance_valid(node):
+			var orig_xform := node.global_transform if node.is_inside_tree() else Transform3D()
+			var parent := node.get_parent()
+			if parent != null:
+				parent.remove_child(node)
+			if _model != null and _model.get_parent() != null:
+				_model.get_parent().add_child(node)
+				node.global_transform = orig_xform
+
+			for child in node.get_children():
+				if child is Area3D:
+					child.collision_layer = 0
+					child.collision_mask = 0
+
+			var broken := BrokenPart.new()
+			broken.path = path
+			broken.part_name = placement.part.display_name
+			broken.world_pos = orig_xform.origin
+			var out_dir := (orig_xform.origin - _model.global_position).normalized()
+			if out_dir.length_squared() < 0.01:
+				out_dir = Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized()
+			broken.drift_dir = (out_dir + Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * 0.5).normalized()
+			broken.drift_speed = randf_range(18.0, 48.0)
+			broken.debris_node = node
+			out.append(broken)
+
+	_view.part_nodes.clear()
+	_view.part_meshes.clear()
+	_view.part_materials.clear()
+	_view.muzzles.clear()
+	_view.exhausts.clear()
+	return out

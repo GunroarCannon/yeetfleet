@@ -468,8 +468,19 @@ func _step_files() -> void:
 	if saved.is_empty():
 		return
 	var before := _builder.design_json()
+	# saved_designs() lists every design on disk, and the player may well have
+	# their own. Load the file this run wrote — matching it by name — rather than
+	# trusting the first entry, or the round-trip check compares two different
+	# ships and blames save/load for it.
+	var target := ""
+	for path in saved:
+		if path.get_file().to_lower().contains("smoke_test_hull"):
+			target = path
+			break
+	if target == "":
+		target = saved[0]
 	_builder.new_design()
-	_builder.load_from_file(saved[0])
+	_builder.load_from_file(target)
 	_check(_builder.design_json() == before, "a design did not survive save then load")
 
 

@@ -158,7 +158,7 @@ func _rebuild_group_members() -> void:
 	# Fill the pool with live ship data.
 	var pool_idx := 0
 	for ship in _ships:
-		if not is_instance_valid(ship) or not ship._alive:
+		if not is_instance_valid(ship) or not ship.is_inside_tree() or not ship._alive:
 			continue
 		var gid: int = ship.group_id
 		if not _groups.has(gid):
@@ -175,7 +175,7 @@ func _rebuild_group_members() -> void:
 
 	# Push the rebuilt member arrays to each ship in the group.
 	for ship in _ships:
-		if not is_instance_valid(ship) or not ship._alive:
+		if not is_instance_valid(ship) or not ship.is_inside_tree() or not ship._alive:
 			continue
 		var gid: int = ship.group_id
 		if _groups.has(gid):
@@ -184,8 +184,10 @@ func _rebuild_group_members() -> void:
 			for i in members.size():
 				var mem: AiGroupBehaviour.Member = members[i]
 				if mem.position.is_equal_approx(ship.global_position):
-					ship.behaviour.my_index_in_group = i
+					if ship.behaviour != null:
+						ship.behaviour.my_index_in_group = i
 					break
+
 
 
 ## Spawn a new group of ships with a shared archetype.
@@ -338,7 +340,11 @@ func spawn_ballistic_satellite(grav: GravitySystem, distance: float) -> AiShip:
 	ship._ai_paused = true
 	ship.is_satellite = true
 	ship.team_id = 0
-	ship.model.velocity = grav.circular_orbit_velocity(body, pos)
+	# Through the model's setter, not a bare write: the satellite is already
+	# bound to the physics world by the line above, and the driven body's step
+	# would otherwise read the solver's (zero) copy back over this the moment it
+	# ran — a probe that never leaves its spawn point.
+	ship.model.set_velocity(grav.circular_orbit_velocity(body, pos))
 	_ships.append(ship)
 	return ship
 

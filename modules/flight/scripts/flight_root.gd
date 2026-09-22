@@ -79,12 +79,19 @@ var model: FlightModel
 var camera_rig: FlightCamera
 var systems: SystemsSim
 var damage: DamageSystem
+var audio: SpaceAudio = null
+
+var _headlight_l: SpotLight3D = null
+var _headlight_r: SpotLight3D = null
+var _nav_light_port: OmniLight3D = null
+var _nav_light_starboard: OmniLight3D = null
 
 var library: PartLibrary
 var design: ShipDesign
 var view: ShipView
 
 var location: Location = Location.SPACE
+
 ## Non-null only in [constant Location.SPACE]. [FlightCamera] reads it directly
 ## (see [member FlightCamera.space]) to recentre the sky dome on itself; nothing
 ## else about the rig's transform is Juice's or the location's to touch.
@@ -122,7 +129,7 @@ var _mote_streak_dir := Vector3.ZERO
 var _env_holder: WorldEnvironment
 var _key_light: DirectionalLight3D
 var _fill_light: DirectionalLight3D
-var _view_light: DirectionalLight3D
+var _rim_light: DirectionalLight3D
 ## All active debris nodes, tracked for drift and fade each frame.
 var _debris_list: Array[Dictionary] = []
 
@@ -195,6 +202,19 @@ var _rear_camera: Camera3D = null
 var _rear_texture_rect: TextureRect = null
 var _rear_view_on := false
 
+## Player hull HP and shield — tracked here so the HUD, damage system, and
+## AI weapons all have a single source of truth.
+var player_hp := 500.0
+var player_max_hp := 500.0
+var player_shield := 0.0
+var player_max_shield := 0.0
+var _player_dead := false
+var _game_over_timer := 0.0  # slow-mo duration before showing modal
+
+## Debris from AI ship part scatter and player collision. Entries have:
+## { node, velocity, spin_axis, spin_speed, life, material }
+## The "material" key may be null for non-fading node types (e.g. no special mat).
+
 
 ## The nodes are created here rather than in [method _ready] because Godot
 ## readies children before their parent, and [FlightHud] reaches back for the
@@ -210,6 +230,10 @@ func _enter_tree() -> void:
 	library = PartLibrary.instance()
 	library.load_all()
 	_load_design()
+
+	audio = SpaceAudio.new()
+	audio.name = "SpaceAudio"
+	add_child(audio)
 
 	# A scene restart reloads this node; land back in the location we were in.
 	location = Session.flight_location
@@ -232,7 +256,9 @@ func _enter_tree() -> void:
 ## after [method _enter_tree] has run.
 func _ready() -> void:
 	_assemble()
+	_setup_ship_lights()
 	# The player's own hull has to follow a global look and palette change, like the
+
 	# traffic and the scenery do — see [method AiSpawner._on_style_changed] and
 	StyleManager.instance().style_changed.connect(_on_style_changed)
 	StyleManager.instance().palette_changed.connect(_on_palette_changed)
@@ -280,6 +306,7 @@ func _ready() -> void:
 		model._asteroid_data = space.get_meta("asteroid_data") as Array	# Hand the gravity system to the flight model AND the space scene
 	# (so the moon integrates via real gravity, not sine animation).
 	if gravity != null:
+		gravity.pull_enabled = Session.gravity_pull
 		model.gravity = gravity
 		if space != null:
 			space.set_gravity(gravity)
@@ -319,8 +346,11 @@ func _ready() -> void:
 	_coach.start()
 
 	systems.state_changed.connect(_on_systems_state)
-	systems.fire_blocked.connect(func(reason: String) -> void: _hud.show_hint(reason))
-	model.assist_changed.connect(func(_on: bool) -> void: _hud.show_hint(_assist_hint()))
+	systems.fire_blocked.connect(_on_systems_fire_blocked)
+	systems.weapon_switched.connect(_on_weapon_switched)
+	if _hud != null and _hud.has_method("update_weapon_badge"):
+		_hud.update_weapon_badge(systems.get_active_weapon())
+	model.assist_changed.connect(_on_model_assist_changed)
 	model.orbit_changed.connect(_on_orbit_changed)
 	_build_incident_director()
 
@@ -349,7 +379,10 @@ func _load_design() -> void:
 		design = library.default_design()
 		library.autofill_required(design)
 	if design != null:
-		design.design_name = design.design_name + " (Random)"
+		var toy_factions := ["neon_turbo", "cobalt_vanguard", "emerald_warlords", "crimson_toybox", "amethyst_void", "solar_raiders", "cyber_teal"]
+		var pick_fid: String = toy_factions[randi() % toy_factions.size()]
+		library.apply_faction(design, pick_fid)
+		design.design_name = design.design_name + " (Toy Edition)"
 
 
 ## [constant Location.SPACE] gets [SpaceScene]'s own environment and lights for
@@ -796,6 +829,7 @@ func _on_palette_changed(_palette: Palette) -> void:
 ## Toggles mobile screen fitting view (closer framing & responsive UI).
 func set_mobile_view(enabled: bool) -> void:
 	Session.mobile_view_fit = enabled
+	Session.save_to_disk()
 	if camera_rig != null:
 		camera_rig.set_mobile_view(enabled)
 	if _hud != null:
@@ -820,14 +854,20 @@ func _build_test_volume_environment() -> void:
 	_env_holder.environment = env
 	add_child(_env_holder)
 
-	# Three lights and no shadows. The key and the fill are world-fixed, which is
-	# most of how attitude is legible out here: roll the ship and you visibly
-	# change which faces catch the light.
+	# Three lights: Key, Fill, and Rim.
+	# The key light illuminates form with crisp directional shadows on enhanced lighting.
+	# The fill light softens shadows with cool sky tones.
+	# The rim light catches edges from behind, replacing the camera-axis hack with authentic edge separation.
 	_key_light = DirectionalLight3D.new()
 	_key_light.name = "KeyLight"
-	_key_light.light_energy = 2.1
+	_key_light.light_energy = 2.4 if Session.enhanced_lighting else 2.0
 	_key_light.light_color = Color("fff1de")
-	_key_light.shadow_enabled = false
+	_key_light.shadow_enabled = Session.enhanced_lighting
+	_key_light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	_key_light.directional_shadow_max_distance = 180.0
+	_key_light.directional_shadow_blend_splits = true
+	_key_light.shadow_bias = 0.03
+	_key_light.shadow_normal_bias = 1.2
 	_key_light.look_at_from_position(Vector3.ZERO, Vector3(-0.55, -0.7, -0.45), Vector3.UP)
 	add_child(_key_light)
 
@@ -840,21 +880,118 @@ func _build_test_volume_environment() -> void:
 	_fill_light.look_at_from_position(Vector3.ZERO, Vector3(0.6, 0.45, 0.65), Vector3.UP)
 	add_child(_fill_light)
 
-	# The third is aimed down the camera's own axis and re-aimed every frame.
-	#
-	# Two world-fixed lights cannot keep an arbitrarily-oriented ship readable:
-	# fly away from the key and the chase camera is looking at the hull's shadow
-	# side, which against a black background is not a ship at all, it is a hole.
-	# A weak view-axis light guarantees the surface facing the player is always
-	# lit *somewhat*, without flattening it — at this energy the key still decides
-	# the form and this only rescues the floor.
-	_view_light = DirectionalLight3D.new()
-	_view_light.name = "ViewLight"
-	_view_light.light_energy = 0.95
-	_view_light.light_color = Color("c8d4e8")
-	_view_light.light_specular = 0.25
-	_view_light.shadow_enabled = false
-	add_child(_view_light)
+	# Rim / Kicker: angled from behind-above to carve out silhouette and metallic edges
+	# against the black void of space, avoiding the flat washed-out camera flashlight look.
+	_rim_light = DirectionalLight3D.new()
+	_rim_light.name = "RimLight"
+	_rim_light.light_energy = 1.15 if Session.enhanced_lighting else 0.8
+	_rim_light.light_color = Color("9ec8ff")
+	_rim_light.light_specular = 0.75
+	_rim_light.shadow_enabled = false
+	_rim_light.look_at_from_position(Vector3.ZERO, Vector3(0.55, 0.4, 0.75), Vector3.UP)
+	add_child(_rim_light)
+
+
+# --- Ship Lights & Tactical Searchlights -------------------------------------
+
+func _setup_ship_lights() -> void:
+	if model == null:
+		return
+	var on := Session.ship_headlights
+
+	_headlight_l = SpotLight3D.new()
+	_headlight_l.name = "HeadlightL"
+	_headlight_l.light_energy = 3.8 if on else 0.0
+	_headlight_l.light_color = Color("eef6ff")
+	_headlight_l.spot_range = 220.0
+	_headlight_l.spot_angle = 32.0
+	_headlight_l.spot_attenuation = 1.0
+	_headlight_l.position = Vector3(-1.8, 0.0, -1.2)
+	_headlight_l.rotation = Vector3.ZERO # Point along -Z (ship forward)
+	model.add_child(_headlight_l)
+
+	_headlight_r = SpotLight3D.new()
+	_headlight_r.name = "HeadlightR"
+	_headlight_r.light_energy = 3.8 if on else 0.0
+	_headlight_r.light_color = Color("eef6ff")
+	_headlight_r.spot_range = 220.0
+	_headlight_r.spot_angle = 32.0
+	_headlight_r.spot_attenuation = 1.0
+	_headlight_r.position = Vector3(1.8, 0.0, -1.2)
+	_headlight_r.rotation = Vector3.ZERO # Point along -Z (ship forward)
+	model.add_child(_headlight_r)
+
+	_nav_light_port = OmniLight3D.new()
+	_nav_light_port.name = "NavPort"
+	_nav_light_port.light_color = Color("ff2233")
+	_nav_light_port.light_energy = 0.9 if on else 0.0
+	_nav_light_port.omni_range = 8.0
+	_nav_light_port.position = Vector3(-2.4, 0.2, 0.6)
+	model.add_child(_nav_light_port)
+
+	_nav_light_starboard = OmniLight3D.new()
+	_nav_light_starboard.name = "NavStarboard"
+	_nav_light_starboard.light_color = Color("22ff66")
+	_nav_light_starboard.light_energy = 0.9 if on else 0.0
+	_nav_light_starboard.omni_range = 8.0
+	_nav_light_starboard.position = Vector3(2.4, 0.2, 0.6)
+	model.add_child(_nav_light_starboard)
+
+
+func toggle_headlights() -> bool:
+	Session.ship_headlights = not Session.ship_headlights
+	Session.save_to_disk()
+	var on := Session.ship_headlights
+	if _headlight_l != null:
+		_headlight_l.light_energy = 3.5 if on else 0.0
+	if _headlight_r != null:
+		_headlight_r.light_energy = 3.5 if on else 0.0
+	if _nav_light_port != null:
+		_nav_light_port.light_energy = 0.9 if on else 0.0
+	if _nav_light_starboard != null:
+		_nav_light_starboard.light_energy = 0.9 if on else 0.0
+	if audio != null:
+		audio.play_light_switch_sound()
+	if _hud != null:
+		_hud.show_hint("Tactical Headlights: %s (L)" % ("ON" if on else "OFF"))
+	return on
+
+
+# --- Atmospheric Re-entry VFX -----------------------------------------------
+
+func _update_atmospheric_reentry(_delta: float) -> void:
+	if model == null or view == null or not model.is_inside_tree():
+		return
+	var ship_pos := model.global_position
+	var speed := model.velocity.length()
+	var atmo_burn := 0.0
+
+	if location == Location.SPACE and space != null:
+		var p_dist := ship_pos.distance_to(space.planet_centre)
+		var atmo_outer := space.planet_radius * 1.35
+		var atmo_inner := space.planet_radius * 1.02
+		if p_dist < atmo_outer and speed > 120.0:
+			var depth := clampf((atmo_outer - p_dist) / (atmo_outer - atmo_inner), 0.0, 1.0)
+			var speed_factor := clampf((speed - 120.0) / 250.0, 0.0, 1.0)
+			atmo_burn = depth * speed_factor
+	elif location == Location.GENERATED_SYSTEM and gravity != null:
+		var dominant := gravity.find_dominant_body(ship_pos)
+		if dominant != null and dominant.radius > 50.0 and speed > 120.0:
+			var p_dist := ship_pos.distance_to(dominant.position)
+			var atmo_outer := dominant.radius * 1.35
+			var atmo_inner := dominant.radius * 1.02
+			if p_dist < atmo_outer:
+				var depth := clampf((atmo_outer - p_dist) / (atmo_outer - atmo_inner), 0.0, 1.0)
+				var speed_factor := clampf((speed - 120.0) / 250.0, 0.0, 1.0)
+				atmo_burn = depth * speed_factor
+
+	view.set_reentry_burn(atmo_burn)
+	if atmo_burn > 0.12 and randf() < 0.35:
+		var nose_pos := model.global_position - model.global_transform.basis.z * (view.aabb.size.z * 0.5 + 0.5)
+		Juice.burst(BurstPresets.Preset.SPARKS, Transform3D(model.global_transform.basis, nose_pos), atmo_burn * 1.8, Color(1.0, 0.55, 0.15))
+		if atmo_burn > 0.4 and randf() < 0.2:
+			Juice.burst(BurstPresets.Preset.VAPOUR, Transform3D(model.global_transform.basis, nose_pos), atmo_burn * 2.0, Color(1.0, 0.35, 0.1, 0.6))
+
 
 
 ## A lattice of motionless specks the ship flies through.
@@ -1015,6 +1152,15 @@ func _assemble() -> void:
 	if camera_rig != null:
 		camera_rig.adopt(model, model, view)
 
+	# Init player HP from ship stats (clamped to a playable range, 2.5× hero bonus)
+	_player_dead = false
+	var stats := view.resolution.stats
+	var base_hp := maxf(stats.get_stat("hull_hp"), 80.0)
+	player_max_hp = base_hp * 2.5
+	player_hp = player_max_hp
+	player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0)
+	player_shield = player_max_shield
+
 
 ## Third person is the default and, for now, the view this scene exists to test:
 ## you cannot judge how a ship handles without watching it bank. The rig still
@@ -1111,9 +1257,6 @@ func _process(delta: float) -> void:
 		# Update the moon landmark position (index 1 after Tarn IV).
 		if space.landmarks.size() > 1:
 			space.landmarks[1]["position"] = moon_pos
-	var camera := camera_node()
-	if camera != null and _view_light != null:
-		_view_light.global_transform = Transform3D(camera.global_transform.basis, Vector3.ZERO)
 	if _motes != null and _mote_field_on:
 		_motes.global_position = (model.global_position / MOTE_SPACING).round() * MOTE_SPACING
 		_update_mote_streaks(delta)
@@ -1128,8 +1271,8 @@ func _process(delta: float) -> void:
 	# Drift, spin and fade broken-off debris.
 	var still_alive: Array[Dictionary] = []
 	for d in _debris_list:
-		var node: MeshInstance3D = d["node"]
-		if not is_instance_valid(node):
+		var node: Node3D = d["node"] as Node3D
+		if node == null or not is_instance_valid(node) or not node.is_inside_tree():
 			continue
 		var vel: Vector3 = d["velocity"]
 		# Very gentle drag so debris slows down rather than flying forever.
@@ -1177,13 +1320,25 @@ func _physics_process(delta: float) -> void:
 	# Touch-to-accelerate: holding the screen drives throttle to full.
 	var flight := active_model()
 	var systems_now := active_systems()
-	if _touch_accel and not _button_boost:
-		flight.command.throttle = clampf(
-			flight.command.throttle + 1.2 * delta,
-			ThrottleLever.MIN_VALUE, 1.0
-		)
-		systems_now.set_throttle(clampf(absf(flight.command.throttle), 0.0, 1.0))
-	systems_now.set_boost(flight.command.boost)
+	if flight != null:
+
+		if _touch_accel and not _button_boost:
+			flight.command.throttle = clampf(
+				flight.command.throttle + 1.2 * delta,
+				ThrottleLever.MIN_VALUE, 1.0
+			)
+			if systems_now != null:
+				systems_now.set_throttle(clampf(absf(flight.command.throttle), 0.0, 1.0))
+		if systems_now != null:
+			systems_now.set_boost(flight.command.boost)
+
+
+	if audio != null and flight != null:
+		var strafe := flight.velocity.slide(flight.global_transform.basis.z).length()
+		audio.update_engine_spool(flight.command.throttle, flight.command.boost, strafe, delta)
+
+	_update_atmospheric_reentry(delta)
+
 
 
 ## True when the active ship's control mode should implicitly keep the nose on a
@@ -1256,14 +1411,27 @@ func _read_keyboard(delta: float) -> void:
 		# Neither key held — throttle holds position (lever behaviour).
 		pass
 
+	if _player_dead:
+		return
+
 	flight.command.boost = Input.is_action_pressed("flight_boost") or _button_boost
-	# Two sources for one piece of state, so it is recomputed from both every
-	# frame rather than each of them writing into it and clearing the other.
-	active_systems().set_firing(Input.is_action_pressed("flight_fire") or _button_firing)
+	var sys_active := active_systems()
+	if sys_active != null:
+		sys_active.set_firing(Input.is_action_pressed("flight_fire") or _button_firing)
 
 
 func _on_systems_state(energy: float, heat: float, _notes: String) -> void:
 	_hud.set_power(energy, heat)
+
+
+func _on_systems_fire_blocked(reason: String) -> void:
+	if is_instance_valid(_hud):
+		_hud.show_hint(reason)
+
+
+func _on_model_assist_changed(_on: bool) -> void:
+	if is_instance_valid(_hud):
+		_hud.show_hint(_assist_hint())
 
 
 # --- The interface the HUD calls -------------------------------------------
@@ -1383,7 +1551,149 @@ func respawn() -> void:
 			d["node"].queue_free()
 	_debris_list.clear()
 	_hud.sync_throttle(0.0)
+	# Reset player HP on respawn
+	if view != null:
+		var stats := view.resolution.stats
+		var base_hp := maxf(stats.get_stat("hull_hp"), 80.0)
+		player_max_hp = base_hp * 2.5
+		player_hp = player_max_hp
+		player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0)
+		player_shield = player_max_shield
+	_player_dead = false
+	if _hud != null and _hud.has_method("hide_game_over"):
+		_hud.hide_game_over()
+	if Engine.time_scale < 1.0:
+		Engine.time_scale = 1.0
 	_hud.show_hint("Back at the start point")
+
+
+## Accept damage to the player ship (called by AI weapons and collision model).
+## Applies shield absorption first, then hull. Triggers game over at 0 HP.
+func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
+	if _player_dead:
+		return
+	var where := hit_point if hit_point != Vector3.ZERO else (
+		model.global_position if model != null else Vector3.ZERO
+	)
+	# Shield absorbs 65% of incoming damage while it holds.
+	if player_shield > 0.0:
+		var absorbed := minf(player_shield, amount * 0.65)
+		player_shield -= absorbed
+		amount -= absorbed
+		if audio != null:
+			audio.play_shield_hit_sound(model.global_position if model != null else Vector3.ZERO, true)
+		# A lighter flash than a hull hit: this is the shield blooming, not the
+		# hull taking a bite.
+		AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, 1.0)
+	if amount <= 0.0:
+		return
+	var prev_hp := player_hp
+	player_hp = maxf(player_hp - amount, 0.0)
+	# Addon layer on the hull hit, scaled by the damage taken, plus the library's
+	# hit sound. No sound comes from the addon itself — [SpaceAudio] owns the
+	# mix, and the two would just be twice as loud.
+	var hit_scale := clampf(amount * 0.04, 0.6, 2.4)
+	AddonVfx.spawn(self, AddonVfx.Kind.HIT, where, Vector3.UP, hit_scale, Color("ffb347"))
+	AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, hit_scale)
+	if audio != null:
+		audio.play_hit(where, true)
+	if _hud != null and _hud.has_method("spawn_damage_number"):
+		var is_crit := amount > player_max_hp * 0.15
+		_hud.spawn_damage_number(roundi(amount), true, is_crit, hit_point)
+	if player_hp <= 0.0 and prev_hp > 0.0:
+		game_over()
+
+
+## Trigger the game-over sequence: scatter all parts, slow-mo, show modal.
+func game_over() -> void:
+	if _player_dead:
+		return
+	_player_dead = true
+	model.halt()
+	model.clear_phys_world()
+
+	# Scatter every remaining part from the player ship
+	if damage != null:
+		var broken_parts := damage.break_all_parts()
+		for bp in broken_parts:
+			_on_part_broken(bp, [])
+
+	# Dramatic juice
+	var xform := model.global_transform
+	Juice.ring(xform, 5.0, Color("ff5500"), 0.6)
+	Juice.burst(BurstPresets.Preset.RING_SPARK, xform, 3.0, Color("ff8800"))
+	Juice.burst(BurstPresets.Preset.SPARKS, xform, 3.0, Color("ffcc44"))
+	Juice.burst(BurstPresets.Preset.EMBERS, xform, 2.5)
+	Juice.burst(BurstPresets.Preset.DEBRIS, xform, 2.0)
+	Juice.burst(BurstPresets.Preset.VAPOUR, xform, 2.0)
+	Juice.light_pop(model.global_position, Color("ff8844"), 20.0, 0.6)
+	Juice.shake(1.5)
+	Juice.flash(Color("ff6600"), 0.6, 0.4)
+	if audio != null:
+		audio.play_explosion(model.global_position, true)
+	# The addon's heaviest effect on top of the debris scatter. Sound stays with
+	# SpaceAudio just above, so this only adds the visuals.
+	AddonVfx.explosion(self, model.global_position, 3.0, true, Color("ff8844"))
+	# ExplosionRegistry: player ship death gets the assigned SLOT_SHIP_DEATH effect.
+	# This stacks on top of the Juice / AddonVfx layer rather than replacing it,
+	# so the best-of-both-worlds result is always used.
+	var _reg := ExplosionRegistry.new()
+	_reg.spawn_event(self, ExplosionRegistry.SLOT_SHIP_DEATH,
+		model.global_position, Vector3.UP, 1.5)
+
+	Juice.hitstop(0.06, 0.3)
+
+	# Slow motion
+	Engine.time_scale = 0.25
+
+	# Switch to a death orbiting camera
+	if camera_rig != null:
+		camera_rig.set_mode(FlightCamera.Mode.FREE)
+		camera_rig.recentre()
+
+	# After a brief slow-mo delay, restore time and show Game Over modal
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_interval(1.4)
+	tw.tween_callback(func() -> void:
+		Engine.time_scale = 1.0
+		if _hud != null and _hud.has_method("show_game_over"):
+			_hud.show_game_over()
+	)
+
+
+## Register a debris node with a specific velocity so it gets updated by the
+## flight root's per-frame debris ticker. Called by AiShip when it scatters parts.
+func register_debris(node: Node3D, velocity: Vector3, spin_speed := 0.0) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	# Fade material: look for the first mesh child with a StandardMaterial3D.
+	var fade_mat: StandardMaterial3D = null
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			var mi := child as MeshInstance3D
+			if mi.material_override is StandardMaterial3D:
+				var m := (mi.material_override as StandardMaterial3D).duplicate() as StandardMaterial3D
+				m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mi.material_override = m
+				fade_mat = m
+				break
+	if node is MeshInstance3D:
+		if (node as MeshInstance3D).material_override is StandardMaterial3D:
+			var m := ((node as MeshInstance3D).material_override as StandardMaterial3D).duplicate() as StandardMaterial3D
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			(node as MeshInstance3D).material_override = m
+			fade_mat = m
+
+	var actual_spin := spin_speed if spin_speed > 0.0 else randf_range(1.5, 5.0)
+	_debris_list.append({
+		"node": node,
+		"velocity": velocity,
+		"spin_axis": Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized(),
+		"spin_speed": actual_spin,
+		"life": randf_range(7.0, 12.0),
+		"material": fade_mat,
+	})
 
 
 func return_to_hangar() -> void:
@@ -1427,11 +1737,13 @@ func planet_spacing() -> float:
 ## Apply a new planet size scale. Callers are expected to restart the scene after.
 func set_planet_scale(value: float) -> void:
 	Session.planet_scale = clampf(value, 0.5, 10.0)
+	Session.save_to_disk()
 
 
 ## Apply a new planet spacing scale. Callers are expected to restart after.
 func set_planet_spacing(value: float) -> void:
 	Session.planet_spacing = clampf(value, 0.5, 5.0)
+	Session.save_to_disk()
 
 
 # --- Take control + weapons lock -------------------------------------------------
@@ -1474,6 +1786,8 @@ func take_control(ship: AiShip) -> void:
 		camera_rig.set_mode(FlightCamera.Mode.CHASE)
 	if _hud != null:
 		_hud.show_hint("Piloting %s — L to leave control" % ship.preset_name)
+		if ship.systems != null and _hud.has_method("update_weapon_badge"):
+			_hud.update_weapon_badge(ship.systems.get_active_weapon())
 
 
 ## Give control back to the player's own ship.
@@ -1486,6 +1800,8 @@ func leave_control() -> void:
 		camera_rig.set_mode(FlightCamera.Mode.CHASE)
 	if _hud != null:
 		_hud.show_hint("Back in your own ship")
+		if systems != null and _hud.has_method("update_weapon_badge"):
+			_hud.update_weapon_badge(systems.get_active_weapon())
 
 
 ## Toggle a weapons lock on the nearest live AI ship (or release the current one).
@@ -1994,7 +2310,11 @@ func enter_orbit() -> void:
 	var vel := gravity.circular_orbit_velocity(body, model.global_position)
 	if vel.length_squared() < 0.001:
 		return
-	model.velocity = vel
+	# set_velocity, not a bare write: by the time anything asks for an orbit this
+	# ship is bound to the physics world, and the world's driven body reads its
+	# own copy back at the top of the next step (see [method
+	# FlightModel.set_velocity]).
+	model.set_velocity(vel)
 	model.command.throttle = 0.0
 	model.command.boost = false
 	_hud.show_hint("Entering orbit — circular velocity set, throttle released")
@@ -2013,7 +2333,7 @@ func match_circular_speed() -> void:
 	var dir := model.velocity.normalized()
 	if dir.length_squared() < 0.001:
 		dir = -model.global_transform.basis.z
-	model.velocity = dir * v_orbit
+	model.set_velocity(dir * v_orbit)
 	_hud.show_hint("Speed matched to circular (%.0f m/s)" % v_orbit)
 
 
@@ -2038,6 +2358,7 @@ func set_far_view_max(value: float) -> void:
 ## applies live to the current rig (chase mode adds its boost dolly each frame).
 func set_camera_fov(deg: float) -> void:
 	Session.camera_fov = deg
+	Session.save_to_disk()
 	if camera_rig != null:
 		camera_rig.set_fov(deg)
 
@@ -2045,8 +2366,34 @@ func set_camera_fov(deg: float) -> void:
 ## Third-person chase-distance dial (×). Persists in Session; applies live.
 func set_camera_chase(scale: float) -> void:
 	Session.camera_chase = scale
+	Session.save_to_disk()
 	if camera_rig != null:
 		camera_rig.set_chase_scale(scale)
+
+
+## When on, the chase camera freezes while the ship is out-of-control and snaps
+## back the moment control returns. Off by default.
+func toggle_ooc_camera_hold() -> void:
+	if camera_rig != null:
+		camera_rig.ooc_camera_hold = not camera_rig.ooc_camera_hold
+
+
+func ooc_camera_hold_on() -> bool:
+	return camera_rig != null and camera_rig.ooc_camera_hold
+
+
+## Toggle Galaxy on Fire 2 style cinematic sunflare, radiant rays and dramatic contrast.
+func toggle_cinematic_lighting() -> void:
+	Session.cinematic_lighting = not Session.cinematic_lighting
+	Session.save_to_disk()
+	if space != null:
+		space.set_cinematic_lighting(Session.cinematic_lighting)
+	if _hud != null:
+		_hud.show_hint("Cinematic sun lighting: %s" % ("ON" if Session.cinematic_lighting else "OFF"))
+
+
+func cinematic_lighting_on() -> bool:
+	return Session.cinematic_lighting
 
 ## Toggle high-detail rendering. Does NOT resize the window (that just zoomed
 ## the stretch-scaled canvas); it raises the 3D render scale and rebuilds the
@@ -2054,6 +2401,7 @@ func set_camera_chase(scale: float) -> void:
 ## so everything is genuinely less low-poly. Restarts the scene to rebuild.
 func toggle_high_res() -> void:
 	Session.high_res = not Session.high_res
+	Session.save_to_disk()
 	_hud.show_hint("High res: %s — rebuilding scene…" % ("ON" if Session.high_res else "OFF"))
 	restart_scene()
 
@@ -2074,6 +2422,7 @@ func toggle_high_contrast() -> void:
 ## AI population has its own dial, [method set_npc_speed_scale].
 func set_player_speed_scale(scale: float) -> void:
 	Session.player_speed_scale = maxf(scale, 0.05)
+	Session.save_to_disk()
 	if model != null:
 		model.speed_scale = Session.player_speed_scale
 		model.rescale_speed(Session.player_speed_scale)
@@ -2085,6 +2434,7 @@ func set_player_speed_scale(scale: float) -> void:
 ## are two different things, which one dial could not express.
 func set_npc_speed_scale(scale: float) -> void:
 	Session.npc_speed_scale = maxf(scale, 0.05)
+	Session.save_to_disk()
 	if _ai_spawner == null:
 		return
 	for ship in _ai_spawner.ships():
@@ -2099,66 +2449,80 @@ func set_npc_speed_scale(scale: float) -> void:
 func _on_part_broken(broken: DamageSystem.BrokenPart, _effects: Array) -> void:
 	var node := broken.debris_node
 	if node == null or not is_instance_valid(node):
-		# Fallback: create a simple box if the damage system did not provide a node.
-		node = MeshInstance3D.new()
-		node.name = "Debris_%s" % broken.path
-		var mesh := BoxMesh.new()
-		mesh.size = Vector3(0.8, 0.6, 1.2)
-		node.mesh = mesh
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(0.85, 0.55, 0.3)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		node.material_override = mat
-		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		node.global_position = broken.world_pos
-		add_child(node)
+		# No real node provided — skip the fallback box; the burst alone is enough.
+		var break_xform := Transform3D(Basis(), broken.world_pos)
+		Juice.burst(BurstPresets.Preset.SPARKS, break_xform, 1.2, Color("ffcc44"))
+		Juice.burst(BurstPresets.Preset.DEBRIS, break_xform, 0.8)
+		Juice.light_pop(broken.world_pos, Color("ff8844"), 3.0, 0.15)
+		Juice.shake(0.15)
+		AddonVfx.electric(self, broken.world_pos, 1.0, false)
+		# ExplosionRegistry: small flash for the no-node fallback case.
+		var _reg2 := ExplosionRegistry.new()
+		_reg2.spawn_event(self, ExplosionRegistry.SLOT_PART_BREAKOFF,
+			broken.world_pos, Vector3.UP, 0.7)
+		return
 
 	# Enable transparency fade on all mesh children of the debris node.
 	var fade_mat: StandardMaterial3D = null
 	for child in node.get_children():
 		if child is MeshInstance3D:
-			var m: StandardMaterial3D = child.get_surface_override_material(0) as StandardMaterial3D
-			if m != null:
-				m = m.duplicate() as StandardMaterial3D
+			var mi := child as MeshInstance3D
+			# Check material_override first, then surface 0.
+			var mo = mi.material_override
+			if mo is StandardMaterial3D:
+				var m := (mo as StandardMaterial3D).duplicate() as StandardMaterial3D
 				m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-				child.set_surface_override_material(0, m)
-				fade_mat = m
-		elif child.material_override is StandardMaterial3D:
-			var m: StandardMaterial3D = child.material_override as StandardMaterial3D
-			m = m.duplicate() as StandardMaterial3D
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			child.material_override = m
-			fade_mat = m
+				mi.material_override = m
+				if fade_mat == null:
+					fade_mat = m
+			else:
+				var surf := mi.get_surface_override_material(0) as StandardMaterial3D
+				if surf == null:
+					surf = mi.mesh.surface_get_material(0) as StandardMaterial3D if mi.mesh != null else null
+				if surf != null:
+					surf = surf.duplicate() as StandardMaterial3D
+					surf.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					mi.set_surface_override_material(0, surf)
+					if fade_mat == null:
+						fade_mat = surf
 
 	# Also handle the node itself if it is a MeshInstance3D.
 	if node is MeshInstance3D:
-		var m: StandardMaterial3D = node.material_override as StandardMaterial3D
-		if m != null:
-			m = m.duplicate() as StandardMaterial3D
+		var mi := node as MeshInstance3D
+		var mo = mi.material_override
+		if mo is StandardMaterial3D:
+			var m := (mo as StandardMaterial3D).duplicate() as StandardMaterial3D
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			node.material_override = m
-			fade_mat = m
+			mi.material_override = m
+			if fade_mat == null:
+				fade_mat = m
 
+	var debris_life := 10.0 if _player_dead else 8.0
 	_debris_list.append({
 		"node": node,
 		"velocity": broken.drift_dir * broken.drift_speed + model.velocity * 0.15,
 		"spin_axis": Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized(),
-		"spin_speed": randf_range(2.0, 6.0),
-		"life": 8.0,
+		"spin_speed": randf_range(2.5, 7.5),
+		"life": debris_life,
 		"material": fade_mat,
 	})
 
-	# Particle bursts: sparks, debris chunks, and embers at the break point.
+	# Particle bursts at the break socket.
 	var break_xform := Transform3D(Basis(), broken.world_pos)
-	Juice.burst(BurstPresets.Preset.SPARKS, break_xform, 1.2, Color("ffcc44"))
-	Juice.burst(BurstPresets.Preset.DEBRIS, break_xform, 0.8)
-	Juice.burst(BurstPresets.Preset.EMBERS, break_xform, 0.6)
-	Juice.light_pop(broken.world_pos, Color("ff8844"), 3.0, 0.15)
-	Juice.shake(0.15)
-	Juice.kick(broken.drift_dir, 0.3)
+	Juice.burst(BurstPresets.Preset.SPARKS, break_xform, 1.5, Color("ffcc44"))
+	Juice.burst(BurstPresets.Preset.DEBRIS, break_xform, 1.0)
+	Juice.burst(BurstPresets.Preset.EMBERS, break_xform, 0.7)
+	Juice.light_pop(broken.world_pos, Color("ff8844"), 4.0, 0.18)
+	Juice.shake(0.2)
+	AddonVfx.electric(self, broken.world_pos, 1.2, false)
+	if not _player_dead:
+		Juice.kick(broken.drift_dir, 0.3)
 
-	_hud.show_hint("⚠ %s lost! %s" % [broken.part_name, broken.path])
+	# Show loss hint (suppressed during total break-up to avoid 10 simultaneous hints)
+	if not _player_dead:
+		_hud.show_hint("⚠ %s lost!" % broken.part_name)
+		if _hud.has_method("spawn_damage_number"):
+			_hud.spawn_damage_number(0, true, false, broken.world_pos, "DETACHED!")
 
 
 func toggle_help() -> void:
@@ -2167,6 +2531,7 @@ func toggle_help() -> void:
 
 func toggle_drift_field() -> void:
 	Session.drift_field = not Session.drift_field
+	Session.save_to_disk()
 	_mote_field_on = Session.drift_field
 	_motes.visible = _mote_field_on
 	_hud.show_hint(
@@ -2240,6 +2605,8 @@ func toggle_gravity_pull() -> void:
 		_hud.show_hint("Gravity pull needs gravity (G)")
 		return
 	gravity.pull_enabled = not gravity.pull_enabled
+	Session.gravity_pull = gravity.pull_enabled
+	Session.save_to_disk()
 	_hud.show_hint("Gravity pull: %s — bodies %s drag things in" % [
 		"ON" if gravity.pull_enabled else "OFF",
 		"do" if gravity.pull_enabled else "do not",
@@ -2271,6 +2638,7 @@ func toggle_planet_pointer() -> void:
 		if _planet_pointer.get_parent() != null:
 			remove_child(_planet_pointer)
 	Session.planet_pointer = _planet_pointer.is_showing()
+	Session.save_to_disk()
 	_hud.show_hint("Planet pointer: %s" % ("ON" if _planet_pointer.is_showing() else "OFF"))
 
 
@@ -2300,6 +2668,7 @@ func trail_player_on() -> bool:
 
 func set_trail_player(on: bool) -> void:
 	Session.trail_player = on
+	Session.save_to_disk()
 	if on:
 		if _player_trail == null:
 			_player_trail = Trail3D.new()
@@ -2318,6 +2687,7 @@ func trail_ships_on() -> bool:
 
 func set_trail_ships(on: bool) -> void:
 	Session.trail_ships = on
+	Session.save_to_disk()
 	if not on:
 		for trail in _ship_trails.values():
 			if is_instance_valid(trail):
@@ -2684,13 +3054,13 @@ func toggle_location() -> void:
 	if space != null:
 		space.queue_free()
 		space = null
-	for node in [_env_holder, _key_light, _fill_light, _view_light]:
+	for node in [_env_holder, _key_light, _fill_light, _rim_light]:
 		if node != null:
 			node.queue_free()
 	_env_holder = null
 	_key_light = null
 	_fill_light = null
-	_view_light = null
+	_rim_light = null
 	_build_location()
 	_build_gravity()
 	camera_rig.space = space
@@ -2786,6 +3156,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			vp.set_input_as_handled()
 		return
 	match key.keycode:
+		KEY_F:
+			cycle_weapon()
 		KEY_V:
 			cycle_view()
 		KEY_HOME:
@@ -2796,6 +3168,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_L:
 			if controlled_ai != null:
 				leave_control()
+			else:
+				toggle_headlights()
+
 		KEY_T:
 			toggle_lock()
 		KEY_N:
@@ -2807,8 +3182,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			var idx := steps.find(_time_scale)
 			set_time_scale(steps[(idx + 1) % steps.size()])
 		KEY_P:
-			camera_rig.set_mode(FlightCamera.Mode.PLANET)
-			_hud.show_hint("Planet view — %s" % camera_rig.mode_label())
+			if key.shift_pressed:
+				shatter_nearest_planet()
+			else:
+				camera_rig.set_mode(FlightCamera.Mode.PLANET)
+				_hud.show_hint("Planet view — %s" % camera_rig.mode_label())
+		KEY_X:
+			_fire_heavy_weapon()
+			_hud.show_hint("Heavy antimatter blast fired (X)")
 		KEY_K:
 			# A/B the feel: cycles every .tres in physics/data/profiles live. The
 			# swap covers collision AND gravity. Only in space, where a world exists.
@@ -2816,17 +3197,23 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			if profile != "":
 				_hud.show_hint("Feel profile: %s (collision + gravity)" % profile)
 		KEY_R:
-			respawn()
+			if _player_dead:
+				respawn_player_ship()
+			else:
+				respawn()
 		KEY_D:
 			if key.shift_pressed:
 				_dump_scene_tree()
 			else:
 				_hud.toggle_debug_panel()
 		KEY_B:
-			toggle_rear_view()
+			if _player_dead:
+				return_to_hangar()
+			else:
+				toggle_rear_view()
 		KEY_C:
 			model.trigger_quick_turn()
-		KEY_X:
+		KEY_Z:
 			model.warp_active = not model.warp_active
 			_hud.show_hint("Warp %s" % ("ON — 8× speed" if model.warp_active else "OFF"))
 		KEY_G:
@@ -2903,6 +3290,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 					_last_spawn_time = now
 		KEY_F5:
 			restart_scene()
+		KEY_F6:
+			if _hud != null:
+				_hud.toggle_wireframe_mode()
+			else:
+				var on: bool = StyleManager.instance().toggle_wireframe()
+		KEY_F7:
+			if space != null and space.has_method("toggle_glare"):
+				var on: bool = space.toggle_glare()
+				if _hud != null:
+					_hud.show_hint("Solar Glare: %s" % ("ON" if on else "OFF"))
 		KEY_F8:
 			set_mobile_view(not Session.mobile_view_fit)
 		KEY_F9:
@@ -2963,8 +3360,11 @@ func respawn_player_ship() -> void:
 	if location == Location.SPACE and phys_world != null and view != null:
 		model.set_phys_world(phys_world, _ship_collision_radius(view), _ship_hull(view))
 	systems.state_changed.connect(_on_systems_state)
-	systems.fire_blocked.connect(func(reason: String) -> void: _hud.show_hint(reason))
-	model.assist_changed.connect(func(_on: bool) -> void: _hud.show_hint(_assist_hint()))
+	systems.fire_blocked.connect(_on_systems_fire_blocked)
+	systems.weapon_switched.connect(_on_weapon_switched)
+	if _hud != null and _hud.has_method("update_weapon_badge"):
+		_hud.update_weapon_badge(systems.get_active_weapon())
+	model.assist_changed.connect(_on_model_assist_changed)
 	model.orbit_changed.connect(_on_orbit_changed)
 
 	# Position: a stable circular orbit around the current dominant body, or the
@@ -3001,3 +3401,235 @@ func respawn_player_ship() -> void:
 	if _hud != null:
 		_hud.show_hint("Player ship rebuilt into orbit")
 	print("Player ship respawned at position: %s" % spawn_pos)
+
+
+func cycle_weapon() -> void:
+	var sys := active_systems()
+	if sys == null:
+		return
+	var w: Dictionary = sys.cycle_weapon()
+	if _hud != null:
+		_hud.show_hint("Weapon: %s" % w.get("name", "Unknown"))
+		if _hud.has_method("update_weapon_badge"):
+			_hud.update_weapon_badge(w)
+
+
+func set_weapon_index(idx: int) -> void:
+	var sys := active_systems()
+	if sys == null:
+		return
+	var w: Dictionary = sys.set_weapon_index(idx)
+	if _hud != null:
+		_hud.show_hint("Weapon: %s" % w.get("name", "Unknown"))
+		if _hud.has_method("update_weapon_badge"):
+			_hud.update_weapon_badge(w)
+
+
+func _on_weapon_switched(weapon: Dictionary) -> void:
+	if _hud != null and _hud.has_method("update_weapon_badge"):
+		_hud.update_weapon_badge(weapon)
+
+
+func on_planet_destroyed(planet: Planet) -> void:
+	if planet == null or not is_instance_valid(planet):
+		return
+	var p_pos: Vector3 = planet.global_position
+	var p_radius: float = planet.data.planet_radius if planet.data != null else 1500.0
+	var p_name: String = planet.data.planet_name if planet.data != null else "Planet"
+	
+	if not planet.has_meta("shattered"):
+		planet.set_meta("shattered", true)
+		PlanetDebrisBuilder.shatter_planet(planet, p_pos, self, 420.0, Session.planet_break_fineness, phys_world)
+	
+	# Hide and disable planet
+	planet.visible = false
+	planet.process_mode = Node.PROCESS_MODE_DISABLED
+	for child in planet.get_children():
+		if child is Node3D:
+			child.visible = false
+	
+	# Clean up landmarks so HUD indicators and minimap clear
+	if space != null and space.get("landmarks") != null:
+		var remaining_landmarks: Array[Dictionary] = []
+		for lm in space.landmarks:
+			var lm_pos: Vector3 = lm.get("position", Vector3.ZERO)
+			var lm_name: String = lm.get("name", "")
+			if lm_pos.distance_to(p_pos) > p_radius * 1.5 and lm_name != p_name and not p_name in lm_name:
+				remaining_landmarks.append(lm)
+		space.landmarks = remaining_landmarks
+	
+	# Clean up PhysWorld static colliders (preserve dynamic rock debris)
+	if phys_world != null:
+		var to_remove: Array[PhysBody] = []
+		for b in phys_world.bodies:
+			if b.kinematic and b.layer == PhysBody.Layer.STATIC:
+				if b.node == planet or b.node == planet.get_parent() or (b.node != null and b.node.global_position.distance_to(p_pos) < p_radius * 1.2):
+					to_remove.append(b)
+		for b in to_remove:
+			phys_world.remove(b)
+	
+	# Clean up gravity body
+	if gravity != null:
+		gravity.remove_body_near(p_pos, p_radius * 2.5)
+		
+	# Reset camera & targeting
+	if camera_rig != null and camera_rig.mode == FlightCamera.Mode.PLANET:
+		camera_rig.set_mode(FlightCamera.Mode.CHASE)
+	if locked_target == planet:
+		locked_target = null
+	if _hud != null:
+		_hud.show_hint("CRITICAL: %s ANNIHILATED!" % p_name)
+
+
+## Immediately shatters the nearest or locked planet with 3D fragments and asteroids.
+func shatter_nearest_planet() -> void:
+	var target_planet: Planet = null
+	if locked_target is Planet and is_instance_valid(locked_target) and (locked_target as Planet).visible:
+		target_planet = locked_target as Planet
+	else:
+		var candidate_planets := get_tree().get_nodes_in_group("planets")
+		if candidate_planets.is_empty() and space != null:
+			candidate_planets = space.find_children("", "Planet", true, false)
+		
+		var closest_dist := 1e9
+		var cam_pos := camera_rig.camera.global_position if camera_rig != null and camera_rig.camera != null else (model.global_position if model != null else Vector3.ZERO)
+		for p in candidate_planets:
+			if p is Planet and is_instance_valid(p) and p.visible and p.data != null:
+				var d := cam_pos.distance_to(p.global_position)
+				if d < closest_dist:
+					closest_dist = d
+					target_planet = p
+	
+	if target_planet == null:
+		if _hud != null:
+			_hud.show_hint("No active planet found to shatter")
+		return
+	
+	var p_pos := target_planet.global_position
+	var p_radius: float = target_planet.data.planet_radius if target_planet.data != null else 1000.0
+	var cam_pos := camera_rig.camera.global_position if camera_rig != null and camera_rig.camera != null else (model.global_position if model != null else p_pos + Vector3(0, 0, p_radius * 2.0))
+	var hit_pos := p_pos + (cam_pos - p_pos).normalized() * p_radius
+	
+	_spawn_heavy_explosion(hit_pos)
+	if systems != null:
+		systems._destroy_planet(target_planet, hit_pos)
+	else:
+		if not target_planet.has_meta("shattered"):
+			target_planet.set_meta("shattered", true)
+			PlanetDebrisBuilder.shatter_planet(target_planet, hit_pos, self, 420.0, Session.planet_break_fineness, phys_world)
+		on_planet_destroyed(target_planet)
+	
+	if _hud != null:
+		var p_name: String = target_planet.data.planet_name if target_planet.data != null else "Planet"
+		_hud.show_hint("💥 %s OBLITERATED (fineness ×%.2f)!" % [p_name, Session.planet_break_fineness])
+
+
+func _fire_heavy_weapon() -> void:
+	if camera_rig == null:
+		return
+	var camera := camera_rig.camera
+	var from := camera.global_position
+	var ray_dir := -camera.global_transform.basis.z
+	var to := from + ray_dir * 100000.0
+	var space_state := space.get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	
+	# Godot's built in raycast
+	var result := space_state.intersect_ray(query)
+	if not result.is_empty():
+		var hit_pos: Vector3 = result["position"]
+		var collider: Node3D = result["collider"]
+		
+		# Spawn heavy explosion
+		_spawn_heavy_explosion(hit_pos)
+		
+		# If it's a large craft part, fracture it
+		if collider is StaticBody3D:
+			var cur: Node = collider
+			var gen: LargeCraftGenerator = null
+			while cur != null:
+				if cur is LargeCraftGenerator:
+					gen = cur as LargeCraftGenerator
+					break
+				cur = cur.get_parent()
+			if gen != null:
+				gen.shatter_at(hit_pos, 30.0, ray_dir * 60.0)
+		return
+
+	# If we didn't hit a StaticBody3D, check planets
+	if space != null:
+		var closest_dist := 100000.0
+		var closest_planet: Planet = null
+		var hit_point := Vector3.ZERO
+		
+		var candidate_planets := get_tree().get_nodes_in_group("planets")
+		if candidate_planets.is_empty():
+			candidate_planets = space.find_children("", "Planet", true, false)
+			
+		for p in candidate_planets:
+			if not (p is Planet) or not is_instance_valid(p):
+				continue
+			var sub := p as Planet
+			if not sub.visible or sub.data == null:
+				continue
+			var center: Vector3 = sub.global_position
+			var radius: float = sub.data.planet_radius
+			var L: Vector3 = center - from
+			var tca: float = L.dot(ray_dir)
+			var d2: float = L.length_squared() - tca * tca
+			var r2: float = radius * radius
+			if d2 > r2:
+				continue
+			var thc: float = sqrt(maxf(0.0, r2 - d2))
+			var t0: float = tca - thc
+			var t1: float = tca + thc
+			var t_hit := -1.0
+			if t0 > 0.0:
+				t_hit = t0
+			elif t1 > 0.0:
+				t_hit = t1
+			if t_hit > 0.0 and t_hit < closest_dist:
+				closest_dist = t_hit
+				closest_planet = sub
+				hit_point = from + ray_dir * t_hit
+							
+		if closest_planet != null:
+			_spawn_heavy_explosion(hit_point)
+			if systems != null:
+				systems._destroy_planet(closest_planet, hit_point)
+			else:
+				on_planet_destroyed(closest_planet)
+
+
+func _spawn_heavy_explosion(pos: Vector3) -> void:
+	Juice.flash(Color(1.0, 0.8, 0.5), 0.2, 1.0)
+	Juice.light_pop(pos, Color(1.0, 0.5, 0.2), 30.0, 1.5)
+	Juice.shake(0.8)
+	
+	# Razor-thin luminous shockwave wavefront ring
+	var mesh_inst := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.985
+	tm.outer_radius = 1.0
+	tm.rings = 36
+	tm.ring_segments = 16
+	mesh_inst.mesh = tm
+	
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.7, 0.2, 0.9)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.5, 0.0)
+	mat.emission_energy_multiplier = 5.0
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mesh_inst.material_override = mat
+	
+	add_child(mesh_inst)
+	mesh_inst.global_position = pos
+	mesh_inst.scale = Vector3(0.01, 0.05, 0.01)
+	
+	var tween := create_tween()
+	tween.tween_property(mesh_inst, "scale", Vector3(120.0, 0.35, 120.0), 0.85).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(mat, "albedo_color:a", 0.0, 0.85)
+	tween.tween_callback(mesh_inst.queue_free)
