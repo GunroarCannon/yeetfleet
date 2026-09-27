@@ -5,6 +5,15 @@ Godot 4.5 (GL Compatibility), GDScript. Modules under `modules/`, each with a
 `data/`. Execution order and the feel contract live in `TECHNICAL_PLAN.md`;
 `GAMEDOC.md` is the design bible.
 
+## GodotPrompter
+
+Before implementing any Godot system, check for and invoke the matching
+`godot-prompter:*` skill (`godot-grill` when a new system's requirements are
+unclear; the domain skill — `input-handling`, `camera-system`, `save-load`,
+`responsive-ui`, … — for a known change). Report the pattern you picked, the
+alternative you rejected and why, before building. Subagents writing Godot
+code must do the same. Decision records live in `docs/decisions/`.
+
 ## The rules that matter (a condensed, always-true core)
 
 - **Match the surrounding code exactly.** Tabs for indentation, `##` doc
@@ -20,7 +29,45 @@ Godot 4.5 (GL Compatibility), GDScript. Modules under `modules/`, each with a
   - physics: `"$GD" --path . --headless --script modules/physics/tools/physics_smoke.gd`
   - flight↔physics bridge: `... --script modules/flight/tools/flight_bridge_smoke.gd`
   - flight scene orbit: `... --script modules/flight/tools/orbit_check.gd`
+  - chase-camera feel (zoom ease, knockback, shudder): `... --fixed-fps 144 --script
+    modules/flight/tools/camera_feel_check.gd` — run at 60 too; tick/frame
+    mismatch bugs only show above 60 fps. Add `-- --no-interp` to run with
+    physics interpolation off. Also checks emotes ride along at speed, a
+    twitchy-thumb weave against the old rigid follow, and that every view in
+    `FlightCamera.CYCLE` keeps the ship in frame.
   - profile cycle / rock promote / control modes: the matching `*_check.gd`.
+  - scenarios (sides spawn, wingmen fight, locked guns kill, stop restores
+    free roam): `... --script modules/flight/tools/scenario_check.gd`.
+  - bullet-hell / fairness (enemy fire styles, real enemy shots, off-screen
+    mercy, chase carry, graffiti markers, fly-as, the bug hunt finding a
+    planted aim bug): `... --script modules/flight/tools/combat_feel_check.gd`.
+  - **Bug hunt rule:** when something misbehaves "sometimes", don't guess —
+    register the suspects on `BugHunt` (flight root's `bug_hunt`, 🐞 chip),
+    feed a metric with `BugHunt.record()`, and let a hunt flip each suspect
+    against a baseline. Runs append to `user://bug_hunt_runs.csv`.
+  - movement profiles (swipe, slingshot incl. 3D aim, FPS, AI slingshot, HUD hiding, camera
+    gestures, steady/look-ahead sling camera, 3D arrows, player shots never slow, grab area,
+    launch magnet, ram/shot reach, lost wing, hostile markers, enemy telegraph): `... --fixed-fps 60
+    --script modules/flight/tools/move_profile_check.gd` — run at 144 too. Its waits count
+    physics ticks, not wall time (under `--fixed-fps` they differ per rate).
+  - shipped game defaults (layering, no headless bake, reset):
+    `... --script modules/core/tools/game_defaults_check.gd`.
+  - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd
+    -- out_dir 540 960` (windowed).
+  - what logs the most: `... --script modules/flight/tools/log_census_check.gd [-- <seconds>]`
+    (start-up and a fight, ranked by lines; fails above 2 lines/s while fighting).
+    In game: the Log census debug chip ([LogCensus], a Godot 4.5 `Logger`).
+  - Feel checks (`camera_feel_check`, `combat_feel_check`, `killcam_check`)
+    run on the **shipped** Juice defaults (`JuiceSettings._loaded = true`
+    before the scene loads) and at ×1 time — the player's saved dials and a
+    saved time warp (restored a frame late) made them fail on this machine.
+    New feel checks should do the same.
+  - planet looks side by side: `flight_shot.gd -- out.png 90 960 540 planet <style 0-2>`.
+  - the player's guns on screen: `modules/flight/tools/fire_shot.gd` and the
+    mobile HUD looks: `mobile_hud_shot.gd` (both windowed, see headers).
+  - faces / confetti: `... --script modules/whimsy/tools/whimsy_smoke.gd`; the
+    look itself: `modules/whimsy/tools/whimsy_shot.gd` (windowed, see its header).
+  - Always add `--audio-driver Dummy` to test launches — they should be silent.
 - **Module isolation.** One `class_name` per module; a module talks to another
   only through that façade's public API (signals out / calls in). No `get_parent()`
   reach-across for new code. `Session` (core) holds statics that survive scene

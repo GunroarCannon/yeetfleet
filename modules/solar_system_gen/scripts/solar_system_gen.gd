@@ -235,6 +235,15 @@ var log_events := false
 const EVENT_LOG_CAP := 500
 var _event_log: Array[String] = []
 var _sim_time := 0.0
+## Physics frames between [method _resolve_collisions] sweeps. That sweep is
+## O(n²) over every body (see its doc) and bodies barely move between
+## consecutive frames at real-world sim speed, so skipping most frames costs
+## nothing visible while cutting the sweep's frequency — and cost — by this
+## factor. 1 = every frame, the lab's default (chaos/stability tooling wants
+## every overlap caught promptly). Flight throttles this higher — see
+## [method FlightRoot._build_generated_system].
+var collision_check_interval := 1
+var _collision_check_counter := 0
 ## body name -> name of the body it actually orbits right now (the physics'
 ## own pick, not the hysteresis-smoothed [member _predicted_ref]) -- tracked
 ## only while [member log_events] is on, to log genuine reparenting (a moon
@@ -849,12 +858,15 @@ func _physics_process(delta: float) -> void:
 	var step := total_dt / float(substeps)
 	for _s in substeps:
 		_integrate(step)
-	# Collisions resolve once per real frame, not per substep — cheap enough at
-	# this body count (a few dozen to a couple hundred with belts) and a fast
-	# mover tunnelling through in one substep at extreme time_scale is an
-	# acceptable trade for a "fast forward and watch" feature, not a physics
-	# guarantee.
-	_resolve_collisions()
+	# Collisions resolve once per real frame (throttled by
+	# collision_check_interval), not per substep — cheap enough at this body
+	# count (a few dozen to a couple hundred with belts) and a fast mover
+	# tunnelling through in one substep at extreme time_scale is an acceptable
+	# trade for a "fast forward and watch" feature, not a physics guarantee.
+	_collision_check_counter += 1
+	if _collision_check_counter >= collision_check_interval:
+		_collision_check_counter = 0
+		_resolve_collisions()
 	_track_actual_dominant()
 	_update_belt_lod(delta)
 	_update_belt_visuals(delta)

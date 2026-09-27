@@ -176,8 +176,10 @@ static func shatter_planet(
 	flash_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	flash.material_override = flash_mat
 	flash.top_level = true
-	flash.global_position = p_pos
+	# In the tree before global_position is touched — see the same fix in
+	# [method SystemsSim._spawn_planet_crater_blast].
 	parent_node.add_child(flash)
+	flash.global_position = p_pos
 
 	var tw_flash := flash.create_tween()
 	tw_flash.parallel().tween_property(flash, "scale", Vector3.ONE * 5.5, 2.2).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
@@ -594,6 +596,10 @@ static func _register_physics(
 	rb.max_contacts_reported = 4
 	rb.can_sleep = true
 	rb.add_to_group("rigid_bodies")
+	# A random fraction gets an early exit once off-screen for a while, rather
+	# than every piece riding out its full cleanup tween below regardless of
+	# whether anyone can see it — see [DebrisRegistry].
+	DebrisRegistry.maybe_cull_when_unseen(rb)
 	rb.body_entered.connect(func(_other: Node) -> void:
 		if is_instance_valid(rb) and rb.is_inside_tree():
 			Juice.burst(BurstPresets.Preset.SPARKS, rb.global_transform, 1.4, Color(1.0, 0.75, 0.3))

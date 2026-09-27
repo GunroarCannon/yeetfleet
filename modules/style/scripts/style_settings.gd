@@ -11,8 +11,10 @@ const SECTION := "style"
 
 ## Id of the [StyleProfile] to start on. Default is "cartoony" for a rounded, toon look.
 static var profile_id := "cartoony"
-## Id of the [Palette] to start on. Empty means the same: use the fallback.
-static var palette_id := ""
+## Id of the [Palette] to start on. A fresh install starts on "toybox", the
+## palette built for the soft-toy art direction; empty means the pre-palette
+## fallback ([constant Palette.DEFAULTS]).
+static var palette_id := "toybox"
 ## When true, every element that supports it is forced into the toon shading
 ## path, independent of the style profile's own band dial. See [ToonOverride].
 static var toon_shading := false
@@ -42,10 +44,10 @@ static func set_wireframe_mode(value: bool) -> void:
 
 static func load_from_disk() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(SETTINGS_PATH) != OK:
+	if GameDefaults.load_layered(cfg, SETTINGS_PATH, StyleSettings.load_from_disk) != OK:
 		return
 	profile_id = String(cfg.get_value(SECTION, "profile", "cartoony"))
-	palette_id = String(cfg.get_value(SECTION, "palette", ""))
+	palette_id = String(cfg.get_value(SECTION, "palette", "toybox"))
 	toon_shading = bool(cfg.get_value(SECTION, "toon_shading", false))
 	wireframe_mode = bool(cfg.get_value(SECTION, "wireframe_mode", false))
 

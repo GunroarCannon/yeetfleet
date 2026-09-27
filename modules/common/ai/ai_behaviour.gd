@@ -62,6 +62,19 @@ var _evasive_dir := Vector3.UP
 ## Set by [AiShip]; the behaviour reads this to decide state transitions.
 var player_position := Vector3.ZERO
 var player_visible := false
+## The pursued ship's own forward vector -- used only by the flanking bias
+## (see [method _flank_point]), so a "stay in front" roll has something to
+## stay in front of.
+var player_forward := Vector3.FORWARD
+## The pursued ship's world velocity, for flankers matching its speed — see
+## [method _speed_match_throttle].
+var player_velocity := Vector3.ZERO
+
+## Whether this pursuit/engage/flee rolled to bias its target toward staying
+## in front of the pursued ship instead of closing dead-on -- see [method
+## _roll_flank]. Rolled once per state entry, not every frame, so one
+## engagement reads as consistently one or the other.
+var _flank := false
 
 ## Dynamic obstacle avoidance and raycast context
 var ship_node_ref: Node3D = null
@@ -84,6 +97,13 @@ var threat_detected := false
 ## Gravity system reference, set by [AiShip] so behaviour can do gravity-aware throttle.
 var gravity_ref: GravitySystem = null
 
+
+
+## Seconds between obstacle probes (see [method update]); each ship is
+## jittered so a fleet does not probe on the same frame.
+const AVOID_INTERVAL := 0.12
+var _avoid_timer := 0.0
+var _avoid_cached := Vector3.ZERO
 
 
 func _init() -> void:
@@ -139,14 +159,36 @@ func update(delta: float, ship_pos: Vector3, ship_basis: Basis, top_speed: float
 		State.PURSUIT, State.ENGAGE:
 			desired_throttle = 0.95
 			desired_boost = true
-			target_pos = threat_position if threat_detected else player_position
-			var d_target := ship_pos.distance_to(target_pos)
+			var real_target := threat_position if threat_detected else player_position
+			# Findability bias: once spotted, tend to close in on a point ahead
+			# of the target rather than dead-on, so the fight drifts somewhere
+			# the player can actually see it coming from. All the proximity/aim
+			# checks below still measure against the real target, never the
+			# flanked point -- only the cruise-in steering direction changes.
+			target_pos = _flank_point(real_target, player_forward, ship_pos) if _flank else real_target
+			var d_target := ship_pos.distance_to(real_target)
 			# Knife-fight proximity: break into evasive roll so ships joust rather than collide
 			if d_target < 95.0:
 				state = State.EVASIVE_BREAK
 				_state_timer = 0.0
 				var sign_x := 1.0 if _rng.randf() > 0.5 else -1.0
 				_evasive_dir = (ship_basis.x * sign_x + ship_basis.y * 0.45).normalized()
+			# A flanker that has made it in front of the target turns to face it
+			# and matches its speed, backing off (in reverse if need be) to hold
+			# a standoff distance. That keeps it in the player's view and in
+			# their gunsight, instead of being overrun or overshooting and
+			# vanishing behind them.
+			elif (
+				_flank and JuiceSettings.ai_speed_match
+				and _in_front_of_target(ship_pos, real_target, d_target)
+			):
+				target_pos = real_target
+				desired_boost = false
+				desired_throttle = _speed_match_throttle(ship_pos, real_target, d_target, top_speed)
+				# Undo the archetype speed multiplier applied below, so the
+				# matched speed is the one actually flown.
+				if archetype_data != null and archetype_data.speed_mult > 0.01:
+					desired_throttle /= archetype_data.speed_mult
 			# Turret/sniper combat style: inside weapons range the ship stops
 			# chasing and holds nearly still, rotating fully onto the target so
 			# its guns land. The steering below still points at the target; only
@@ -154,6 +196,7 @@ func update(delta: float, ship_pos: Vector3, ship_basis: Basis, top_speed: float
 			elif archetype_data != null and archetype_data.hold_to_aim and d_target < 500.0:
 				desired_throttle = 0.05
 				desired_boost = false
+				target_pos = real_target
 		State.EVASIVE_BREAK:
 			desired_throttle = 1.0
 			desired_boost = true
@@ -171,6 +214,7 @@ func update(delta: float, ship_pos: Vector3, ship_basis: Basis, top_speed: float
 			if _state_timer > 2.8 or ship_pos.distance_to(enemy_pos) > 350.0:
 				state = State.ENGAGE
 				_state_timer = 0.0
+				_roll_flank(0.85)
 		State.HOLD:
 			desired_throttle = 0.05
 			target_pos = ship_pos
@@ -201,7 +245,14 @@ func update(delta: float, ship_pos: Vector3, ship_basis: Basis, top_speed: float
 	var blended := individual_force * (1.0 - group_weight) + group_force * group_weight
 
 	# Dynamic obstacle & debris avoidance (5-whisper probes)
-	var avoid := _compute_obstacle_avoidance(ship_pos, ship_basis)
+	# Re-probed a few times a second, not every tick: the belt sweep and five
+	# ray casts per ship per tick were among the heaviest AI costs, and a
+	# rock does not move out of the way in a tenth of a second.
+	_avoid_timer -= delta
+	if _avoid_timer <= 0.0:
+		_avoid_timer = AVOID_INTERVAL * _rng.randf_range(0.8, 1.2)
+		_avoid_cached = _compute_obstacle_avoidance(ship_pos, ship_basis)
+	var avoid := _avoid_cached
 	if avoid.length_squared() > 0.001:
 		blended = blended * 0.25 + avoid * 0.75
 
@@ -363,6 +414,69 @@ func _steer_toward(ship_pos: Vector3, ship_basis: Basis, target_pos: Vector3) ->
 	return to_target
 
 
+## Half-cone (as a dot-product threshold, ~50°) counted as "already ahead of
+## the target" by [method _flank_point] -- inside it, there is nothing to fix.
+const FLANK_FOV_COS := 0.64
+## How far ahead of the target the flanked point sits, in metres.
+const FLANK_LEAD_DISTANCE := 220.0
+
+
+## Roll once whether this newly-entered state should bias its target toward
+## staying in front of the pursued/fled-from ship (see [member _flank] and
+## [method _flank_point]) -- gated by [member JuiceSettings.ai_flank_enabled]
+## and scaled by [member JuiceSettings.ai_flank_chance_mult], so a settings
+## slider and the on/off checkbox can each move it independently.
+func _roll_flank(chance: float) -> void:
+	_flank = JuiceSettings.ai_flank_enabled and _rng.randf() < chance * JuiceSettings.ai_flank_chance_mult
+
+
+## Bend a pursuit/engage target from dead-on [param anchor] to a point
+## [constant FLANK_LEAD_DISTANCE] ahead of it along [param fwd] (the pursued
+## ship's own forward vector) -- a cheap dot-product FOV test skips the bend
+## when this ship is already roughly ahead of the target, since there is
+## nothing to fix in that case. Findability juice only: never changes who is
+## actually being chased, only which point the steering aims at.
+## Distance a speed-matching flanker tries to hold in front of its target.
+const FLANK_STANDOFF := 260.0
+## How hard it corrects toward [constant FLANK_STANDOFF], (m/s) per metre off.
+const FLANK_HOLD_GAIN := 0.5
+## Deepest reverse throttle, matching the flight model's reverse lever range.
+const AI_REVERSE_MIN := -0.35
+
+
+## Inside the target's forward cone and close enough to matter.
+func _in_front_of_target(ship_pos: Vector3, target: Vector3, dist: float) -> bool:
+	if dist > FLANK_LEAD_DISTANCE * 3.0 or dist < 1.0:
+		return false
+	return (ship_pos - target).normalized().dot(_target_heading()) > FLANK_FOV_COS
+
+
+## The way the target is actually going: its velocity when it is moving, its
+## nose when it is not.
+func _target_heading() -> Vector3:
+	if player_velocity.length_squared() > 4.0:
+		return player_velocity.normalized()
+	return player_forward
+
+
+## Throttle that holds [constant FLANK_STANDOFF] in front of the target: back
+## off at the speed the target closes on us, plus a correction toward the
+## standoff. The ship faces the target here, so a negative value means
+## backing away from it.
+func _speed_match_throttle(ship_pos: Vector3, target: Vector3, dist: float, top_speed: float) -> float:
+	var dir := (target - ship_pos) / maxf(dist, 0.01)
+	var closing := player_velocity.dot(-dir)
+	var wanted := -closing + (dist - FLANK_STANDOFF) * FLANK_HOLD_GAIN
+	return clampf(wanted / maxf(top_speed, 1.0), AI_REVERSE_MIN, 1.0)
+
+
+func _flank_point(anchor: Vector3, fwd: Vector3, ship_pos: Vector3) -> Vector3:
+	var to_ship := ship_pos - anchor
+	if to_ship.length_squared() > 1.0 and to_ship.normalized().dot(fwd) > FLANK_FOV_COS:
+		return anchor
+	return anchor + fwd * FLANK_LEAD_DISTANCE
+
+
 # --- State transitions -------------------------------------------------------
 
 func _evaluate_transitions(ship_pos: Vector3) -> void:
@@ -393,13 +507,26 @@ func _evaluate_transitions(ship_pos: Vector3) -> void:
 				if player_visible and dist_to_player < archetype_data.detection_range:
 					state = State.PURSUIT
 					_state_timer = 0.0
+					_roll_flank(0.85)
 			elif player_visible and dist_to_player < (archetype_data.flee_range if archetype_data != null else FLEE_RANGE):
 				state = State.FLEE
 				_state_timer = 0.0
-				_waypoint = ship_pos + (ship_pos - player_position).normalized() * 600.0
+				_roll_flank(0.20)
+				var away := (ship_pos - player_position).normalized()
+				if _flank:
+					# Even fleeing, lean the escape sideways rather than dead
+					# away, so a "fleeing" ship doesn't immediately vanish
+					# behind the player's own tail -- much rarer than the
+					# pursuit bias (20% vs 85%), per the playtest ask.
+					var side := away.cross(Vector3.UP)
+					if side.length_squared() < 0.01:
+						side = away.cross(Vector3.RIGHT)
+					away = (away * 0.6 + side.normalized() * 0.8).normalized()
+				_waypoint = ship_pos + away * 600.0
 			elif player_visible and dist_to_player < (archetype_data.detection_range if archetype_data != null else DETECTION_RANGE):
 				if archetype_data != null and archetype_data.aggression > 0.5:
 					state = State.PURSUIT
+					_roll_flank(0.85)
 				else:
 					state = State.INVESTIGATE
 				_state_timer = 0.0

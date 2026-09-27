@@ -66,6 +66,21 @@ const POOL_SIZE := 16
 var _spatial_pool: Array[AudioStreamPlayer3D] = []
 var _pool_idx := 0
 
+## Simple leaky-bucket auto-duck for AI weapon fire: every non-player shot adds
+## to [member _fire_duck_level] and is itself quieted by the level it just
+## raised, then the level drains in [method _process]. A squad all firing at
+## once is loud on the first shot and gets progressively quieter within the
+## same burst instead of every voice stacking at full volume -- unthrottled,
+## the pool has no polyphony limit at all, and a dozen weapons round-robining
+## through it at once read as a wall of noise rather than a firefight.
+var _fire_duck_level := 0.0
+const FIRE_DUCK_PER_SHOT := 1.0
+const FIRE_DUCK_MAX_DB := 13.0
+const FIRE_DUCK_DECAY := 2.2
+## Shooter key -> time (s) its next shot sound may start. See [method
+## _shot_sound_due].
+var _next_shot_sound := {}
+
 # Engine spool state
 var _current_engine_pitch := 0.65
 var _current_engine_vol_db := -20.0
@@ -265,19 +280,42 @@ func _synth_laser() -> AudioStreamWAV:
 	return _make_wav(buf, rate, false)
 
 
+## Softened per playtest feedback: with the player holding the trigger down
+## almost constantly, the old 1800 Hz ceiling and a full-weight second
+## harmonic made this the one gun that turned into a piercing, unvarying
+## whine over a long fight. Lower ceiling, a lighter harmonic, and a one-pole
+## smoothing pass ([method _soften_highs]) take the edge off; per-shot pitch/
+## volume jitter (so repeats don't sound identical) lives in the caller,
+## [method play_weapon_fire].
 func _synth_laser_pulse() -> AudioStreamWAV:
 	var rate := 22050
 	var dur := 0.11
 	var frames := int(rate * dur)
+	var samples := PackedFloat32Array()
+	samples.resize(frames)
+	for i in frames:
+		var t := float(i) / float(rate)
+		var f := lerpf(1300.0, 260.0, pow(t / dur, 0.35))
+		var env := exp(-t * 26.0)
+		samples[i] = (sin(TAU * f * t) + 0.15 * sin(TAU * f * 2.0 * t)) * env
+	_soften_highs(samples, 0.55)
 	var buf := PackedByteArray()
 	buf.resize(frames * 2)
 	for i in frames:
-		var t := float(i) / float(rate)
-		var f := lerpf(1800.0, 320.0, pow(t / dur, 0.35))
-		var env := exp(-t * 26.0)
-		var sample := (sin(TAU * f * t) + 0.25 * sin(TAU * f * 2.0 * t)) * env
-		buf.encode_s16(i * 2, clampi(int(sample * 31000.0), -32768, 32767))
+		buf.encode_s16(i * 2, clampi(int(samples[i] * 31000.0), -32768, 32767))
 	return _make_wav(buf, rate, false)
+
+
+## One-pole low-pass smoothing over a synthesized sample buffer, in place.
+## [param alpha] 0..1: how much of each output sample is the raw input versus
+## the carried-over previous output — lower keeps more top end, higher smooths
+## harder. A cheap way to soften a procedural tone's brightness without
+## reshaping its envelope or frequency sweep.
+func _soften_highs(samples: PackedFloat32Array, alpha: float) -> void:
+	var prev := 0.0
+	for i in samples.size():
+		prev = lerpf(prev, samples[i], alpha)
+		samples[i] = prev
 
 
 func _synth_laser_heavy() -> AudioStreamWAV:
@@ -702,14 +740,25 @@ func play_spatial(
 
 
 ## Play a weapon shot sound, selecting a unique voice by weapon id or category.
-func play_weapon_fire(w_type: String, pos: Vector3, is_player: bool = false, w_id: String = "") -> void:
+## [param shooter_id] identifies the firing ship (any stable id, e.g. its
+## instance id) for the shot-sound interval — see [method _shot_sound_due].
+## [param gap_mult] and [param pitch_mult] come from the shooter's firing
+## style (see [AiFirePatterns]): a stream spaces its sounds further apart, an
+## orb-lobber sounds lower, so a crowded fight is a mix of voices and rhythms.
+func play_weapon_fire(
+	w_type: String, pos: Vector3, is_player: bool = false, w_id: String = "",
+	shooter_id: int = 0, gap_mult: float = 1.0, pitch_mult: float = 1.0
+) -> void:
 	var stream: AudioStream = sound_laser
 	var p_scale := randf_range(0.96, 1.04)
 
 	match w_id:
 		"pulse_laser":
 			stream = sound_laser_pulse if sound_laser_pulse != null else sound_laser
-			p_scale = randf_range(1.08, 1.16)
+			# Wider and lower-centred than the old 1.08-1.16: that band was narrow
+			# enough that sustained fire sounded like the same sample replayed,
+			# and skewed high enough to read as shrill on top of it.
+			p_scale = randf_range(0.92, 1.10)
 		"heavy_pulse_blaster":
 			stream = sound_laser_heavy if sound_laser_heavy != null else sound_laser
 			p_scale = randf_range(0.84, 0.90)
@@ -756,15 +805,52 @@ func play_weapon_fire(w_type: String, pos: Vector3, is_player: bool = false, w_i
 				"flak": stream = sound_flak_detonation
 				_: stream = sound_laser
 
+	# Loudness jitter on top of the per-weapon pitch range above, so repeated
+	# shots from the same gun don't sound like the exact same sample played
+	# back-to-back. Widened from the original (-2.5, 1.0) — that range was
+	# barely audible shot-to-shot on a weapon fired near-continuously.
+	var v_jitter := randf_range(-4.0, 1.5)
+
+	p_scale *= pitch_mult
+	var key := shooter_id if shooter_id != 0 else (-1 if is_player else hash(w_type + w_id))
+	if not _shot_sound_due(key, stream, p_scale, gap_mult):
+		return
+
 	if is_player:
 		_cockpit_player.stream = stream
 		_cockpit_player.pitch_scale = p_scale
+		_cockpit_player.volume_db = v_jitter
 		_cockpit_player.bus = BUS_WEAPONS
 		_cockpit_player.play()
 	else:
+		var duck_db := minf(_fire_duck_level * 2.0, FIRE_DUCK_MAX_DB)
 		var p := play_spatial(stream, pos, 24.0, 2600.0, 0.12, BUS_EXTERIOR)
 		if p != null:
 			p.pitch_scale = p_scale
+			p.volume_db += v_jitter - duck_db
+		_fire_duck_level += FIRE_DUCK_PER_SHOT
+
+
+## Shot-sound interval ([member JuiceSettings.shot_sound_interval]): while a
+## gun keeps firing, its sound plays at its own rhythm instead of once per
+## shot. The next one is due [member JuiceSettings.shot_sound_interval_pct]
+## percent of this sound's (pitch-adjusted) length after it starts: 100% is
+## back to back, never overlapping. 0% or below, or the setting off, plays
+## every shot as before.
+func _shot_sound_due(key: int, stream: AudioStream, pitch: float, gap_mult := 1.0) -> bool:
+	var pct := JuiceSettings.shot_sound_interval_pct
+	if not JuiceSettings.shot_sound_interval or pct <= 0.0 or stream == null:
+		return true
+	var now := Time.get_ticks_msec() / 1000.0
+	if now < float(_next_shot_sound.get(key, 0.0)):
+		return false
+	var length := stream.get_length() / maxf(pitch, 0.01)
+	_next_shot_sound[key] = now + length * pct / 100.0 * gap_mult
+	if _next_shot_sound.size() > 128:
+		for k: int in _next_shot_sound.keys():
+			if float(_next_shot_sound[k]) < now:
+				_next_shot_sound.erase(k)
+	return true
 
 
 ## Start or sustain a continuous beam audio loop (cockpit for player, spatial for AI).
@@ -912,3 +998,4 @@ func _process(delta: float) -> void:
 		_beam_player.volume_db = move_toward(_beam_player.volume_db, _beam_target_vol, delta * 85.0)
 		if _beam_target_vol <= -70.0 and _beam_player.volume_db <= -70.0:
 			_beam_player.stop()
+	_fire_duck_level = maxf(_fire_duck_level - FIRE_DUCK_DECAY * delta, 0.0)

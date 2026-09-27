@@ -44,9 +44,13 @@ func _initialize() -> void:
 		quit(1)
 		return
 
-	# Knock it loose, pushing it away from the planet's centre.
+	# Knock it loose, pushing it away from the planet's centre. The player is
+	# brought alongside: flying rocks farther than ROCK_DEMOTE_RANGE from them
+	# are frozen back into scenery, and the rock picked can be kilometres off.
 	var away := (anchor_pos0 - space.planet_centre).normalized()
-	root_node._on_rock_impacted(rock, null, 0.0, anchor_pos0, -away, 90.0)
+	root_node.model.halt()
+	root_node.model.global_position = anchor_pos0 - away * 300.0
+	root_node._on_rock_impacted(null, 0.0, anchor_pos0, -away, 90.0, rock)
 	if rock.kinematic:
 		push_error("rock check: hard knock did not free the rock")
 		failures += 1

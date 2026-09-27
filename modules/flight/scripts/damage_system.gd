@@ -107,6 +107,39 @@ func bind(view: ShipView, model: FlightModel, hull_holder: Node3D) -> void:
 	_effect_list.clear()
 
 
+## Where broken-off debris is parented. Null means the model's own parent (the
+## player's scene root). An AI ship sets its world host here: its model's
+## parent is the AiShip node itself, and debris parented there would vanish
+## the moment the dead ship is freed.
+var debris_parent: Node = null
+
+
+## Break off one random part that is still attached, weighted like [method
+## handle_impact] (engines and cockpits likelier than greebles). Returns false
+## when nothing breakable is left. [param severity] 0..1 goes to the effects.
+func break_random_part(severity := 0.5) -> bool:
+	if _view == null or _model == null:
+		return false
+	var candidates: Array = []
+	for placement in _view.resolution.placements:
+		# Only parts still on the hull. Placements are the design and never
+		# shrink, so an already-lost part would otherwise be "lost" again.
+		if placement.is_chassis() or not _view.part_nodes.has(placement.path):
+			continue
+		var weight := 1
+		match placement.part.category:
+			"engine": weight = 3
+			"cockpit": weight = 3
+			"weapon": weight = 2
+			"wing": weight = 2
+		for _w in weight:
+			candidates.append(placement)
+	if candidates.is_empty():
+		return false
+	_break_off(candidates.pick_random() as Placement, severity)
+	return true
+
+
 ## Called by [method FlightModel._check_collision] when the ship hits something
 ## fast enough. Picks one or more random parts from the ship and breaks them off.
 func handle_impact(impact_speed: float) -> void:
@@ -194,41 +227,14 @@ func _break_off(placement: Placement, speed_fraction: float) -> void:
 		broken.world_pos = orig_xform.origin
 
 		# Wrap into a collidable RigidBody3D so detached pieces become physical, collidable debris
-		var rb := RigidBody3D.new()
-		var s_name := "chassis" if path == "" else path.replace("/", "__")
-		rb.name = "Debris_" + s_name
-		rb.top_level = true
-		rb.collision_layer = 4
-		rb.collision_mask = 1 | 2 | 4
-
-		var col_shape := CollisionShape3D.new()
-		var box_shape := BoxShape3D.new()
-		var b_size := Vector3(1.5, 0.8, 1.8)
-		for child in node.get_children():
-			if child is MeshInstance3D and child.mesh != null:
-				var maabb: AABB = child.mesh.get_aabb()
-				b_size = maabb.size.clamp(Vector3(0.5, 0.5, 0.5), Vector3(8.0, 8.0, 8.0))
-				break
-		box_shape.size = b_size
-		col_shape.shape = box_shape
-		rb.add_child(col_shape)
-
-		node.transform = Transform3D.IDENTITY
-		rb.add_child(node)
-
-		if _model != null and _model.get_parent() != null:
-			_model.get_parent().add_child(rb)
-			rb.global_transform = orig_xform
-
 		var base_vel: Vector3 = _model.velocity if _model != null else Vector3.ZERO
-		rb.linear_velocity = base_vel + broken.drift_dir * broken.drift_speed
-		rb.angular_velocity = Vector3(randf_range(-4.0, 4.0), randf_range(-4.0, 4.0), randf_range(-4.0, 4.0))
+		var host: Node = debris_parent if debris_parent != null else _model.get_parent()
+		var rb := DebrisRegistry.wrap_rigidbody(
+			node, orig_xform, host,
+			base_vel + broken.drift_dir * broken.drift_speed,
+			Vector3(randf_range(-4.0, 4.0), randf_range(-4.0, 4.0), randf_range(-4.0, 4.0)),
+		)
 		broken.debris_node = rb
-
-		# Self-cleanup after 35s to prevent debris accumulation
-		var tw := rb.create_tween()
-		tw.tween_interval(35.0)
-		tw.tween_callback(rb.queue_free)
 
 	# Remove from the view registry, including pruning muzzles and exhausts
 	if _view != null:
@@ -392,9 +398,6 @@ func break_all_parts() -> Array[BrokenPart]:
 			var parent := node.get_parent()
 			if parent != null:
 				parent.remove_child(node)
-			if _model != null and _model.get_parent() != null:
-				_model.get_parent().add_child(node)
-				node.global_transform = orig_xform
 
 			for child in node.get_children():
 				if child is Area3D:
@@ -410,7 +413,15 @@ func break_all_parts() -> Array[BrokenPart]:
 				out_dir = Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized()
 			broken.drift_dir = (out_dir + Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * 0.5).normalized()
 			broken.drift_speed = randf_range(18.0, 48.0)
-			broken.debris_node = node
+			# Full-destruction wreckage gets the same real, collidable
+			# RigidBody3D treatment as a mid-flight part loss (above) — this
+			# used to be a bare decorative Node3D with no collision shape at
+			# all, so a dead ship's pieces passed through everything.
+			broken.debris_node = DebrisRegistry.wrap_rigidbody(
+				node, orig_xform, _model.get_parent(),
+				_model.velocity + broken.drift_dir * broken.drift_speed,
+				Vector3(randf_range(-3.0, 3.0), randf_range(-3.0, 3.0), randf_range(-3.0, 3.0)),
+			)
 			out.append(broken)
 
 	_view.part_nodes.clear()

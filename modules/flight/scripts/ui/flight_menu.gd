@@ -12,7 +12,7 @@
 ## [method popup_for], clears and fills its content, then calls
 ## [method recentre_open].
 class_name FlightMenu
-extends HBoxContainer
+extends HFlowContainer
 
 ## A category button was pressed; the HUD should fill that popup's content.
 signal category_pressed(id: int)
@@ -25,7 +25,9 @@ var _open_id := -1
 
 
 func _ready() -> void:
-	add_theme_constant_override("separation", BuilderTheme.GAP)
+	# A flow, not a row: on a narrow (portrait) screen the icons wrap.
+	add_theme_constant_override("h_separation", BuilderTheme.GAP)
+	add_theme_constant_override("v_separation", BuilderTheme.GAP)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
@@ -127,6 +129,9 @@ func _measure_open(id: int) -> void:
 	var popup := _popups[id] as DraggablePopup
 	if popup == null or not is_instance_valid(popup):
 		return
+	# The sprayed-sticker look, re-applied to whatever the HUD just filled in.
+	PopupSkin.skin(popup)
+	PopupSkin.style_heading(popup.title_label())
 	popup.auto_fit(_hud.size)
 	_place_open(id)
 
@@ -285,6 +290,11 @@ class DraggablePopup:
 		handle.offset_bottom = HEADER_H
 		_scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_scroll.offset_top = HEADER_H + BuilderTheme.GAP
+
+
+	## The header's title, for [PopupSkin] to restyle.
+	func title_label() -> Label:
+		return _title_label
 
 
 	func _on_drag(by: Vector2) -> void:

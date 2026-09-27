@@ -112,6 +112,11 @@ var _save_status: Label
 
 
 func _ready() -> void:
+	# This lab is opened directly in the editor (F6, see the class doc), never
+	# through the launcher — nothing else on the way in calls [method
+	# Session.start], so without this the persisted dials below would always
+	# read back their hardcoded defaults instead of last session's values.
+	Session.load_from_disk()
 	get_window().theme = BuilderTheme.build()
 	_build_generator()
 	_build_environment()
@@ -129,6 +134,7 @@ func _build_generator() -> void:
 	generator.name = "Generator"
 	generator.system_seed = Session.seed if Session.seed != 0 else randi()
 	generator.time_scale = Session.solar_time_scale
+	generator.distance_scale = Session.solar_distance_scale
 	generator.high_res_geometry = Session.high_res
 	Planet.high_detail = Session.high_res
 	# generator's own _ready() calls generate_system() once it enters the tree,
@@ -508,17 +514,20 @@ func _build_ui() -> void:
 
 	var panel := PanelContainer.new()
 	panel.name = "Panel"
-	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	# Full height, so the list scrolls inside the screen on a short/portrait
+	# display instead of running off the bottom; never wider than the screen.
+	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
 	panel.offset_left = BuilderTheme.PAD
 	panel.offset_top = BuilderTheme.PAD
-	panel.custom_minimum_size = Vector2(300, 0)
+	panel.offset_bottom = -BuilderTheme.PAD
+	panel.custom_minimum_size = Vector2(minf(300.0, get_viewport().get_visible_rect().size.x - BuilderTheme.PAD * 2.0), 0)
 	panel.add_theme_stylebox_override(
 		"panel", BuilderTheme.flat(BuilderTheme.panel_bg(), BuilderTheme.border(), 6)
 	)
 	canvas.add_child(panel)
 
 	var outer_scroll := ScrollContainer.new()
-	outer_scroll.custom_minimum_size = Vector2(0, 700)
+	outer_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	outer_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	panel.add_child(outer_scroll)
 
@@ -872,6 +881,8 @@ func _distance_index_for(scale: float) -> int:
 func _on_distance_preset_selected(idx: int) -> void:
 	var preset: Dictionary = SolarSystemGenerator.DISTANCE_PRESETS[idx]
 	generator.distance_scale = float(preset["scale"])
+	Session.solar_distance_scale = generator.distance_scale
+	Session.save_to_disk()
 	generator.generate_system()
 	_build_backdrop()
 	_frame_camera_to_system()
@@ -882,12 +893,14 @@ func _on_distance_preset_selected(idx: int) -> void:
 func _on_time_scale_changed(v: float) -> void:
 	generator.time_scale = v
 	Session.solar_time_scale = v
+	Session.save_to_disk()
 	_update_time_value_label()
 
 
 func _on_time_scale_preset_pressed(mult: float) -> void:
 	generator.time_scale = mult
 	Session.solar_time_scale = mult
+	Session.save_to_disk()
 	if _time_slider != null:
 		# set_value_no_signal, not .value: a preset above the slider's own
 		# range (see TIME_SCALE_PRESETS) would otherwise fire value_changed

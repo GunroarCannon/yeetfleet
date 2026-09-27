@@ -18,7 +18,9 @@ class_name PhysWorld
 extends RefCounted
 
 ## The bodies in the world this step. The scene mutates this list; the world
-## never adds or removes on its own.
+## does not add or remove a body on its own — except a body whose [member
+## PhysBody.node] has gone null, pruned at the top of [method step] as a
+## safety net (see that pruning's doc for why one can appear at all).
 var bodies: Array[PhysBody] = []
 
 ## The feel dials for this world. Defaults are the grounded-ish starting point;
@@ -58,6 +60,25 @@ func clear() -> void:
 	_scenery_dirty = true
 
 
+## Safety net against a body whose [member PhysBody.node] went null without
+## going through [method remove] first — every known add/remove path in the
+## codebase does pair correctly (see the module's own audit notes), but a
+## body stuck in [member bodies] with no node makes [method PhysBody.position]
+## fail and [method step] would otherwise spend every future frame re-erroring
+## on the same pair forever instead of just dropping the one bad entry. Rare
+## and worth tracking down further if it recurs — [method PhysBody.position]
+## logs a one-time diagnostic when this happens.
+func _prune_nodeless_bodies() -> void:
+	var i := bodies.size() - 1
+	while i >= 0:
+		if bodies[i].node == null:
+			var stale := bodies[i]
+			bodies.remove_at(i)
+			if stale.kinematic:
+				_scenery_dirty = true
+		i -= 1
+
+
 ## A body's kinematic flag changed outside the world (a rock promoted to free
 ## body or demoted back to scenery): the scenery index must rebuild next step so
 ## the body lands in the right bucket.
@@ -68,6 +89,7 @@ func mark_scenery_dirty() -> void:
 ## One physics step at `delta` seconds: broadphase, pair resolution, then
 ## integration. Call after every controller has written its body's velocity.
 func step(delta: float) -> void:
+	_prune_nodeless_bodies()
 	if bodies.size() < 2:
 		# Fewer than two bodies cannot collide; integrate what there is.
 		for body in bodies:
@@ -120,6 +142,20 @@ func _query_scenery(m: PhysBody, delta: float, budget: int) -> int:
 	var reach := m.radius + _scenery_max_r + m.velocity.length() * delta
 	var span := int(ceil(reach / maxf(_scenery_cell, 0.001)))
 	var base := _cell_of(m)
+	# A big or fast mover's neighbourhood can be thousands of cells (a
+	# capital hull's is 17³) while only a few hundred hold a rock: then walk
+	# the occupied cells instead of probing every empty one. Same pairs.
+	var side := 2 * span + 1
+	if side * side * side > _scenery_grid.size():
+		for key: Vector3i in _scenery_grid:
+			var d := key - base
+			if absi(d.x) > span or absi(d.y) > span or absi(d.z) > span:
+				continue
+			for s in _scenery_grid[key] as Array:
+				budget = _try_pair(s as PhysBody, m, delta, budget)
+				if budget <= 0:
+					return budget
+		return budget
 	for dx in range(-span, span + 1):
 		for dy in range(-span, span + 1):
 			for dz in range(-span, span + 1):

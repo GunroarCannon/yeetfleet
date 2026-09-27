@@ -28,6 +28,19 @@ signal boost_changed(level: float)
 ## Emitted when the ship enters or recovers from an out-of-control spin state.
 signal out_of_control_changed(active: bool)
 
+## Emitted from [method _on_phys_impacted] after a genuinely physical hit
+## (ship-to-ship, ship-to-rock/scenery) is resolved — distinct from weapon
+## damage, which never goes through the physics solver. [FlightRoot] uses
+## this for the camera bump-zoom juice effect on the player's own ship.
+## [param other_radius]/[param other_kinematic] describe what was hit, so a
+## planet/station/anomaly can be told apart from a ship or a rock — see
+## [method FlightRoot._on_model_collided].
+signal collided(closing: float, other_radius: float, other_kinematic: bool)
+## The same hit as [signal collided], with what was hit and the contact normal
+## (pointing from [param other] toward this ship). The slingshot profile
+## ([SlingRun]) picks its bounce from it.
+signal impacted(other: PhysBody, normal: Vector3, closing: float)
+
 
 func _ready() -> void:
 	add_to_group("flight_models")
@@ -87,6 +100,28 @@ const SPEED_MAX := 520.0
 
 var command := Command.new()
 
+# --- Pilot overrides (movement profiles) ---
+
+## Velocity is flown by a movement profile's pilot ([SwipePilot], [SlingRun])
+## instead of throttle and assist: no thrust, no assist, no speed ceiling here.
+## Gravity, orbital assist and collisions still apply.
+var external_drive := false
+## The hull spins freely (a slingshot launch): the stick is ignored, a knock's
+## tumble is not snapped to a spinning top, and it decays at
+## [member free_spin_damp] per second.
+var free_spin := false
+var free_spin_damp := 0.15
+## With [member free_spin]: the nose follows the velocity like a rocket and the
+## hull rolls about it at [member rocket_roll_rate] rad/s, instead of tumbling.
+var rocket_spin := false
+var rocket_roll_rate := 0.0
+## Ramming: damage this ship deals when it rams, and takes when rammed. A
+## movement profile built around ramming raises the first and lowers the other.
+var ram_dealt_mult := 1.0
+var ram_taken_mult := 1.0
+## Scales [method _durability] (how hard this hull is to crush).
+var durability_mult := 1.0
+
 ## True when the throttle sets a speed to hold and the ship follows its nose.
 ## 0 = manual, 1 = damping, 2 = assist (full fly-by-wire).
 ## Assist is the default now: the player spawns in orbit and assist's "coasting"
@@ -104,6 +139,14 @@ var assist := true
 var velocity := Vector3.ZERO
 ## The velocity this ship last handed the solver (see [method _pull_solver_state]).
 var _phys_velocity_written := Vector3.ZERO
+## A velocity the ship is carried along at on top of its own, as if flying
+## inside a moving frame: it moves the ship but is not part of [member
+## velocity], so the flight assist never brakes it, the nose never turns to it
+## and the speed ceiling never clips it. Written by [AiShip]'s chase assist.
+var frame_velocity := Vector3.ZERO
+## The [member frame_velocity] folded into the solver's copy last step, taken
+## back out when the solver's result is read (see [method _pull_solver_state]).
+var _frame_velocity_written := Vector3.ZERO
 ## Current body-frame angular rate, rad/s: x pitch, y yaw, z roll.
 var angular := Vector3.ZERO
 
@@ -166,6 +209,21 @@ var _visual: Node3D = null
 ## the design/Session apply so the two never fight over [member Node3D.scale].
 var _squash_scale := Vector3.ONE
 var _squash_recovery := 0.5
+## Where the squash scales about, in [member _visual]'s local space — the hull's
+## centre. Scaling about the holder's own origin instead slid the whole hull
+## toward that origin on every hit and back as it recovered, which read as the
+## ship jumping and snapping home. Set by whoever builds the ship.
+var squash_pivot := Vector3.ZERO
+## [member _visual]'s resting position, captured when it is bound.
+var _visual_rest_pos := Vector3.ZERO
+## Visual knockback (see [member JuiceSettings.knockback_visual]): an offset of
+## the drawn hull in ship space, sprung back home, and its spring velocity.
+var _recoil := Vector3.ZERO
+var _recoil_vel := Vector3.ZERO
+## Peak visual knockback, in metres per unit of knockback strength.
+const RECOIL_METRES := 0.14
+## Hard cap on the visual knockback offset, in metres.
+const RECOIL_MAX := 3.0
 
 ## Debug warp speed: held key multiplies effective thrust and speed ceiling.
 ## Not part of the flight model — purely a debug tool for exploring the
@@ -210,6 +268,11 @@ var asymmetric_drag := Vector3.ZERO
 ## An induced tumble is capped so a violent hit can spin the ship fast and disorienting,
 ## but not infinitely break numerical integration.
 const TUMBLE_MAX := 18.0
+## How fast (rad/s²-equivalent lerp rate) an out-of-control tumble's axis snaps
+## to world-up -- see [method _integrate_rotation]'s "simple spinning-top
+## tumble" comment. High enough to converge within a couple of frames instead
+## of a visible slow drift.
+const TOP_SPIN_SNAP := 16.0
 ## Approach speed (m/s) below which a contact is a touch, not a crash.
 const IMPACT_TOUCH_SPEED := 6.0
 ## Approach speed at which a hit starts breaking parts off.
@@ -285,7 +348,9 @@ const PRESET_ARCADE := {
 const PRESET_SIM := {
 	"speed_mult": 1.0,
 	"accel_mult": 1.0,
-	"turn_mult": 1.0,
+	# Was 1.0: the design's raw agility turned most hulls far too slowly to
+	# fight in.
+	"turn_mult": 1.9,
 	"assist_autority": ASSIST_AUTHORITY,
 	"damping": 0.8,
 	"turn_spool": ROTATION_SPOOL,
@@ -318,6 +383,7 @@ func configure(
 	_damage = damage
 	if visual != null:
 		_visual = visual
+		_visual_rest_pos = visual.position
 	if stats == null:
 		return
 	# Base stats from the design.
@@ -407,9 +473,17 @@ func set_velocity(value: Vector3) -> void:
 		_phys_velocity_written = value
 
 
+## This ship's body in the [PhysWorld], or null when it is not bound to one.
+func phys_body() -> PhysBody:
+	return _phys
+
+
 ## Drop all motion. Used when the scene restarts the ship rather than reloading.
 func halt() -> void:
 	velocity = Vector3.ZERO
+	_knock_pending = Vector3.ZERO
+	_recoil = Vector3.ZERO
+	_recoil_vel = Vector3.ZERO
 	angular = Vector3.ZERO
 	_tumble = Vector3.ZERO
 	_assist_lockout = 0.0
@@ -457,6 +531,7 @@ func _arcade_pivot_mult() -> float:
 func _physics_process(delta: float) -> void:
 	_update_boost(delta)
 	_pull_solver_state(delta)
+	_feed_knockback(delta)
 	_integrate_rotation(delta)
 	_integrate_translation(delta)
 	_update_visual_roll(delta)
@@ -467,6 +542,26 @@ func _physics_process(delta: float) -> void:
 	# world (the tuning test volume, a combat arena without physics).
 	if phys_world == null:
 		_check_collision()
+	_detect_teleport(delta)
+
+
+## Last physics tick's position, for [method _detect_teleport].
+var _last_tick_pos := Vector3.INF
+
+
+## With physics interpolation on, a ship is drawn between its previous and
+## current tick positions. A teleport (respawn, location change, arena jump)
+## would then be drawn as a one-frame streak across the scene. Any move far
+## beyond what this tick's velocity explains is treated as a teleport and the
+## interpolation is reset. Cheap enough to run every tick, and it covers every
+## caller that moves the ship, without each one having to remember to.
+func _detect_teleport(delta: float) -> void:
+	var here := global_position
+	if _last_tick_pos != Vector3.INF:
+		var expected := (velocity + frame_velocity).length() * delta
+		if here.distance_to(_last_tick_pos) > expected * 3.0 + 25.0:
+			reset_physics_interpolation()
+	_last_tick_pos = here
 
 
 ## Apply an impact spin from a physical collision or explosion torque.
@@ -492,15 +587,21 @@ func apply_radial_blast(blast_origin: Vector3, max_radius: float, peak_force: fl
 	var falloff := 1.0 - clampf(dist / max_radius, 0.0, 1.0)
 	var intensity := falloff * falloff
 	var push_dir := diff.normalized() if dist > 0.01 else -global_transform.basis.z
-	var impulse := push_dir * (peak_force * intensity)
+	# The player gets a scaled-down shove and spin (see
+	# [member JuiceSettings.player_blast_push]): at full strength a nearby
+	# blast threw the ship hundreds of metres and tumbled it for seconds.
+	var push_mult := JuiceSettings.player_blast_push if is_player() else 1.0
+	var spin_mult := JuiceSettings.player_blast_spin if is_player() else 1.0
+	var impulse := push_dir * (peak_force * intensity * push_mult)
 	velocity += impulse / _ship_mass()
 
 	var spin_axis := push_dir.cross(Vector3(0.3, 0.9, -0.2)).normalized()
 	if spin_axis.length_squared() < 0.01:
 		spin_axis = Vector3.UP
-	var torque := spin_axis * (peak_torque * intensity)
-	var ooc_time := clampf(intensity * 2.5, 0.3, 3.0)
-	apply_impact_spin(torque, ooc_time)
+	var torque := spin_axis * (peak_torque * intensity * spin_mult)
+	var ooc_time := clampf(intensity * 2.5, 0.3, 3.0) * spin_mult
+	if spin_mult > 0.0:
+		apply_impact_spin(torque, ooc_time if ooc_time >= 0.15 else 0.0)
 
 	if is_player():
 		Juice.shake(clampf(intensity * 0.85, 0.2, 1.0), 0.45)
@@ -510,6 +611,9 @@ func apply_radial_blast(blast_origin: Vector3, max_radius: float, peak_force: fl
 # --- Rotation ---------------------------------------------------------------
 
 func _integrate_rotation(delta: float) -> void:
+	if free_spin:
+		_integrate_free_spin(delta)
+		return
 	var wanted := Vector3(
 		command.pitch * turn_rate,
 		command.yaw * turn_rate,
@@ -522,26 +626,24 @@ func _integrate_rotation(delta: float) -> void:
 		if _out_of_control_timer <= 0.0 and out_of_control:
 			out_of_control = false
 			out_of_control_changed.emit(false)
-		# Cartoony top-spin: steer the tumble axis toward world-up so the ship
-		# spins like a gyroscope top rather than flopping randomly on all axes.
-		# The rate is preserved — only the direction drifts to Y-dominant.
+		# Simple spinning-top tumble: the tumble axis snaps to world-up almost
+		# immediately and stays there, rate preserved — a single fast, clean
+		# spin rather than a chaotic multi-axis wobble. (Playtest ask: "a
+		# simple spin, like spinning a top, fast and quick" — this used to
+		# blend in slowly and layer a jittery wobble on top so the first half
+		# second read as chaos on purpose; that read as broken, not cartoony.)
 		var spin_speed := _tumble.length()
 		if spin_speed > 0.01:
 			var top_axis := Vector3.UP * (1.0 if _tumble.y >= 0.0 else -1.0)
-			# Blend toward world-Y by ~4 rad/s² — fast enough to feel snappy,
-			# slow enough that the first half-second still reads as "chaos".
-			var axis_now := (_tumble / spin_speed).lerp(top_axis, clampf(delta * 4.0, 0.0, 1.0))
+			var axis_now := (_tumble / spin_speed).lerp(top_axis, clampf(delta * TOP_SPIN_SNAP, 0.0, 1.0))
 			_tumble = axis_now.normalized() * spin_speed
-		var jitter := Vector3(
-			sin(Time.get_ticks_msec() * 0.011) * 0.5,
-			cos(Time.get_ticks_msec() * 0.008) * 0.5,
-			sin(Time.get_ticks_msec() * 0.014) * 0.5
-		)
-		wanted = wanted * 0.15 + jitter * (turn_rate * 0.4)
+		wanted = Vector3.ZERO
 
 
 	# Asymmetric drag from missing wings / detached parts pulls the ship continuously:
-	if asymmetric_drag.length_squared() > 1e-6:
+	# The player keeps a steady ship (only the lost turn rate) unless
+	# [member JuiceSettings.player_wing_spiral] says otherwise; the AI spirals.
+	if asymmetric_drag.length_squared() > 1e-6 and (JuiceSettings.player_wing_spiral or not is_player()):
 		var fwd_speed := forward_speed()
 		var drag_factor := clampf(fwd_speed / 120.0, 0.2, 2.5)
 		wanted += asymmetric_drag * drag_factor
@@ -590,6 +692,26 @@ func _integrate_rotation(delta: float) -> void:
 	global_transform = Transform3D(basis.orthonormalized(), global_transform.origin)
 
 
+## A launched hull: no pilot, no assist. Either tumbles about whatever axis
+## the knocks gave it, or points its nose along the flight path and rolls.
+func _integrate_free_spin(delta: float) -> void:
+	angular = Vector3.ZERO
+	var basis := global_transform.basis
+	if rocket_spin and velocity.length_squared() > 1.0:
+		var fwd := velocity.normalized()
+		var up := basis.y if absf(basis.y.dot(fwd)) < 0.95 else basis.x
+		var aligned := Basis.looking_at(fwd, up)
+		basis = basis.slerp(aligned, clampf(delta * 8.0, 0.0, 1.0))
+		if absf(rocket_roll_rate) > 0.0:
+			basis = Basis(fwd, rocket_roll_rate * delta) * basis
+		_tumble = Vector3.ZERO
+	elif _tumble.length_squared() > 1e-10:
+		var rate := _tumble.length()
+		basis = Basis(_tumble / rate, rate * delta) * basis
+		_tumble *= clampf(1.0 - free_spin_damp * delta, 0.0, 1.0)
+	global_transform = Transform3D(basis.orthonormalized(), global_transform.origin)
+
+
 # --- Translation ------------------------------------------------------------
 
 func _integrate_translation(delta: float) -> void:
@@ -615,7 +737,10 @@ func _integrate_translation(delta: float) -> void:
 	# lockout window the ship keeps whatever the collision handed it.
 	var ctl := 0 if _assist_lockout > 0.0 else assist_mode
 
-	if ctl == 2:
+	if external_drive:
+		# A movement profile's pilot owns the velocity (see [member external_drive]).
+		pass
+	elif ctl == 2:
 		# Fly-by-wire: compute the velocity the pilot is asking for — the target
 		# speed, along the nose — and accelerate towards it. This one line is the
 		# whole difference between the full-assist mode.
@@ -647,6 +772,9 @@ func _integrate_translation(delta: float) -> void:
 	var ceiling := top_speed * BOOST_SPEED * 1.6
 	if warp_active:
 		ceiling *= WARP_SPEED_MULT
+	if external_drive:
+		# The pilot caps its own dashes and launches; this only stops a runaway.
+		ceiling = top_speed * (WARP_SPEED_MULT * 2.0 if warp_active else 6.0)
 	if velocity.length() > ceiling:
 		velocity = velocity.normalized() * ceiling
 
@@ -683,10 +811,12 @@ func _integrate_translation(delta: float) -> void:
 	# solver's swept test measures the same travel this node is about to make.
 	# The node moves here, not in the world: this is a driven body that keeps
 	# its tuned hand-integration.
+	var carried := velocity + frame_velocity
 	if _phys != null:
-		_phys.velocity = velocity
-		_phys_velocity_written = velocity
-	global_position += velocity * delta
+		_phys.velocity = carried
+		_phys_velocity_written = carried
+		_frame_velocity_written = frame_velocity
+	global_position += carried * delta
 
 
 func _strafe_vector(basis: Basis) -> Vector3:
@@ -883,6 +1013,15 @@ func clear_phys_world() -> void:
 	phys_world = null
 
 
+## The RID of this ship's Godot physics collider (the "GodotCollider"
+## [AnimatableBody3D] raycasts and direct-space queries actually hit), or an
+## invalid [RID] if the model has not synced to a [PhysWorld] yet. Weapon fire
+## uses this to exclude the shooter's own hull from its hit raycast.
+func get_collider_rid() -> RID:
+	var col_body := get_node_or_null("GodotCollider") as CollisionObject3D
+	return col_body.get_rid() if col_body != null else RID()
+
+
 ## Re-derive this body's collision volume from rebuilt geometry, without touching
 ## the world binding or the mass.
 ##
@@ -951,8 +1090,25 @@ func _on_phys_impacted(other: PhysBody, impulse: float, point: Vector3, normal: 
 		var seconds := clampf(0.015 + closing * 0.0004, 0.02, profile.hitstop_max)
 		Juice.hitstop(seconds * profile.hitstop_scale, 0.15)
 	# A little shake so even a mid hit reads in the camera.
-	Juice.shake(clampf(closing * 0.003, 0.08, 0.45), 0.3)
+	# Any ship's bump, scaled by how near the camera it happened.
+	Juice.shake(clampf(closing * 0.003, 0.08, 0.45) * AddonVfx.camera_falloff(global_position, 400.0), 0.3)
 	_trigger_squash(profile, normal, closing)
+	var other_radius := other.radius if other != null else 0.0
+	var other_kinematic := other != null and other.kinematic
+	collided.emit(closing, other_radius, other_kinematic)
+	impacted.emit(other, normal, closing)
+
+
+## A ram that landed without the hulls touching: the player's attack reach
+## ([member JuiceSettings.player_ram_reach]) caught this ship. It takes the
+## ram's damage, a shove along [param push] (unit, away from the rammer) and a
+## spin, as if they had collided; the rammer takes nothing from it.
+func take_reach_ram(rammer: PhysBody, point: Vector3, push: Vector3, closing: float) -> void:
+	_apply_collision_damage(rammer, 0.0, point, closing)
+	set_velocity(velocity + push * closing * 0.35)
+	var lever := point - global_position
+	apply_impact_spin(lever.cross(push) * (closing * 0.08) + push.cross(global_transform.basis.y) * (closing * 0.04))
+	_trigger_squash(_active_profile(), -push, closing)
 
 
 func is_player() -> bool:
@@ -964,11 +1120,12 @@ func _durability() -> float:
 	var hp := 160.0
 	if _stats != null:
 		hp = maxf(_stats.get_stat("hull_hp"), 80.0)
+	hp *= JuiceSettings.hull_hp_mult
 	var m := _ship_mass()
-	var d := hp + m * 2.5
+	var d := (hp + m * 2.5) * durability_mult
 	if is_player():
 		# Player parts have naturally higher strength and durability
-		d *= 2.5
+		d *= JuiceSettings.player_durability_mult
 	return d
 
 
@@ -994,7 +1151,11 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 	if closing < 10.0:
 		return
 
-	var base_dmg := (closing - 8.0) * 2.5
+	# Coefficients bumped (2.5→3.5 base, 1.4→2.0 past the >25 floor) per
+	# playtest feedback wanting more "bump to destroy" — a faster ram should
+	# hit noticeably harder, not just marginally. [member JuiceSettings.
+	# ram_damage_mult] scales the whole result on top, for live tuning.
+	var base_dmg := (closing - 8.0) * 3.5
 	var my_d := _durability()
 	var their_d := _other_durability(other)
 
@@ -1006,7 +1167,7 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 	var dmg := base_dmg * durability_ratio * speed_ratio * 1.5
 
 	if closing > 25.0:
-		dmg = maxf(dmg, (closing - 18.0) * 1.4)
+		dmg = maxf(dmg, (closing - 18.0) * 2.0)
 
 	if is_player():
 		# Heroic ramming advantage: player ship shrugs off self damage and hits harder
@@ -1018,13 +1179,28 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 			if other_parent != null and not (other_parent is AiShip):
 				dmg *= 2.0
 
+	dmg *= JuiceSettings.ram_damage_mult
+	# Movement-profile ramming dials: what the rammer deals, what this hull takes.
+	dmg *= ram_taken_mult
+	if other != null and other.node is FlightModel:
+		dmg *= (other.node as FlightModel).ram_dealt_mult
+
 	var p := get_parent()
 	if p != null:
 		if is_player() and p.has_method("take_damage"):
 			p.take_damage(dmg, point)
 		elif p is AiShip:
 			var ai := p as AiShip
-			ai.take_damage(dmg)
+			# Popcorn enemies (see AiFactions.ArchetypeData.popcorn): any
+			# ramming hit that reaches this point (closing >= 10 m/s) pops
+			# them outright, rather than needing enough scaled damage to.
+			if ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled:
+				dmg = ai.hp + 1.0
+			# Rammed by the player's own ship (its owner is the flight root, not
+			# an AiShip) — counts as the player's hit for kill cams and stats.
+			var rammer: Node = other.node.get_parent() if other != null and other.node != null else null
+			var by_player := rammer != null and not (rammer is AiShip) and rammer.has_method("take_damage")
+			ai.take_damage(dmg, by_player)
 			if closing > 22.0 and ai.has_method("break_random_part"):
 				ai.break_random_part()
 
@@ -1036,36 +1212,142 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 ## gated on [member StyleProfile.squash_enabled] — the style dial exists
 ## precisely so this deformation can be turned off for a "grounded" look.
 func _trigger_squash(profile: PhysProfile, normal: Vector3, closing: float) -> void:
-	if _visual == null or profile == null or profile.squash_amount <= 0.0:
+	if profile == null or profile.squash_amount <= 0.0:
+		return
+	var local_normal := (global_transform.basis.inverse() * normal).normalized()
+	# How hard: scales with closing speed past the touch threshold, capped by the
+	# profile's own dial so a plinking hit barely dents while a slam maxes out.
+	var severity := clampf((closing - IMPACT_TOUCH_SPEED) / (IMPACT_DAMAGE_SPEED * 2.0), 0.0, 1.0)
+	apply_squash(local_normal, severity, profile.squash_amount, profile.squash_recovery)
+
+
+## Ship-local squash & stretch, [param local_dir] the impact axis (ship
+## space), [param severity] 0..1. Shared by [method _trigger_squash] (a
+## physical collision, with its own profile-driven amount/recovery) and
+## [method squash_from_weapon_hit] (a weapon hit, no physics profile
+## involved). Squashes along the hit axis and bulges the other two — volume
+## roughly preserved rather than the hull just shrinking on impact.
+func apply_squash(local_dir: Vector3, severity: float, amount: float, recovery: float) -> void:
+	amount *= JuiceSettings.squash_strength
+	if _visual == null or amount <= 0.0:
 		return
 	var style := StyleManager.instance().current_profile
 	if not style or not style.squash_enabled:
 		return
-	var local_normal := (global_transform.basis.inverse() * normal).normalized()
-	if local_normal.length_squared() < 0.001:
-		local_normal = Vector3.FORWARD
-	# How hard: scales with closing speed past the touch threshold, capped by the
-	# profile's own dial so a plinking hit barely dents while a slam maxes out.
-	var severity := clampf((closing - IMPACT_TOUCH_SPEED) / (IMPACT_DAMAGE_SPEED * 2.0), 0.0, 1.0)
-	var flat := 1.0 - profile.squash_amount * severity * 0.4
-	var bulge := 1.0 + profile.squash_amount * severity * 0.2
-	# Squash along the hit axis, bulge the other two — volume roughly preserved
-	# rather than the hull just shrinking on impact.
-	var axis := local_normal.abs()
+	if local_dir.length_squared() < 0.001:
+		local_dir = Vector3.FORWARD
+	var flat := maxf(1.0 - amount * severity * 0.4, 0.3)
+	var bulge := 1.0 + amount * severity * 0.2
+	var axis := local_dir.normalized().abs()
 	_squash_scale = Vector3(
 		lerpf(bulge, flat, axis.x), lerpf(bulge, flat, axis.y), lerpf(bulge, flat, axis.z)
 	)
-	_squash_recovery = maxf(profile.squash_recovery, 0.05)
+	_squash_recovery = maxf(recovery, 0.05)
 	_visual.scale = _squash_scale
+	_place_visual()
+
+
+## Default squash amount/recovery for a weapon hit — tuned separately from a
+## physical collision's [PhysProfile] dials since there is no "closing speed"
+## for a raycast hit, only the damage dealt.
+const WEAPON_SQUASH_AMOUNT := 0.3
+const WEAPON_SQUASH_RECOVERY := 0.16
+
+
+## Squash from taking weapon damage. [param world_dir] is world-space,
+## typically the direction from the shot's origin (or hit point) toward the
+## ship; [param severity] 0..1, usually the damage as a fraction of max HP.
+func squash_from_weapon_hit(world_dir: Vector3, severity: float) -> void:
+	apply_squash(
+		global_transform.basis.inverse() * world_dir, severity,
+		WEAPON_SQUASH_AMOUNT, WEAPON_SQUASH_RECOVERY
+	)
+
+
+## A knockback impulse to the ship's velocity, from a weapon hit or a strong
+## weapon's own recoil. Distinct from [method _on_phys_impacted]'s
+## solver-resolved impulse, which only fires for genuine physical contact.
+##
+## Queued, not applied at once: [method _feed_knockback] feeds it in over about
+## [constant KNOCKBACK_SPREAD] seconds. The whole velocity change used to land
+## in a single physics tick, which reads as the ship teleporting sideways. The
+## total push is unchanged; only its onset is eased. Scaled by
+## [member JuiceSettings.hit_knockback_strength].
+##
+## With [member JuiceSettings.knockback_visual] on (and a visual bound), the
+## push moves only the drawn hull, sprung back home over [member
+## JuiceSettings.knockback_return_time]. The velocity version is kept for
+## A/B; in full assist the fly-by-wire cancels it within a few ticks, so the
+## chase camera saw a jump and an immediate snap back.
+func apply_knockback(world_dir: Vector3, strength: float) -> void:
+	if world_dir.length_squared() < 0.001 or strength <= 0.0:
+		return
+	var push := strength * JuiceSettings.hit_knockback_strength
+	if JuiceSettings.knockback_visual and _visual != null:
+		# An impulse sized so a critically damped spring peaks at
+		# RECOIL_METRES per unit of push, whatever the return time.
+		var w := _recoil_omega()
+		var local_dir := (global_transform.basis.inverse() * world_dir).normalized()
+		_recoil_vel += local_dir * push * RECOIL_METRES * w * exp(1.0)
+		return
+	_knock_pending += world_dir.normalized() * push
+
+
+## Stiffness of the visual knockback spring: settled in about
+## [member JuiceSettings.knockback_return_time] seconds.
+func _recoil_omega() -> float:
+	return 4.0 / maxf(JuiceSettings.knockback_return_time, 0.05)
+
+
+## Queued knockback velocity not yet applied — see [method apply_knockback].
+var _knock_pending := Vector3.ZERO
+const KNOCKBACK_SPREAD := 0.25
+
+
+func _feed_knockback(delta: float) -> void:
+	if _knock_pending == Vector3.ZERO:
+		return
+	var step := _knock_pending * (1.0 - exp(-delta * 4.0 / KNOCKBACK_SPREAD))
+	velocity += step
+	_knock_pending -= step
+	if _knock_pending.length_squared() < 0.0001:
+		_knock_pending = Vector3.ZERO
 
 
 ## Eases [member Node3D.scale] on [member _visual] back toward
 ## [constant Vector3.ONE] every frame after a squash. Cheap no-op once settled.
 func _update_squash(delta: float) -> void:
-	if _visual == null or _visual.scale.is_equal_approx(Vector3.ONE):
+	if _visual == null:
+		return
+	var recoiling := _recoil != Vector3.ZERO or _recoil_vel != Vector3.ZERO
+	if _visual.scale.is_equal_approx(Vector3.ONE) and not recoiling:
 		return
 	var rate := clampf(delta / _squash_recovery, 0.0, 1.0)
 	_visual.scale = _visual.scale.lerp(Vector3.ONE, rate)
+	if _visual.scale.is_equal_approx(Vector3.ONE):
+		_visual.scale = Vector3.ONE
+	if recoiling:
+		# Critically damped: out and home again with no overshoot. Substepped
+		# so a stiff spring stays stable on a slow physics tick.
+		var w := _recoil_omega()
+		var steps := clampi(ceili(w * delta / 0.5), 1, 8)
+		var h := delta / float(steps)
+		for i in steps:
+			_recoil_vel += (-w * w * _recoil - 2.0 * w * _recoil_vel) * h
+			_recoil += _recoil_vel * h
+		_recoil = _recoil.limit_length(RECOIL_MAX)
+		if _recoil.length_squared() < 1e-6 and _recoil_vel.length_squared() < 1e-4:
+			_recoil = Vector3.ZERO
+			_recoil_vel = Vector3.ZERO
+	_place_visual()
+
+
+## Put [member _visual] where its squash and recoil say: scaled about
+## [member squash_pivot] rather than its own origin, plus the recoil offset.
+func _place_visual() -> void:
+	var s := _visual.scale
+	var pivot_shift := squash_pivot - squash_pivot * s
+	_visual.position = _visual_rest_pos + pivot_shift + _recoil
 
 
 ## At the start of each physics step, take back what the solver did to this
@@ -1084,7 +1366,7 @@ func _pull_solver_state(delta: float) -> void:
 	# teleport, [method set_velocity] — stands instead of being silently reverted
 	# before it is ever integrated.
 	if _phys.velocity != _phys_velocity_written:
-		velocity = _phys.velocity
+		velocity = _phys.velocity - _frame_velocity_written
 	if _phys.angular != Vector3.ZERO:
 		_tumble = (_tumble + _phys.angular).limit_length(TUMBLE_MAX)
 		_phys.angular = Vector3.ZERO

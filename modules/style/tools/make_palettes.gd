@@ -115,6 +115,60 @@ func _toon() -> Palette:
 	return p
 
 
+## Soft-lit vinyl toys on a deep indigo night: the look of the art-direction
+## references (indigo hulls with orange and lime accents, a pink nebula, warm
+## mauve rocks). Written by hand to toybox.tres first; kept here so the values
+## live next to the other palettes'.
+func _toybox() -> Palette:
+	var p := _nebula()
+	# The void is scaled up hard on its way to the sky gradient: a navy of
+	# (0.03, 0.02, 0.10) rendered as electric blue. Keep it near black.
+	p.background = Color(0.022, 0.016, 0.045)
+	p.ambient = Color("221c48")
+	p.star = Color("ffd98a")
+	p.nebula_core = Color("8a3c6e")
+	p.nebula_edge = Color("1e1650")
+	p.hull_primary = Color("4b4fc4")
+	p.hull_accent = Color("ff9a3c")
+	p.hull_trim = Color("2c2a5a")
+	p.rock_light = Color("c4a8b4")
+	p.rock_mid = Color("9a7f90")
+	p.rock_dark = Color("6a5572")
+	p.rock_accent = Color("ffcf6b")
+	p.metal_light = Color("eeeaff")
+	p.metal_mid = Color("a9a3cf")
+	p.metal_dark = Color("4a4470")
+	p.planet_primary = Color("7fcf8a")
+	p.planet_secondary = Color("f3d98b")
+	p.planet_water = Color("5fb6f0")
+	p.planet_ring = Color("f5cfa0")
+	p.planet_cloud = Color("ffffff")
+	p.planet_atmosphere = Color("b8a6ff")
+	p.ui_bg_deep = Color("110f24")
+	p.ui_bg_panel = Color("1b1838")
+	p.ui_bg_panel_alt = Color("24204a")
+	p.ui_bg_field = Color("15122c")
+	p.ui_bg_hover = Color("2e2a5c")
+	p.ui_border = Color("3a3570")
+	p.ui_border_strong = Color("57509a")
+	p.ui_text = Color("e8e6ff")
+	p.ui_text_dim = Color("9d97c9")
+	p.ui_text_strong = Color("ffffff")
+	p.ui_accent = Color("7ea8ff")
+	p.ui_accent_dim = Color("4a5fb0")
+	p.ui_good = Color("7ee06a")
+	p.ui_warn = Color("ffd166")
+	p.ui_bad = Color("ff6b8b")
+	p.ui_select = Color("ffb347")
+	p.valid = Color("7ea8ff")
+	p.invalid = Color("ff9a3c")
+	p.hover = Color("ffe28a")
+	p.socket = Color("a9a3cf")
+	p.beam = Color("8ff0d0")
+	p.grid = Color(0.5, 0.46, 0.8, 0.35)
+	return p
+
+
 ## Warm oxide and burnt steel. The hull is the same family as the rock, so a ship
 ## parked on an asteroid reads as belonging to the same place.
 func _rust() -> Palette:

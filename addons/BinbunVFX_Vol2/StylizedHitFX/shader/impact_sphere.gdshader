@@ -48,7 +48,10 @@ void fragment() {
 	
 	
 	ALPHA = value;
-	PREMUL_ALPHA_FACTOR = value;
+	// PREMUL_ALPHA_FACTOR removed (Project Nebula): it only matters under
+	// blend_premul_alpha, and under blend_add the GL Compatibility renderer in
+	// Godot 4.5 emits it without declaring it -- the shader failed to compile
+	// on every hit, and the broken draw left the next screen-texture copy empty.
 	
 	vec3 color = mix(secondary_color, primary_color, value) * emission * emission_mult;
 	

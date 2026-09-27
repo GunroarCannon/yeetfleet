@@ -444,6 +444,9 @@ static func spawn_event(parent: Node3D, slot: String, pos: Vector3, normal: Vect
 	var debris: bool = bool(a.get("debris", true))
 	var shake: float = float(a.get("shake", 0.4))
 	
+	# Scaled by how close it is: a blast out in the world used to rattle the
+	# player's camera wherever it went off.
+	shake *= AddonVfx.camera_falloff(pos, 600.0)
 	if shake > 0.01:
 		Juice.shake(shake)
 	
@@ -463,6 +466,8 @@ static func spawn_effect(
 ) -> Node3D:
 	ensure_initialized()
 	if parent == null or not is_instance_valid(parent):
+		return null
+	if not AddonVfx.worth_spawning(pos):
 		return null
 	
 	var def := get_effect(effect_id)
@@ -551,11 +556,11 @@ static func _instantiate_addon_scene(path: String, color: Color, scale: float) -
 			var a := anim_player.get_animation(anim_player.current_animation)
 			if a != null:
 				max_life = maxf(1.0, a.length + 0.3)
+		# A bound method, not a lambda holding [code]node[/code]: the effect is
+		# often freed first (with the ship it hung off), and a lambda's freed
+		# capture errored when the timer fired. A bound call just disconnects.
 		var timer := tree.create_timer(max_life)
-		timer.timeout.connect(func():
-			if is_instance_valid(node):
-				node.queue_free()
-		)
+		timer.timeout.connect(node.queue_free)
 	return node
 
 static func _create_procedural_effect(recipe_id: String, color: Color, scale: float) -> Node3D:
@@ -605,7 +610,7 @@ static func _create_procedural_fireball(color: Color, scale: float) -> Node3D:
 	var tree: SceneTree = Engine.get_main_loop() as SceneTree
 	if tree != null:
 		var t := tree.create_timer(1.2)
-		t.timeout.connect(func(): if is_instance_valid(root): root.queue_free())
+		t.timeout.connect(root.queue_free)
 	return root
 
 static func _create_procedural_plasma(color: Color, scale: float) -> Node3D:
@@ -649,7 +654,7 @@ static func _create_procedural_plasma(color: Color, scale: float) -> Node3D:
 	var tree: SceneTree = Engine.get_main_loop() as SceneTree
 	if tree != null:
 		var t := tree.create_timer(1.0)
-		t.timeout.connect(func(): if is_instance_valid(root): root.queue_free())
+		t.timeout.connect(root.queue_free)
 	return root
 
 static func _create_procedural_singularity(color: Color, scale: float) -> Node3D:
@@ -682,7 +687,7 @@ static func _create_procedural_singularity(color: Color, scale: float) -> Node3D
 	var tree: SceneTree = Engine.get_main_loop() as SceneTree
 	if tree != null:
 		var t := tree.create_timer(1.2)
-		t.timeout.connect(func(): if is_instance_valid(root): root.queue_free())
+		t.timeout.connect(root.queue_free)
 	return root
 
 static func _create_procedural_supernova(color: Color, scale: float) -> Node3D:
@@ -709,7 +714,7 @@ static func _create_procedural_supernova(color: Color, scale: float) -> Node3D:
 	var tree: SceneTree = Engine.get_main_loop() as SceneTree
 	if tree != null:
 		var t := tree.create_timer(1.4)
-		t.timeout.connect(func(): if is_instance_valid(root): root.queue_free())
+		t.timeout.connect(root.queue_free)
 	return root
 
 static func _create_vector_shatter(color: Color, scale: float) -> Node3D:
@@ -752,14 +757,25 @@ static func _create_vector_shatter(color: Color, scale: float) -> Node3D:
 	var tree: SceneTree = Engine.get_main_loop() as SceneTree
 	if tree != null:
 		var t := tree.create_timer(1.1)
-		t.timeout.connect(func(): if is_instance_valid(root): root.queue_free())
+		t.timeout.connect(root.queue_free)
 	return root
 
+## Explosion voices playing right now. Each is a player made for the one
+## sound; a chain of deaths and hit blasts used to stack them without limit,
+## and every live voice is mixed on the audio thread.
+static var _live_sounds := 0
+const MAX_LIVE_SOUNDS := 6
+
+
 static func _play_spatial_sound(parent: Node3D, pos: Vector3, sound_id: String) -> void:
+	if _live_sounds >= MAX_LIVE_SOUNDS or not AddonVfx.worth_spawning(pos, 3200.0):
+		return
 	var stream: AudioStream = Sfx.stream(StringName(sound_id))
 	if stream == null:
 		return
+	_live_sounds += 1
 	var asp := AudioStreamPlayer3D.new()
+	asp.tree_exiting.connect(func() -> void: _live_sounds = maxi(_live_sounds - 1, 0))
 	asp.stream = stream
 	asp.unit_size = 28.0
 	asp.max_distance = 3200.0

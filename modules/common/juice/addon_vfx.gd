@@ -90,6 +90,70 @@ const HIT_SPRITE_FRAMES := [
 ## animation never reports finishing. Longer than any authored effect.
 const MAX_LIFETIME := 8.0
 
+## Live-instance ceiling across [method spawn] and [method spawn_sprite_hit]
+## together. Unlike [Juice]'s bursts these are whole scene trees — each with
+## its own [AnimationPlayer] and a backstop [Timer] — instantiated and freed
+## per event rather than pooled, so a heavy firefight barraging hits/sec must
+## still have a hard cap or it pays for N full scene-tree spawns a second.
+## Phone gets half of desktop, matching [BurstPresets]'s own split.
+const DESKTOP_MAX_CONCURRENT := 32
+const MOBILE_MAX_CONCURRENT := 16
+
+static var _live_count := 0
+## Explosions alive right now — they skip the budget above, so they get their
+## own ceiling ([member JuiceSettings.max_live_explosions]).
+static var _live_explosions := 0
+## Nearer than this to the camera an effect is always worth spawning, whatever
+## the frustum says: a blast beside the hull spills into view.
+const CULL_NEAR := 90.0
+
+
+## 1 at the camera, easing to 0 at [param reach] metres from it — for camera
+## shake from something that happened out in the world: a hit a kilometre off
+## should not rattle the player's view.
+static func camera_falloff(pos: Vector3, reach: float) -> float:
+	var loop := Engine.get_main_loop() as SceneTree
+	var cam: Camera3D = loop.root.get_camera_3d() if loop != null and loop.root != null else null
+	if cam == null or not cam.is_inside_tree():
+		return 1.0
+	var t := clampf(1.0 - cam.global_position.distance_to(pos) / maxf(reach, 1.0), 0.0, 1.0)
+	return t * t
+
+
+## Whether an effect starting at [param pos] would be seen: in front of the
+## camera (inside its view, or within [constant CULL_NEAR] metres) and closer
+## than [param max_dist]. With [member JuiceSettings.cull_offscreen_fx] off,
+## always true. A culled effect is not drawn anyway, but its particles,
+## lights and scripts still ran every frame until it expired.
+static func worth_spawning(pos: Vector3, max_dist := 3000.0) -> bool:
+	if not JuiceSettings.cull_offscreen_fx:
+		return true
+	var loop := Engine.get_main_loop() as SceneTree
+	if loop == null or loop.root == null:
+		return true
+	var cam := loop.root.get_camera_3d()
+	if cam == null or not cam.is_inside_tree():
+		return true
+	var d2 := cam.global_position.distance_squared_to(pos)
+	if d2 > max_dist * max_dist:
+		return false
+	return d2 < CULL_NEAR * CULL_NEAR or cam.is_position_in_frustum(pos)
+
+
+## The Performance panel's effects budget ([member
+## PerformanceSettings.vfx_budget]), halved on phones like the old constants.
+static func _max_concurrent() -> int:
+	PerformanceSettings.ensure_loaded()
+	var budget := PerformanceSettings.vfx_budget
+	return maxi(budget / 2, 4) if OS.has_feature("mobile") else budget
+
+
+## True when spawning one more addon-layer node would go over budget — lets a
+## caller skip the rest of a hit's side effects (e.g. the sprite flash) too,
+## not just the particle scene.
+static func _over_budget() -> bool:
+	return _live_count >= _max_concurrent()
+
 ## Spatial audio pool. Four is the whole budget: a broadside resolves to a few
 ## simultaneous impacts at most.
 const AUDIO_POOL_SIZE := 4
@@ -147,9 +211,21 @@ static func spawn(
 	pos: Vector3,
 	normal := Vector3.UP,
 	scale := 1.0,
-	color := Color.TRANSPARENT
+	color := Color.TRANSPARENT,
+	priority := false
 ) -> Node3D:
 	if not enabled() or parent == null or not parent.is_inside_tree():
+		return null
+	# [param priority] effects (explosions) skip the budget: a ship dying or
+	# losing a part must always visibly blow up, even mid-firefight when hit
+	# sparks have filled the budget. They are rare enough not to need a cap.
+	if not priority and _over_budget():
+		return null
+	if not worth_spawning(pos):
+		return null
+	# Explosions have their own ceiling; past it only a big one (a death, a
+	# heavy blast) still goes off, so a hail of hit pops cannot bury the frame.
+	if priority and _live_explosions >= int(JuiceSettings.max_live_explosions) and scale < 1.5:
 		return null
 	var scene := scene_for(kind)
 	if scene == null:
@@ -166,6 +242,11 @@ static func spawn(
 		node.set("secondary_color", color.darkened(0.35))
 		node.set("tertiary_color", color.darkened(0.6))
 	parent.add_child(node)
+	_live_count += 1
+	node.tree_exiting.connect(func() -> void: _live_count = maxi(_live_count - 1, 0))
+	if priority:
+		_live_explosions += 1
+		node.tree_exiting.connect(func() -> void: _live_explosions = maxi(_live_explosions - 1, 0))
 	node.global_position = pos
 	if normal.length_squared() > 0.001:
 		node.look_at(pos + normal.normalized(), Vector3.UP if absf(normal.normalized().y) < 0.95 else Vector3.RIGHT)
@@ -229,7 +310,7 @@ static func explosion(
 ) -> void:
 	if not enabled():
 		return
-	spawn(parent, Kind.BIG_IMPACT if heavy else Kind.EXPLOSION_AIR, pos, Vector3.UP, scale, color)
+	spawn(parent, Kind.BIG_IMPACT if heavy else Kind.EXPLOSION_AIR, pos, Vector3.UP, scale, color, true)
 	if sound != &"":
 		play(sound, pos)
 
@@ -244,7 +325,7 @@ static func nuke(
 ) -> void:
 	if not enabled():
 		return
-	spawn(parent, Kind.NUKE, pos, Vector3.UP, scale, color)
+	spawn(parent, Kind.NUKE, pos, Vector3.UP, scale, color, true)
 	if sound != &"":
 		play(sound, pos)
 
@@ -298,6 +379,8 @@ static func spawn_sprite_hit(
 ) -> AnimatedSprite3D:
 	if parent == null or not parent.is_inside_tree():
 		return null
+	if _over_budget() or not worth_spawning(pos, 1500.0):
+		return null
 	var frames := _hit_sprite_frames()
 	if frames == null:
 		return null
@@ -325,16 +408,28 @@ static func spawn_sprite_hit(
 	# AnimatedSprite3D.autoplay is the animation *name* to start on, not a bool.
 	sprite.autoplay = &"default"
 	parent.add_child(sprite)
+	_live_count += 1
+	sprite.tree_exiting.connect(func() -> void: _live_count = maxi(_live_count - 1, 0))
 	sprite.global_position = pos
 	sprite.global_rotation = Vector3.ZERO
 	sprite.connect("animation_finished", sprite.queue_free)
 	return sprite
 
 
+## Cached across calls: the three frames rarely change, and rebuilding a
+## [SpriteFrames] plus re-loading its textures from disk on every single hit
+## was pure per-event churn.
+static var _hit_frames_cache: SpriteFrames = null
+static var _hit_frames_cache_built := false
+
+
 static func _hit_sprite_frames() -> SpriteFrames:
 	FxSettings.ensure_loaded()
 	if not FxSettings.sprite_hits:
 		return null
+	if _hit_frames_cache_built:
+		return _hit_frames_cache
+	_hit_frames_cache_built = true
 	var frames := SpriteFrames.new()
 	frames.remove_animation("default")
 	frames.add_animation("default")
@@ -348,7 +443,8 @@ static func _hit_sprite_frames() -> SpriteFrames:
 		if tex != null:
 			frames.add_frame("default", tex)
 			added += 1
-	return frames if added > 0 else null
+	_hit_frames_cache = frames if added > 0 else null
+	return _hit_frames_cache
 
 
 # --- Audio -----------------------------------------------------------------

@@ -12,8 +12,10 @@ const TOUCH_MIN_MOBILE := 46.0
 ## Generates a responsive Theme resource tailored to current display size and device.
 static func create_theme(viewport_size: Vector2, is_mobile: bool = false) -> Theme:
 	var th := Theme.new()
-	var touch_min := TOUCH_MIN_MOBILE if (is_mobile or viewport_size.x <= 1280.0) else TOUCH_MIN_DESKTOP
-	var base_font_size := 14 if (is_mobile or viewport_size.x <= 1280.0) else 13
+	# The long edge, so a portrait phone counts as small, not as "narrow desktop".
+	var small := is_mobile or maxf(viewport_size.x, viewport_size.y) <= 1280.0
+	var touch_min := TOUCH_MIN_MOBILE if small else TOUCH_MIN_DESKTOP
+	var base_font_size := 14 if small else 13
 
 	th.default_font_size = base_font_size
 

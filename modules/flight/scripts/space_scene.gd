@@ -16,6 +16,7 @@ class_name SpaceScene
 extends Node3D
 
 const VectorGrid = preload("res://modules/style/scripts/vector_grid.gd")
+const STAR_SURFACE_SHADER := preload("res://modules/common/planets/shaders/star_surface.gdshader")
 
 ## Radius of the star dome. Far enough that no gameplay object reaches it, and
 ## the dome is re-centred on the camera every frame so it cannot be flown to.
@@ -57,6 +58,11 @@ const FLOATING_ASTEROID_MAX_DIST := 15000.0  # Maximum distance from origin
 ## Direction of the star, and the direction the key light comes from, so the lit
 ## side of a ship always faces the visible sun.
 const SUN_DIR := Vector3(0.42, 0.28, 0.86)
+## Radius of the star disc itself. Every other star layer (halo, corona, flare
+## petals, starburst rays) scales off this, so it is the one dial for "how big
+## does the sun read" — raised from an original 220 that read as too small
+## against the rest of the backdrop.
+const STAR_DISC_RADIUS := 300.0
 
 ## Scaled world layout. The constants above are the design values; these are
 ## multiplied by [Session]'s planet-size and spacing settings when the scene
@@ -125,20 +131,27 @@ var _rock_holder: Node3D = null
 var _live_rocks: Array[PhysBody] = []
 
 
-## 1 = normal, 2 = high detail. Reads [Session]'s toggle so that turning high-res
-## on rebuilds the whole scene (it restarts) with denser, less low-poly geometry
-## instead of just resizing the window.
+## 1 = Low, 2 = Medium, 3 = High. Reads [member Session.planet_quality] (not
+## [member Session.high_res], which is viewport supersampling — a different
+## cost from mesh density) so raising the quality tier rebuilds the whole
+## scene (it restarts) with denser, less low-poly geometry.
 func _detail() -> int:
-	return 2 if Session.high_res else 1
+	return 1 + Session.planet_quality
 
 
 func _ready() -> void:
 	# A fixed seed, because a belt that reshuffles every launch makes it
 	# impossible to tell a flight-model change from a different set of rocks.
 	_rng.seed = 20250824
-	# High-res rebuilds geometry at higher resolution (see _detail below). The
-	# planet's atmosphere sphere lives in Planet, so hand the flag over first.
+	# Higher planet_quality rebuilds geometry at higher resolution (see
+	# _detail below). The planet's atmosphere sphere lives in Planet, so hand
+	# the flag over first.
 	Planet.high_detail = _detail() > 1
+	# Pin the surface shader technique this session starts with, so the
+	# planet-look picker survives a scene restart for a real side-by-side
+	# comparison. A no-op group-walk here (no planets exist yet) beyond
+	# setting Planet.surface_shader_path for the ones about to be built.
+	Planet.set_surface_style(Session.planet_surface_style)
 	_build_environment()
 	_build_sky()
 	_build_star()
@@ -353,7 +366,13 @@ func _build_environment() -> void:
 	# rear view, a chase view into shadow) goes completely dark. A cold, fairly
 	# strong ambient keeps geometry readable from every angle.
 	env.ambient_light_color = Palette.color("ambient")
-	env.ambient_light_energy = 0.85
+	# Lower than it was: the part shader now carries its own two-colour
+	# hemisphere floor, and a strong flat ambient on top of that is exactly what
+	# flattened hulls into stickers. The night side is carried by that floor
+	# and the shader's fresnel rim; a directional "kicker" from opposite the star
+	# was tried and floods the very face the camera sees whenever it looks
+	# sunward, which is the opposite of a rim.
+	env.ambient_light_energy = 0.45
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	# Lower than the flight test volume's 4.0: refs 3 and 4 both clip bright
 	# emissives — plumes, tracers, the sun disc — to white rather than merely
@@ -366,18 +385,26 @@ func _build_environment() -> void:
 	# well above 1.0 so it only catches emissives, never the diffuse hull.
 	env.glow_enabled = true
 	env.glow_intensity = 0.55
-	env.glow_hdr_threshold = 1.15
+	# Above anything a sunlit hull reaches, so paint never halos -- a lit orange
+	# hull used to bloom a red rim -- while plumes and tracers still do.
+	env.glow_hdr_threshold = 1.4
 	env.glow_bloom = 0.10
 	_env_ref = env
 	var holder := WorldEnvironment.new()
 	holder.name = "Environment"
 	holder.environment = env
 	add_child(holder)
+	# The baked nebula panorama behind everything (see [NebulaSky]); until it
+	# lands, and when it is off, the flat colour above is the backdrop.
+	_nebula_sky = NebulaSky.new()
+	_nebula_sky.name = "NebulaSky"
+	add_child(_nebula_sky)
+	_nebula_sky.bake(env)
 
 	var key := DirectionalLight3D.new()
 	key.name = "SunLight"
 	_sun_light = key
-	key.light_energy = 3.5 if Session.cinematic_lighting else (2.2 if Session.enhanced_lighting else 1.5)
+	key.light_energy = 1.85 if Session.cinematic_lighting else (1.7 if Session.enhanced_lighting else 1.5)
 	# The palette's star colour, pulled most of the way to white: this is the
 	# light the star *casts*, not the star's own disc, and a saturated light
 	# tints every hull in the system.
@@ -395,8 +422,9 @@ func _build_environment() -> void:
 	# shape rather than a hole cut in the starfield.
 	var fill := DirectionalLight3D.new()
 	fill.name = "PlanetFill"
-	fill.light_energy = 0.32
-	fill.light_color = Palette.color("ambient").lightened(0.35)
+	fill.light_energy = 0.40
+	fill.light_color = Palette.color("ambient").lightened(0.35).lerp(Color("b58cff"), 0.35)
+	fill.light_specular = 0.2
 	fill.shadow_enabled = false
 	fill.look_at_from_position(Vector3.ZERO, planet_centre.normalized(), Vector3.UP)
 	add_child(fill)
@@ -423,6 +451,20 @@ func _build_environment() -> void:
 
 
 # --- Sky --------------------------------------------------------------------
+
+var _nebula_sky: NebulaSky = null
+
+
+## Turn the baked nebula backdrop on or off (and remember it).
+func set_nebula_sky(on: bool) -> void:
+	Session.nebula_sky = on
+	Session.save_to_disk()
+	if _nebula_sky != null and _env_ref != null:
+		if on:
+			_nebula_sky.bake(_env_ref)
+		else:
+			_nebula_sky.clear()
+
 
 func _build_sky() -> void:
 	_sky = Node3D.new()
@@ -504,6 +546,8 @@ func _on_palette_changed(_palette: Palette) -> void:
 	if env_node != null and env_node.environment != null:
 		env_node.environment.background_color = Palette.color("background")
 		env_node.environment.ambient_light_color = Palette.color("ambient")
+		if _nebula_sky != null:
+			_nebula_sky.bake(env_node.environment)
 
 
 ## The rock material family each rock variant is drawn with. Mirrors the choices
@@ -848,14 +892,14 @@ func set_cinematic_lighting(enabled: bool) -> void:
 		if is_instance_valid(node):
 			node.visible = enabled
 	if _sun_light != null:
-		_sun_light.light_energy = 3.5 if enabled else (2.2 if Session.enhanced_lighting else 1.5)
+		_sun_light.light_energy = 1.85 if enabled else (1.7 if Session.enhanced_lighting else 1.5)
 		_sun_light.light_color = Palette.color("star").lerp(Color.WHITE, 0.15 if enabled else (0.2 if Session.enhanced_lighting else 0.5))
 		_sun_light.shadow_enabled = enabled or Session.enhanced_lighting
 	if _env_ref != null:
 		_env_ref.glow_bloom = 0.15 if enabled else 0.10
 		_env_ref.glow_intensity = 0.70 if enabled else 0.55
-		_env_ref.glow_hdr_threshold = 1.12 if enabled else 1.15
-		_env_ref.ambient_light_energy = 0.65 if enabled else 0.85
+		_env_ref.glow_hdr_threshold = 1.3 if enabled else 1.4
+		_env_ref.ambient_light_energy = 0.38 if enabled else 0.45
 
 
 ## Toggle cinematic lighting on/off live.
@@ -870,11 +914,16 @@ func _build_star() -> void:
 	var pos := SUN_DIR.normalized() * (SKY_RADIUS * 0.9)
 	# On the sky node, so the star stays a fixed direction rather than something
 	# the player can fly to and discover is 240 metres wide.
-	var disc := _make_glow_sphere(220.0, Color("fff8e6"), 1)
+	var disc := _make_star_disc(STAR_DISC_RADIUS)
 	disc.name = "Star"
 	disc.position = pos
 	_sky.add_child(disc)
-	var halo := _make_glow_sphere(550.0, Color(1.0, 0.88, 0.58, 0.20), 1)
+	# The star is a character too: a sleepy-happy face drawn in warm ink.
+	var sun_face := Whimsy.make_sun_face(STAR_DISC_RADIUS)
+	if sun_face != null:
+		sun_face.position = pos
+		_sky.add_child(sun_face)
+	var halo := _make_glow_sphere(STAR_DISC_RADIUS * 2.5, Color(1.0, 0.88, 0.58, 0.20), 1)
 	halo.name = "StarHalo"
 	halo.position = pos
 	_sky.add_child(halo)
@@ -882,7 +931,7 @@ func _build_star() -> void:
 
 	# Solar corona around the sun disc on _sky
 	if Session.render_backdrop:
-		corona = _make_glow_sphere(1200.0, Color(Palette.color("star"), 0.10), 1)
+		corona = _make_glow_sphere(STAR_DISC_RADIUS * 5.5, Color(Palette.color("star"), 0.10), 1)
 		corona.name = "SolarCorona"
 		corona.position = pos
 		_sky.add_child(corona)
@@ -893,7 +942,7 @@ func _build_star() -> void:
 	for i in 3:
 		var t := float(i) / 2.0
 		var petal := _make_flare_petal(
-			lerpf(70.0, 220.0, t), Color(1.0, 0.82, 0.6, 0.18 - t * 0.10)
+			lerpf(STAR_DISC_RADIUS * 0.32, STAR_DISC_RADIUS, t), Color(1.0, 0.82, 0.6, 0.18 - t * 0.10)
 		)
 		petal.name = "StarFlare%d" % i
 		petal.position = pos
@@ -901,17 +950,19 @@ func _build_star() -> void:
 		_glare_nodes.append(petal)
 
 	# Cinematic Galaxy on Fire 2 style radiant solar starburst rays and core blaze
-	var sun_rays := _make_sun_rays(2400.0, 14, Color(1.0, 0.92, 0.65, 0.35), Color(1.0, 0.55, 0.1, 0.0))
+	var sun_rays := _make_sun_rays(STAR_DISC_RADIUS * 11.0, 14, Color(1.0, 0.92, 0.65, 0.35), Color(1.0, 0.55, 0.1, 0.0))
 	sun_rays.name = "CinematicSunRays"
 	sun_rays.position = pos
 	_sky.add_child(sun_rays)
 	_cinematic_nodes.append(sun_rays)
 
-	var inner_blaze := _make_glow_sphere(500.0, Color(1.0, 0.95, 0.75, 0.45), 1)
-	inner_blaze.name = "CinematicInnerBlaze"
-	inner_blaze.position = pos
-	_sky.add_child(inner_blaze)
-	_cinematic_nodes.append(inner_blaze)
+	# No flat "inner blaze" sphere any more: at 500m radius around a 220m disc
+	# it fully enclosed the disc's near face, and being a solid additive glow
+	# with no pattern of its own, it washed the turbulent surface out to plain
+	# white regardless of what star_surface.gdshader drew underneath. The new
+	# disc shader's own fresnel rim already supplies a properly-motivated bright
+	# core and corona, tied to the actual sphere instead of a second overlapping
+	# one guessed to roughly the same size.
 
 
 func _make_sun_rays(max_radius: float, ray_count: int, core_color: Color, edge_color: Color) -> MeshInstance3D:
@@ -922,7 +973,9 @@ func _make_sun_rays(max_radius: float, ray_count: int, core_color: Color, edge_c
 		var dir := Vector2(cos(angle), sin(angle))
 		var perp := Vector2(-dir.y, dir.x)
 		var length := max_radius * (0.65 + 0.35 * sin(float(i) * 3.7))
-		var w := length * 0.09
+		# Wide enough at the base that a ray reads as a soft shine rather than a
+		# sharp needle — the old 0.09 drew fourteen thin pins radiating out.
+		var w := length * 0.17
 		var v0 := Vector3.ZERO
 		var v_mid := Vector3(dir.x * length * 0.3, dir.y * length * 0.3, 0.0)
 		var v_left := v_mid + Vector3(perp.x * w, perp.y * w, 0.0)
@@ -1033,9 +1086,14 @@ func _make_planet(node_name: String, id: String, radius: float, offset: Vector3,
 	data.planet_radius = radius
 	if _detail() > 1:
 		# Don't mutate the library's shared resource — duplicate, then raise the
-		# mesh resolution so the surface is genuinely less faceted at high res.
+		# mesh resolution so the surface is genuinely less faceted at higher
+		# planet_quality tiers. Medium (~1.6x) keeps the old high_res look;
+		# High (~2.4x) goes further, since it no longer shares a dial with
+		# viewport supersampling.
 		data = data.duplicate()
-		data.sphere_resolution = mini(int(data.sphere_resolution * 1.6), 128)
+		var mult := 1.0 + 0.6 * float(Session.planet_quality)
+		var cap := 128 + 64 * (Session.planet_quality - 1)
+		data.sphere_resolution = mini(int(data.sphere_resolution * mult), cap)
 
 	var planet := Planet.new()
 	planet.name = node_name
@@ -1054,7 +1112,7 @@ func _fallback_planet() -> PlanetData:
 	var d := PlanetData.new()
 	d.planet_name = "Tarn IV"
 	d.seed_value = 19870506
-	d.sphere_resolution = 24
+	d.sphere_resolution = 32
 	d.terrain_height = 0.12
 	d.continent_scale = 0.7
 	d.mountain_scale = 3.0
@@ -1075,7 +1133,7 @@ func _fallback_moon() -> PlanetData:
 	var d := PlanetData.new()
 	d.planet_name = "Tarn IV Moon"
 	d.seed_value = 4471
-	d.sphere_resolution = 16
+	d.sphere_resolution = 24
 	d.terrain_height = 0.10
 	d.continent_scale = 1.2
 	d.mountain_scale = 5.0
@@ -1131,7 +1189,7 @@ func _fallback_planet_ashara() -> PlanetData:
 	var d := PlanetData.new()
 	d.planet_name = "Ashara"
 	d.seed_value = 77300123
-	d.sphere_resolution = 20
+	d.sphere_resolution = 32
 	d.terrain_height = 0.14
 	d.continent_scale = 1.0
 	d.mountain_scale = 4.0
@@ -1152,7 +1210,7 @@ func _fallback_planet_glacius() -> PlanetData:
 	var d := PlanetData.new()
 	d.planet_name = "Glacius"
 	d.seed_value = 55298
-	d.sphere_resolution = 16
+	d.sphere_resolution = 24
 	d.terrain_height = 0.08
 	d.continent_scale = 1.2
 	d.mountain_scale = 3.5
@@ -1337,6 +1395,8 @@ func _build_floating_asteroids() -> void:
 		anchor.position = pos
 		floating_rock_holder.add_child(anchor)
 		floating_asteroid_data.append({"position": pos, "radius": size, "node": anchor})
+		if i % 3 == 0:
+			_add_rock_face(anchor, size, i)
 		# Tumble speed: varied for floating asteroids
 		_floating_asteroid_spin.append(_rng.randf_range(0.02, 0.15))
 
@@ -1405,6 +1465,8 @@ func _build_nearfield() -> void:
 		_rock_holder.add_child(anchor)
 		asteroid_data.append({"position": pos, "radius": size, "node": anchor})
 		_asteroid_spin.append(_rng.randf_range(0.1, 0.4))
+		if i % 2 == 0:
+			_add_rock_face(anchor, size, i)
 	_nearfield_mesh = MultiMeshInstance3D.new()
 	_nearfield_mesh.name = "NearField"
 	_nearfield_mesh.multimesh = mm
@@ -1412,6 +1474,15 @@ func _build_nearfield() -> void:
 	_nearfield_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_nearfield_mesh.set_meta("rock_variant", 3)
 	add_child(_nearfield_mesh)
+
+
+## A face on a rock, watching the camera from its surface. Mostly dozing; one in
+## three is awake and blinking. [param radius] is the rock's scale -- the rocks
+## are unit-radius meshes -- and the face sits just proud of the lumps.
+func _add_rock_face(anchor: Node3D, radius: float, index: int) -> void:
+	var face := Whimsy.attach_billboard_face(anchor, radius * 0.95, "happy" if index % 3 == 0 else "sleepy")
+	if face != null:
+		face.make_billboard(1.12)
 
 
 ## A lumpy unit-radius solid. Built by jittering the rings of a lathe rather than
@@ -1479,6 +1550,36 @@ func _make_glow_sphere(radius: float, color: Color, detail: int) -> MeshInstance
 	return inst
 
 
+## The star disc itself: a turbulent, animated fireball (see
+## [constant STAR_SURFACE_SHADER]) rather than the flat glow sphere every
+## other backdrop light uses. Higher poly than [method _make_glow_sphere]'s
+## usual detail so the surface noise has enough silhouette to read against,
+## which a lone distant sphere can afford.
+func _make_star_disc(radius: float) -> MeshInstance3D:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 32
+	mesh.rings = 20
+	var inst := MeshInstance3D.new()
+	inst.name = "Glow"
+	inst.mesh = mesh
+	var mat := ShaderMaterial.new()
+	mat.shader = STAR_SURFACE_SHADER
+	# Every colour comes off the active palette's single "star" role, lightened
+	# or darkened, rather than three hand-picked constants — so a palette swap
+	# (an icy-white star for "ice", a deep ember one for "rust") still reaches
+	# the shader the same way it reaches the key light a few lines up.
+	var star_base := Palette.color("star")
+	mat.set_shader_parameter("core_color", star_base.lightened(0.25))
+	mat.set_shader_parameter("spot_color", star_base.darkened(0.55))
+	mat.set_shader_parameter("corona_color", star_base.lightened(0.55))
+	inst.material_override = mat
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	inst.extra_cull_margin = radius
+	return inst
+
+
 ## Scenery reuses the ship part shader so rocks, hulls and stations share one
 ## lighting model. The three colours map to the three vertex channels [LowPoly]
 ## writes.
@@ -1495,10 +1596,12 @@ func _scenery_material(primary: Color, accent: Color, trim: Color) -> ShaderMate
 	# rim: a rim light on an asteroid reads as a glowing outline, not as stone.
 	mat.set_shader_parameter("plate_variation", 0.14)
 	mat.set_shader_parameter("rim_strength", 0.12)
-	mat.set_shader_parameter("ao_strength", 0.55)
+	mat.set_shader_parameter("ao_strength", 0.45)
 	# Higher solidity so rocks read as solid against the near-black void
 	# rather than blending into it — the see-through problem.
-	mat.set_shader_parameter("solidity", 0.65)
+	# Raised again with the toy lighting: the floor is now a two-colour hemisphere
+	# that halves in toon mode, and at 0.65 a rock's night side went to black.
+	mat.set_shader_parameter("solidity", 0.95)
 	ShipMaterials.apply_style_dials(mat)
 	ShipMaterials.apply_outline(mat)
 	return mat

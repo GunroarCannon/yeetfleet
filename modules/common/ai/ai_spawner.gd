@@ -10,8 +10,25 @@
 class_name AiSpawner
 extends Node3D
 
-const MAX_SHIPS_DESKTOP := 12
+## Re-emits every roster ship's [signal AiShip.destroyed], so the flight scene
+## can react to a kill (kill cam, stats) without wiring each ship itself.
+signal ship_destroyed(ship: AiShip)
+
+## Phone ceiling on the live roster, whatever the Performance panel says.
 const MAX_SHIPS_MOBILE := 4
+## A running [FlightScenarios] set-piece's own roster cap (both sides), or -1
+## for the Performance panel's.
+static var scenario_cap := -1
+
+
+## Live roster cap, from the ⚡ Performance panel ([member
+## PerformanceSettings.max_ai_ships], default 12).
+static func _max_ships() -> int:
+	if scenario_cap >= 0:
+		return scenario_cap
+	PerformanceSettings.ensure_loaded()
+	var cap := PerformanceSettings.max_ai_ships
+	return mini(cap, MAX_SHIPS_MOBILE) if OS.has_feature("mobile") else cap
 const DESPAWN_DISTANCE := 3500.0
 const SPAWN_MIN_DIST := 300.0
 const SPAWN_MAX_DIST := 2200.0
@@ -59,8 +76,13 @@ func _ready() -> void:
 		_spawn_initial_fleet.call_deferred()
 
 
+## Bring the ambient traffic back (after a scenario ends).
+func spawn_initial_fleet() -> void:
+	_spawn_initial_fleet()
+
+
 func _spawn_initial_fleet() -> void:
-	var max_ships: int = MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP
+	var max_ships: int = _max_ships()
 	# Every session meets a hunter squad first; the rest of the cap is the usual
 	# random traffic (which may be all civilians, hence the guarantee).
 	spawn_hunters()
@@ -92,8 +114,13 @@ func _process(delta: float) -> void:
 
 	# Tick every alive ship's behaviour with full group context. Ships the player
 	# is piloting (_ai_paused) are left alone so their inputs are not overwritten.
+	# Everyone hunts whichever hull the player is flying right now — their own,
+	# or a ship they have taken control of.
+	var hunted := _find_player_node()
 	for ship in _ships:
 		if is_instance_valid(ship) and ship._alive and not ship._ai_paused:
+			if hunted != self and hunted != ship.model:
+				ship.player_ref = hunted
 			ship.tick_ai(delta)
 
 	_respawn_timer -= delta
@@ -109,8 +136,10 @@ func _process(delta: float) -> void:
 				ship.teardown()
 			continue
 		var player_pos := _find_player_position()
-		# Satellites are orbit probes — never cull them for flying out of range.
-		if not ship.is_satellite and ship.global_position.distance_to(player_pos) > DESPAWN_DISTANCE:
+		# Satellites are orbit probes — never cull them for flying out of range;
+		# nor the ship the player spawned to fly.
+		if not ship.is_satellite and not ship.is_pilot_vessel \
+				and ship.global_position.distance_to(player_pos) > DESPAWN_DISTANCE:
 			ship.teardown()
 			continue
 		still_alive.append(ship)
@@ -125,8 +154,12 @@ func _process(delta: float) -> void:
 		if not live_group_ids.has(gid):
 			_groups.erase(gid)
 
-	# Respawn to fill the cap.
-	var max_ships: int = MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP
+	# Respawn to fill the cap — only for the ambient traffic. With the auto
+	# fleet off (a scenario, the arena) this used to refill the roster with
+	# random traffic every couple of seconds anyway.
+	if not auto_fleet:
+		return
+	var max_ships: int = _max_ships()
 	while _ships.size() < max_ships:
 		_spawn_group()
 
@@ -190,13 +223,76 @@ func _rebuild_group_members() -> void:
 
 
 
+## Per-ship spawn offset (from the group's cluster centre) and facing for ship
+## [param index] of [param group_size] in an [param arch] group. Most
+## archetypes still get the old scattered cluster — it reads fine for a wolf
+## pack, a swarm or a lone drifter — but a few archetypes have a shape that's
+## part of what they ARE, and spawning them already in that shape (rather than
+## clustered and only forming it after the fact, once [AiGroupBehaviour] takes
+## over) is what makes them readable as that archetype on sight.
+func _spawn_layout(arch: AiFactions.ArchetypeData, index: int, group_size: int) -> Dictionary:
+	var n := maxf(float(group_size), 1.0)
+	match arch.archetype:
+		AiFactions.Archetype.STATION_GUARD, AiFactions.Archetype.HONOR_GUARD, \
+		AiFactions.Archetype.DEFENSE_GRID:
+			# A guard's whole point is holding a ring around what it protects —
+			# spawn already on that ring, facing outward along it, instead of
+			# clustered off to one side.
+			var angle := TAU * float(index) / n
+			var radius := arch.formation_spacing * 1.3
+			var offset := Vector3(cos(angle), _rng.randf_range(-0.15, 0.15), sin(angle)) * radius
+			return {"offset": offset, "facing": Vector3(cos(angle), 0.0, sin(angle))}
+
+		AiFactions.Archetype.CONVOY_TRADER, AiFactions.Archetype.MIGRATION_FLEET:
+			# Already strung out nose-to-tail along a lane when the player meets
+			# them, rather than a knot that only stretches into its line after
+			# spawning.
+			var lane_dir := Vector3(_rng.randf_range(-1.0, 1.0), 0.0, _rng.randf_range(-1.0, 1.0))
+			lane_dir = lane_dir.normalized() if lane_dir.length_squared() > 0.0001 else Vector3.FORWARD
+			var offset := lane_dir * arch.formation_spacing * (float(index) - float(group_size - 1) * 0.5)
+			offset.y = _rng.randf_range(-15.0, 15.0)
+			return {"offset": offset, "facing": lane_dir}
+
+		AiFactions.Archetype.WOLF_PIRATE, AiFactions.Archetype.PIRATE_FLEET:
+			# A raiding pack closing in from one shared heading, not orbiting the
+			# player from every side at once — reads as an approach, not scenery
+			# that happened to spawn nearby.
+			var approach := Vector3(
+				_rng.randf_range(-1.0, 1.0), _rng.randf_range(-0.2, 0.2), _rng.randf_range(-1.0, 1.0)
+			)
+			approach = approach.normalized() if approach.length_squared() > 0.0001 else Vector3.FORWARD
+			var side := approach.cross(Vector3.UP)
+			side = side.normalized() if side.length_squared() > 0.0001 else Vector3.RIGHT
+			var spread := (float(index) - float(group_size - 1) * 0.5) * arch.formation_spacing
+			return {"offset": approach * 250.0 + side * spread, "facing": -approach}
+
+		AiFactions.Archetype.AMBUSHER:
+			# Lying in wait means sitting out at the edge of easy notice, not in
+			# the middle of the cluster the player spawns into.
+			var hide_angle := _rng.randf_range(0.0, TAU)
+			var offset := Vector3(cos(hide_angle), _rng.randf_range(-40.0, 40.0), sin(hide_angle)) \
+				* (arch.detection_range * 0.85)
+			return {"offset": offset, "facing": -offset.normalized()}
+
+		_:
+			var offset := Vector3(
+				_rng.randf_range(-100.0, 100.0),
+				_rng.randf_range(-30.0, 30.0),
+				_rng.randf_range(-100.0, 100.0),
+			)
+			var fwd := Vector3(
+				_rng.randf_range(-1.0, 1.0), _rng.randf_range(-0.3, 0.3), _rng.randf_range(-1.0, 1.0)
+			).normalized()
+			return {"offset": offset, "facing": fwd}
+
+
 ## Spawn a new group of ships with a shared archetype.
 func _spawn_group() -> void:
 	var archetype_id := AiFactions.random_archetype(_rng)
 	var arch := AiFactions.create(archetype_id)
 
 	var group_size := _rng.randi_range(arch.group_size_min, arch.group_size_max)
-	group_size = mini(group_size, MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP - _ships.size())
+	group_size = mini(group_size, _max_ships() - _ships.size())
 	if group_size <= 0:
 		return
 
@@ -222,18 +318,13 @@ func _spawn_group() -> void:
 		ship.name = "AiShip_%d_G%d" % [_ships.size(), gid]
 		add_child(ship)
 
-		# Position within the cluster.
-		var offset := Vector3(
-			_rng.randf_range(-100.0, 100.0),
-			_rng.randf_range(-30.0, 30.0),
-			_rng.randf_range(-100.0, 100.0),
-		)
-		var spawn_pos := cluster_centre + offset
-
-		# Random facing.
-		var fwd := Vector3(
-			_rng.randf_range(-1.0, 1.0), _rng.randf_range(-0.3, 0.3), _rng.randf_range(-1.0, 1.0)
-		).normalized()
+		# Position within the group, shaped by what this archetype actually is —
+		# see [method _spawn_layout].
+		var layout := _spawn_layout(arch, i, group_size)
+		var spawn_pos := cluster_centre + (layout["offset"] as Vector3)
+		var fwd: Vector3 = layout["facing"]
+		if fwd.length_squared() < 0.0001:
+			fwd = Vector3.FORWARD
 		var spawn_xform := Transform3D(Basis.looking_at(fwd, Vector3.UP), spawn_pos)
 
 		ship.initialise(_library, spawn_xform, _find_player_node())
@@ -255,11 +346,18 @@ func _spawn_group() -> void:
 
 
 func _on_ship_destroyed(ship: AiShip) -> void:
-	pass
+	ship_destroyed.emit(ship)
 
 
 func _find_player_position() -> Vector3:
-	if _cached_player != null and is_instance_valid(_cached_player):
+	# _ready() (line 47) runs before FlightRoot._build_ship() creates `model`,
+	# so the first resolve falls into _find_player_node()'s `return self`
+	# branch and used to latch there forever — every spawn then clustered on
+	# the spawner's own position (world origin) instead of the player's.
+	# Keep retrying until the real ship exists, then stop.
+	# Re-resolved every call: taking control of another ship moves "the player".
+	_cached_player = _find_player_node()
+	if _cached_player != null and is_instance_valid(_cached_player) and _cached_player != self:
 		return _cached_player.global_position
 	return global_position
 
@@ -267,7 +365,7 @@ func _find_player_position() -> Vector3:
 func _find_player_node() -> Node3D:
 	var root := get_parent()
 	if root is FlightRoot and root.model != null:
-		return root.model
+		return (root as FlightRoot).active_model()
 	return self
 
 
@@ -388,12 +486,45 @@ func spawn_mother() -> AiShip:
 	return ship
 
 
+## A random ship of [param size_mult] times the normal size, spawned beside
+## [param near] for the player to fly (see [method FlightRoot.fly_as]).
+## Ignores the live-ship cap, is never culled for range, and gets a plain
+## archetype — the player's hands, not a behaviour, fly it.
+func spawn_pilot_vessel(near: Transform3D, size_mult: float) -> AiShip:
+	if _library == null:
+		return null
+	var side := near.basis.x.normalized()
+	var ship := AiShip.new()
+	ship.name = "PilotVessel_%d" % _ships.size()
+	ship.scale_multiplier = size_mult
+	ship.is_pilot_vessel = true
+	ship.spawner_ref = self
+	add_child(ship)
+	# Off to the side by a margin that grows with the hull, facing the same way.
+	var pos := near.origin + side * (30.0 + 25.0 * size_mult)
+	ship.initialise(_library, Transform3D(near.basis.orthonormalized(), pos), _find_player_node())
+	if ship.model == null:
+		ship.queue_free()
+		return null
+	# A size-appropriate gun unless the caller picks one.
+	ship.set_group_context(-1, AiFactions.create(AiFactions.Archetype.LONE_WOLF), [])
+	# The player's own speed dial, not the AI traffic's.
+	ship.model.rescale_speed(Session.player_speed_scale)
+	var grav := _find_gravity()
+	if grav != null:
+		ship.set_gravity(grav)
+	ship.set_phys_world(_find_world())
+	ship.destroyed.connect(_on_ship_destroyed)
+	_ships.append(ship)
+	return ship
+
+
 ## A normal-size fighter ejected by a mother ship, near the host. Inherits the
 ## host's team and aggression, so a mother's fighters take up its fight.
 func spawn_fighter_near(host: Node3D) -> AiShip:
 	if _library == null or host == null:
 		return null
-	var max_ships: int = MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP
+	var max_ships: int = _max_ships()
 	if _ships.size() >= max_ships:
 		return null
 	var player := _find_player_node()
@@ -449,7 +580,7 @@ func ship_snapshot() -> Array[Dictionary]:
 ## already closing in from the first frame. Called by [method _spawn_initial_fleet]
 ## before the random traffic fills the cap.
 func spawn_hunters() -> void:
-	var max_ships: int = MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP
+	var max_ships: int = _max_ships()
 	var player_pos := _find_player_position()
 	var arch := AiFactions.create(AiFactions.Archetype.HUNTER_SQUAD)
 	var gid := _next_group_id
@@ -495,7 +626,7 @@ func spawn_hunters() -> void:
 ## size, on a team. Drives the HUD's spawn panel — the player picks the mix, this
 ## makes it. team 0 = None/neutral (no team warfare, pre-arena behaviour).
 func spawn_group_with(arch: AiFactions.ArchetypeData, count: int, team: int = 0) -> void:
-	var max_ships: int = MAX_SHIPS_MOBILE if OS.has_feature("mobile") else MAX_SHIPS_DESKTOP
+	var max_ships: int = _max_ships()
 	var player_pos := _find_player_position()
 	var gid := _next_group_id
 	_next_group_id += 1
@@ -552,7 +683,7 @@ func spawn_near_player(count: int = 3) -> void:
 	var archetype_id := AiFactions.random_archetype(_rng)
 	var arch := AiFactions.create(archetype_id)
 	_groups[gid] = {"archetype": arch, "members": [] as Array}
-	for i in mini(count, MAX_SHIPS_DESKTOP - _ships.size()):
+	for i in mini(count, _max_ships() - _ships.size()):
 		var ship := AiShip.new()
 		ship.name = "AiShip_%d_G%d" % [_ships.size(), gid]
 		add_child(ship)

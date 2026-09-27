@@ -61,6 +61,10 @@ func _process(_delta: float) -> bool:
 	if _frames == 1:
 		_root.gravity.pull_enabled = true
 		Session.gravity_pull = true
+	# Normal speed, whatever time warp the last session saved (restored a
+	# frame late, so set after it).
+	if _frames == 3 and not is_equal_approx(_root.time_scale(), 1.0):
+		_root.set_time_scale(1.0)
 	var d := _root.model.global_position.distance_to(SpaceScene.PLANET_CENTRE)
 	var moon := _root.space.get_node_or_null("Planet/Moon") as Node3D
 	match _phase:

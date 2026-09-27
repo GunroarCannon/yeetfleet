@@ -72,7 +72,8 @@ func _build_ui() -> void:
 
 	_lead_reticle_check = CheckBox.new()
 	_lead_reticle_check.text = "Predictive Target Lead Reticle"
-	_lead_reticle_check.button_pressed = true
+	# Shows the saved state; it used to always read "on" after a restart.
+	_lead_reticle_check.button_pressed = Session.hud_reticle
 	_lead_reticle_check.toggled.connect(func(on: bool) -> void: setting_changed.emit("lead_reticle", on))
 	vbox.add_child(_lead_reticle_check)
 
@@ -138,6 +139,13 @@ func _build_ui() -> void:
 	b_shatter.text = "💥 Shatter Nearest Planet (Shift+P)"
 	b_shatter.pressed.connect(func() -> void: action_triggered.emit("shatter_planet", {}))
 	vbox.add_child(b_shatter)
+
+	var juice_note := Label.new()
+	juice_note.text = "Juice, camera, sound and AI dials: the 🎬 Juice chip on the top bar."
+	juice_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	juice_note.add_theme_font_size_override("font_size", 11)
+	juice_note.add_theme_color_override("font_color", BuilderTheme.text_dim())
+	vbox.add_child(juice_note)
 
 
 func update_state(locked: bool, facing: bool, lights: bool) -> void:

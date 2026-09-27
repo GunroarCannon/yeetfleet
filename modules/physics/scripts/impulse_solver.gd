@@ -313,9 +313,11 @@ static func _effective_inv_mass(body: PhysBody, profile: PhysProfile) -> float:
 
 
 static func _restitution(a: PhysBody, b: PhysBody, profile: PhysProfile) -> float:
+	var e := (a.restitution + b.restitution) * 0.5
 	if profile != null:
-		return profile.restitution_for_pair(a.layer, b.layer)
-	return (a.restitution + b.restitution) * 0.5
+		e = profile.restitution_for_pair(a.layer, b.layer)
+	var floor_e := maxf(a.restitution_override, b.restitution_override)
+	return maxf(e, floor_e) if floor_e >= 0.0 else e
 
 
 ## Whoever pushed records that on the other body's last_pusher, so M5's blame

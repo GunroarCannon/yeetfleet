@@ -44,8 +44,29 @@ func _initialize() -> void:
 	print("")
 
 
+## The player's saved movement profile, while the smoke flies classic (-1 = it was classic).
+var _profile_was := -1
+
+
+## Some steps save the session: put the player's own profile back in the
+## file, touching nothing else in it.
+func _put_back_profile() -> void:
+	if _profile_was < 0:
+		return
+	Session.move_profile = _profile_was
+	var cfg := ConfigFile.new()
+	if cfg.load(Session.SETTINGS_PATH) == OK and int(cfg.get_value(Session.SECTION, "move_profile", _profile_was)) != _profile_was:
+		cfg.set_value(Session.SECTION, "move_profile", _profile_was)
+		cfg.save(Session.SETTINGS_PATH)
+
+
 func _process(_delta: float) -> bool:
 	_frames += 1
+	# The classic controls, whatever movement profile the last session saved
+	# (restored a frame late; a slingshot pilot would hold the throttle).
+	if _frames == 2 and _root.move_profile != FlightRoot.MoveProfile.CLASSIC:
+		_profile_was = _root.move_profile
+		_root.set_move_profile(FlightRoot.MoveProfile.CLASSIC)
 	if _frames % FRAMES_PER_STEP != 0:
 		return false
 	if _index >= _steps.size():
@@ -59,6 +80,7 @@ func _process(_delta: float) -> bool:
 
 
 func _finish() -> bool:
+	_put_back_profile()
 	print("")
 	if _failures.is_empty():
 		print("── PASS ──────────────────────────────────────────────────")

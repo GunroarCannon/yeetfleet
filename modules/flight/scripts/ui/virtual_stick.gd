@@ -14,6 +14,8 @@ extends Control
 ## Emitted whenever the deflection changes. Right and down are positive, matching
 ## screen axes; the caller maps them onto flight axes.
 signal moved(value: Vector2)
+## A pointer went down on (true) or came off (false) the stick.
+signal held(on: bool)
 
 const RING_WIDTH := 2.0
 const KNOB_RATIO := 0.34
@@ -31,18 +33,35 @@ var _pointer := -1
 ## Set when something other than a pointer (a key, the mouse) owns the stick, so
 ## the widget draws that input instead of fighting it.
 var _external := false
+## A fixed ring radius, px. 0 = fill the widget. Set with a large widget to
+## make a floating stick: the whole area takes a thumb, the ring spawns under it.
+var ring_radius := 0.0
+## Where the ring rests when not held, in local px; (-1, -1) = the centre.
+var rest_point := Vector2(-1.0, -1.0)
 
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(132, 132)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	tooltip_text = "Steer — drag, or use the arrow keys"
-	resized.connect(func() -> void: _origin = size * 0.5)
-	_origin = size * 0.5
+	resized.connect(func() -> void: _origin = rest_centre())
+	_origin = rest_centre()
 
 
 func radius() -> float:
+	if ring_radius > 0.0:
+		return ring_radius
 	return minf(size.x, size.y) * 0.5 - RING_WIDTH
+
+
+## Where the ring sits while nothing holds it: [member rest_point] if set,
+## else the widget's centre.
+func rest_centre() -> Vector2:
+	return rest_point if rest_point.x >= 0.0 else size * 0.5
+
+
+func is_held() -> bool:
+	return _dragging
 
 
 ## Drive the stick from somewhere else — the keyboard, or a mouse drag on the
@@ -52,10 +71,13 @@ func set_external(v: Vector2) -> void:
 	if _dragging:
 		return
 	_external = v.length() > 0.001
-	_set_value(v)
+	# Display only: echoing it back through [signal moved] fed the ship's own
+	# command (with the aim assist mixed in) back in as fresh stick input,
+	# every frame, and the two fought.
+	_set_value(v, false)
 
 
-func _set_value(v: Vector2) -> void:
+func _set_value(v: Vector2, emit := true) -> void:
 	var clamped := v.limit_length(1.0)
 	if clamped.length() < DEADZONE:
 		clamped = Vector2.ZERO
@@ -63,7 +85,8 @@ func _set_value(v: Vector2) -> void:
 		return
 	value = clamped
 	queue_redraw()
-	moved.emit(value)
+	if emit:
+		moved.emit(value)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -96,6 +119,7 @@ func _gui_input(event: InputEvent) -> void:
 
 func _begin(at: Vector2) -> void:
 	_dragging = true
+	held.emit(true)
 	_external = false
 	# Re-centre on the press, but keep the ring fully inside the widget so it
 	# never draws half off the edge of the screen.
@@ -109,15 +133,17 @@ func _drag(at: Vector2) -> void:
 
 
 func _end() -> void:
+	if _dragging:
+		held.emit(false)
 	_dragging = false
 	_pointer = -1
-	_origin = size * 0.5
+	_origin = rest_centre()
 	_set_value(Vector2.ZERO)
 
 
 func _draw() -> void:
 	var r := radius()
-	var centre := _origin if _dragging else size * 0.5
+	var centre := _origin if _dragging else rest_centre()
 	var live := _dragging or _external
 	var ring := BuilderTheme.accent() if live else BuilderTheme.border_strong()
 	draw_circle(centre, r, Color(BuilderTheme.bg_deep(), 0.34))

@@ -61,6 +61,7 @@ var _grid_extent := 0.0
 var _theme_dirty := false
 var _narrow := false
 var _suppress_rebuild := false
+var _audio: BuilderAudio
 
 @onready var _camera: OrbitCamera = %Camera
 
@@ -85,6 +86,11 @@ func _ready() -> void:
 	_ship_holder = %ShipHolder
 	_viewport = %ViewportFrame
 	_systems = %Systems
+
+	_audio = BuilderAudio.new()
+	_audio.name = "BuilderAudio"
+	add_child(_audio)
+	notice.connect(func(_text: String, kind: String) -> void: _audio.play_for_kind(kind))
 
 	history.changed.connect(func() -> void: history_changed.emit())
 

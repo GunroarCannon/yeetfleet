@@ -10,9 +10,10 @@ config_version=5
 
 [application]
 
-config/name="Project Nebula"
+config/name="Yeetfleet"
 config/description="Modular, web/mobile-first Elite-like. Module 1: Ship Builder."
-run/main_scene="res://modules/core/core.tscn"
+run/main_scene="uid://cu4bpdiswlllv"
+config/quit_on_go_back=false
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"
 

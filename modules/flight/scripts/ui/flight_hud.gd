@@ -59,6 +59,13 @@ var _heat := 0.0
 
 ## Debug toggles — small checkboxes on the right edge to isolate rendering issues.
 var _debug_panel: VBoxContainer = null
+## Scrolls [member _debug_panel]; this is what shows and hides.
+var _debug_scroll: ScrollContainer = null
+## Top-bar chips that fold into [member _tools_chip] on a narrow screen.
+var _debug_chips: Array[Control] = []
+var _tools_chip: Button = null
+## Tap-outside-to-close, one-at-a-time and fit-to-screen for every panel.
+var _modals: FlightModalHost = null
 var _debug_toggles: Dictionary = {}
 var _event_container: CenterContainer = null
 
@@ -71,6 +78,21 @@ var _game_over_modal: Control = null
 ## Modular HUD components
 var _radar_display: RadarDisplay = null
 var _combat_modal: CombatSettingsModal = null
+var _juice_panel: JuiceSettingsPanel = null
+var _perf_panel: PerformancePanel = null
+var _stats_panel: CombatStatsPanel = null
+var _controls_panel: ControlsPanel = null
+var _fonts_panel: MobileHudFontsPanel = null
+var _scenario_panel: ScenarioPanel = null
+var _bug_hunt_panel: BugHuntPanel = null
+var _fly_as_panel: FlyAsPanel = null
+var _log_census_panel: LogCensusPanel = null
+## The real phone layout (see [method set_mobile_layout]) and whether it is up.
+var _mobile_hud: MobileHud = null
+var _mobile_layout := false
+## Which desktop widgets were visible when the mobile layout took over, so
+## leaving it puts back exactly what was there.
+var _desktop_visible := {}
 var _weapon_selector: WeaponSelector = null
 
 ## Visual & Palette controls
@@ -91,6 +113,7 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	theme = FlightTheme.create_theme(size, Session.mobile_view_fit)
+	_load_spawn_prefs()
 	_build()
 
 
@@ -116,6 +139,14 @@ func _build() -> void:
 	_build_game_over_modal()
 	_build_radar()
 	_build_combat_modal()
+	_build_juice_panel()
+	_modals = FlightModalHost.new(self)
+	for panel: Control in [_debug_scroll, _combat_modal, _juice_panel, _palette_drawer]:
+		if panel != null:
+			_modals.manage(panel)
+	# Come back in the layout the player left in.
+	if bool(Session.pref("mobile_layout", OS.has_feature("mobile"))):
+		set_mobile_layout.call_deferred(true)
 
 
 func _build_event_container() -> void:
@@ -134,21 +165,49 @@ func get_event_container() -> Control:
 
 func _build_debug_panel() -> void:
 	# Debug panel: toggles on the right edge to isolate rendering issues.
+	# A scrolling column down the right edge, so it fits a short phone screen.
+	_debug_scroll = ScrollContainer.new()
+	_debug_scroll.name = "DebugScroll"
+	_debug_scroll.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	_debug_scroll.offset_right = -BuilderTheme.PAD
+	_debug_scroll.offset_top = BuilderTheme.TOUCH_MIN + BuilderTheme.PAD * 2
+	_debug_scroll.offset_bottom = -BuilderTheme.PAD
+	_debug_scroll.offset_left = -180.0
+	_debug_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_debug_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	_debug_scroll.add_theme_stylebox_override(
+		"panel", BuilderTheme.flat(BuilderTheme.panel_bg(), BuilderTheme.border(), 6)
+	)
+	_debug_scroll.visible = false
+	add_child(_debug_scroll)
 	_debug_panel = VBoxContainer.new()
 	_debug_panel.name = "DebugToggles"
-	_debug_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_debug_panel.offset_right = -BuilderTheme.PAD
-	_debug_panel.offset_top = BuilderTheme.TOUCH_MIN + BuilderTheme.PAD * 2
-	_debug_panel.offset_left = -160.0
-	_debug_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_debug_panel.visible = false
-	add_child(_debug_panel)
+	_debug_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_debug_panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	_debug_scroll.add_child(_debug_panel)
 
 	var lbl := Label.new()
 	lbl.text = "DEBUG"
 	lbl.add_theme_font_size_override("font_size", 10)
 	lbl.add_theme_color_override("font_color", BuilderTheme.warn())
 	_debug_panel.add_child(lbl)
+
+	_add_debug_button("🏠 Hangar", func() -> void: _root.return_to_hangar())
+	_add_debug_button("🎮 Controls", func() -> void: toggle_controls_panel())
+	_add_debug_button("🕹 Next movement profile (U)", func() -> void: _root.cycle_move_profile())
+	_add_debug_button("📱 Mobile HUD (F1 back)", func() -> void: set_mobile_layout(true))
+	_add_debug_button("⚡ Performance", func() -> void: toggle_perf_panel())
+	_add_debug_button("🎨 Palette", func() -> void: toggle_palette_menu())
+	if GameDefaults.can_bake():
+		_add_debug_button("💾 Save as game defaults", _bake_game_defaults)
+	_add_debug_button("↺ Reset to game defaults", _reset_to_game_defaults)
+	_add_debug_button("🔤 HUD fonts", func() -> void: toggle_fonts_panel())
+	_add_debug_button("⚔ Scenarios", func() -> void: toggle_scenario_panel())
+	_add_debug_button("🧪 Stats", func() -> void: toggle_stats_panel())
+	_add_debug_button("🎬 Juice", func() -> void: toggle_juice_panel())
+	_add_debug_button("🛩 Fly as…", func() -> void: toggle_fly_as_panel())
+	_add_debug_button("🐞 Bug hunt", func() -> void: toggle_bug_hunt_panel())
+	_add_debug_button("Log census", func() -> void: toggle_log_census_panel())
 
 	_add_debug_toggle("Plumes", true)
 	_add_debug_toggle("Halos", true)
@@ -158,6 +217,7 @@ func _build_debug_panel() -> void:
 	_add_debug_toggle("Planet", true)
 	_add_debug_toggle("Atmo", true)
 	_add_debug_toggle("SafeAtmo", true)
+	_add_debug_toggle("AltSurface", Session.planet_surface_alt)
 	_add_debug_toggle("Station", true)
 	_add_debug_toggle("SkyDome", true)
 	_add_debug_toggle("Sun", true)
@@ -176,10 +236,30 @@ func _build_debug_panel() -> void:
 	# D key toggles the panel.
 
 
+## Toggles whose state already lives in its own saved setting, so the debug
+## strip doesn't keep a second copy that could disagree with it.
+const DEBUG_TOGGLES_SAVED_ELSEWHERE := ["AltSurface", "Reticle", "Markers", "SciFiSfx", "AddonVFX", "Toon"]
+
+
+func _add_debug_button(label: String, action: Callable) -> void:
+	var b := Button.new()
+	b.text = label
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 10)
+	b.pressed.connect(action)
+	_debug_panel.add_child(b)
+
+
 func _add_debug_toggle(label: String, default: bool) -> void:
 	var cb := CheckBox.new()
 	cb.text = label
-	cb.button_pressed = default
+	var value := default
+	if not label in DEBUG_TOGGLES_SAVED_ELSEWHERE:
+		value = bool(Session.pref("debug_" + label, default))
+		if value != default:
+			# Put a saved non-default back once the scene it drives exists.
+			_on_debug_toggle.call_deferred(label, value)
+	cb.button_pressed = value
 	cb.add_theme_font_size_override("font_size", 10)
 	cb.add_theme_color_override("font_color", BuilderTheme.text_dim())
 	cb.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -192,6 +272,8 @@ func _on_debug_toggle(label: String, on: bool) -> void:
 	# Forward to FlightRoot which owns the actual nodes.
 	if _root == null:
 		return
+	if not label in DEBUG_TOGGLES_SAVED_ELSEWHERE:
+		Session.prefs["debug_" + label] = on
 	match label:
 		"Plumes": _root.set_debug_visible("plumes", on)
 		"Halos": _root.set_debug_visible("halos", on)
@@ -201,6 +283,11 @@ func _on_debug_toggle(label: String, on: bool) -> void:
 		"Planet": _root.set_debug_visible("planet", on)
 		"Atmo": _root.set_debug_visible("atmo", on)
 		"SafeAtmo": Planet.swap_all_atmosphere_shaders(on)
+		"AltSurface":
+			Planet.swap_all_surface_shaders(on)
+			Session.planet_surface_alt = on
+			Session.planet_surface_style = 1 if on else 0
+			Session.save_to_disk()
 		"Station": _root.set_debug_visible("station", on)
 		"SkyDome": _root.set_debug_visible("skydome", on)
 		"Sun": _root.set_debug_visible("sun", on)
@@ -222,8 +309,33 @@ func _on_debug_toggle(label: String, on: bool) -> void:
 
 
 func toggle_debug_panel() -> void:
-	if _debug_panel != null:
-		_debug_panel.visible = not _debug_panel.visible
+	if _debug_scroll != null:
+		_debug_scroll.visible = not _debug_scroll.visible
+
+
+## Close whatever panel or toolbar popup is open. Returns true if something
+## was closed. Back (phone) and Escape call this first.
+func close_top_panel() -> bool:
+	if _menu != null and _menu.close_open():
+		return true
+	return _modals != null and _modals.close_top()
+
+
+## Write the current tuning into the files that ship with the game.
+func _bake_game_defaults() -> void:
+	var n := GameDefaults.bake()
+	if n < 0:
+		show_hint("Only a desktop run from the project can save game defaults")
+	else:
+		show_hint("Saved %d settings files as the game's defaults" % n)
+
+
+## Drop the player's own settings: everything goes back to what ships.
+func _reset_to_game_defaults() -> void:
+	Session.reset_to_defaults()
+	show_hint("Settings reset to the game defaults — restarting")
+	if _root != null:
+		_root.get_tree().reload_current_scene.call_deferred()
 
 
 # --- Settings popup -----------------------------------------------------------
@@ -375,12 +487,31 @@ func _apply_ship_size() -> void:
 
 # --- Spawn state --------------------------------------------------------------
 
-## The spawn panel's remembered choices, kept between popup opens.
+## The spawn panel's remembered choices, kept between popup opens and saved
+## across launches (see [method _set_spawn_pref]).
 var _spawn_behavior := 0
 var _spawn_formation := 0
 var _spawn_count := 3
 ## The team the spawn popup assigns spawned ships to (1 = Red).
 var _spawn_team := 1
+
+
+## Record one spawn-panel choice in [member Session.prefs] and keep the live
+## value in step.
+func _set_spawn_pref(key: String, value: int) -> void:
+	Session.prefs["spawn_" + key] = value
+	match key:
+		"behavior": _spawn_behavior = value
+		"formation": _spawn_formation = value
+		"count": _spawn_count = value
+		"team": _spawn_team = value
+
+
+func _load_spawn_prefs() -> void:
+	_spawn_behavior = int(Session.pref("spawn_behavior", _spawn_behavior))
+	_spawn_formation = int(Session.pref("spawn_formation", _spawn_formation))
+	_spawn_count = int(Session.pref("spawn_count", _spawn_count))
+	_spawn_team = int(Session.pref("spawn_team", _spawn_team))
 
 
 func _on_spawn_pressed() -> void:
@@ -537,77 +668,56 @@ func _build_game_over_modal() -> void:
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_over_modal.add_child(center)
 
+	# A sprayed sticker in the mobile HUD's look (see [PopupSkin]), rimmed in
+	# its hull colour, instead of the old generic rounded box and emoji.
+	var hull_col := MobileHudProfiles.color("hull")
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(460, 240)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("0d111a")
-	sb.border_color = Color("ff4d4d")
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(14)
-	sb.set_content_margin_all(24)
-	sb.shadow_color = Color(0.8, 0.1, 0.1, 0.35)
-	sb.shadow_size = 22
-	panel.add_theme_stylebox_override("panel", sb)
+	panel.name = "WreckedPanel"
+	panel.custom_minimum_size = Vector2(440, 230)
 	center.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
+	vbox.add_theme_constant_override("separation", 12)
 	panel.add_child(vbox)
 
 	var title := Label.new()
-	title.text = "💥 SHIP DESTROYED 💥"
+	title.name = "Title"
+	title.text = "WRECKED"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 28)
-	title.add_theme_color_override("font_color", Color("ff5252"))
+	title.add_theme_font_size_override("font_size", 46)
+	title.add_theme_color_override("font_color", hull_col)
+	# A slight tilt, like a tag sprayed in a hurry.
+	title.pivot_offset = Vector2(200, 26)
+	title.rotation_degrees = -3.0
 	vbox.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "Hull integrity failed — vessel disintegrated into space."
+	sub.text = "Your hull gave out. The ship is scrap."
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_size_override("font_size", 14)
-	sub.add_theme_color_override("font_color", BuilderTheme.text_dim())
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.75))
 	vbox.add_child(sub)
-
-	var hint := Label.new()
-	hint.text = "Press [R] or Space to Respawn • [B] for Ship Builder"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", BuilderTheme.warn())
-	vbox.add_child(hint)
 
 	var btn_box := HBoxContainer.new()
 	btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_box.add_theme_constant_override("separation", 16)
+	btn_box.add_theme_constant_override("separation", 18)
 	vbox.add_child(btn_box)
 
 	var b_respawn := Button.new()
-	b_respawn.text = "↺ RESPAWN (R)"
-	b_respawn.custom_minimum_size = Vector2(170, 48)
-	b_respawn.add_theme_font_size_override("font_size", 15)
-	var r_style := StyleBoxFlat.new()
-	r_style.bg_color = Color("1e6b45")
-	r_style.border_color = Color("46ff9b")
-	r_style.set_border_width_all(2)
-	r_style.set_corner_radius_all(8)
-	b_respawn.add_theme_stylebox_override("normal", r_style)
-	b_respawn.add_theme_color_override("font_color", Color.WHITE)
-	b_respawn.pressed.connect(func() -> void:
-		if _root != null:
-			_root.respawn_player_ship()
-	)
+	b_respawn.name = "Respawn"
+	b_respawn.text = "RESPAWN  [R]"
+	b_respawn.custom_minimum_size = Vector2(176, 52)
+	b_respawn.focus_mode = Control.FOCUS_NONE
+	b_respawn.add_theme_font_size_override("font_size", 17)
+	b_respawn.pressed.connect(_on_respawn_pressed)
 	btn_box.add_child(b_respawn)
 
 	var b_hangar := Button.new()
-	b_hangar.text = "🛠 BUILDER (B)"
-	b_hangar.custom_minimum_size = Vector2(170, 48)
+	b_hangar.name = "Builder"
+	b_hangar.text = "BUILDER  [B]"
+	b_hangar.custom_minimum_size = Vector2(160, 52)
+	b_hangar.focus_mode = Control.FOCUS_NONE
 	b_hangar.add_theme_font_size_override("font_size", 15)
-	var h_style := StyleBoxFlat.new()
-	h_style.bg_color = Color("232938")
-	h_style.border_color = Color("8899aa")
-	h_style.set_border_width_all(2)
-	h_style.set_corner_radius_all(8)
-	b_hangar.add_theme_stylebox_override("normal", h_style)
-	b_hangar.add_theme_color_override("font_color", Color.WHITE)
 	b_hangar.pressed.connect(func() -> void:
 		if _root != null:
 			_root.return_to_hangar()
@@ -615,6 +725,19 @@ func _build_game_over_modal() -> void:
 	btn_box.add_child(b_hangar)
 
 	add_child(_game_over_modal)
+	PopupSkin.skin(panel, hull_col)
+	# The respawn button is the one to press: filled in, not just rimmed.
+	var go := PopupSkin._button_box(MobileHudProfiles.color("shield"), Color.WHITE, 2, 6)
+	b_respawn.add_theme_stylebox_override("normal", go)
+	b_respawn.add_theme_stylebox_override("hover", PopupSkin._button_box(MobileHudProfiles.color("shield").lightened(0.2), Color.WHITE, 2, 6))
+	b_respawn.add_theme_color_override("font_color", Color.WHITE)
+
+
+## The popup's respawn button: the same full respawn as the R key (the button
+## used to rebuild the ship but leave the popup up and the pilot "dead").
+func _on_respawn_pressed() -> void:
+	if _root != null:
+		_root.respawn_player_ship()
 
 
 func _build_radar() -> void:
@@ -641,6 +764,195 @@ func _build_combat_modal() -> void:
 	_combat_modal.setting_changed.connect(_on_combat_setting_changed)
 	_combat_modal.action_triggered.connect(_on_combat_action_triggered)
 	add_child(_combat_modal)
+	PopupSkin.skin(_combat_modal)
+
+
+func _build_juice_panel() -> void:
+	_juice_panel = JuiceSettingsPanel.new()
+	_juice_panel.name = "JuiceSettingsPanel"
+	_juice_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_juice_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_juice_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_juice_panel.visible = false
+	add_child(_juice_panel)
+	PopupSkin.skin(_juice_panel)
+
+
+func toggle_juice_panel() -> void:
+	if _juice_panel != null:
+		_juice_panel.visible = not _juice_panel.visible
+
+
+func toggle_stats_panel() -> void:
+	if _stats_panel == null:
+		_stats_panel = CombatStatsPanel.new()
+		_stats_panel.name = "CombatStatsPanel"
+		_stats_panel.setup(_root)
+		_center_panel(_stats_panel)
+	_stats_panel.visible = not _stats_panel.visible
+
+
+## Movement profile, camera gestures and every control dial ([ControlsPanel]).
+func toggle_controls_panel() -> void:
+	if _controls_panel == null:
+		_controls_panel = ControlsPanel.new()
+		_controls_panel.name = "ControlsPanel"
+		_controls_panel.setup(_root)
+		_center_panel(_controls_panel)
+	_controls_panel.visible = not _controls_panel.visible
+
+
+func toggle_fonts_panel() -> void:
+	if _fonts_panel == null:
+		_fonts_panel = MobileHudFontsPanel.new()
+		_fonts_panel.name = "MobileHudFontsPanel"
+		_center_panel(_fonts_panel)
+	_fonts_panel.visible = not _fonts_panel.visible
+
+
+func toggle_scenario_panel() -> void:
+	if _root == null or _root.scenarios == null:
+		return
+	if _scenario_panel == null:
+		_scenario_panel = ScenarioPanel.new()
+		_scenario_panel.name = "ScenarioPanel"
+		_scenario_panel.setup(_root.scenarios)
+		_center_panel(_scenario_panel)
+	_scenario_panel.visible = not _scenario_panel.visible
+
+
+## The 🐞 Bug hunt panel over the flight root's [BugHunt].
+func toggle_bug_hunt_panel() -> void:
+	if _root == null or _root.bug_hunt == null:
+		return
+	if _bug_hunt_panel == null:
+		_bug_hunt_panel = BugHuntPanel.new()
+		_bug_hunt_panel.name = "BugHuntPanel"
+		_bug_hunt_panel.setup(_root.bug_hunt)
+		_center_panel(_bug_hunt_panel)
+	_bug_hunt_panel.visible = not _bug_hunt_panel.visible
+
+
+## The 🛩 Fly as panel: fly a ship of another size and weapon.
+## The Log census panel: what writes to the log the most (see [LogCensus]).
+func toggle_log_census_panel() -> void:
+	if _log_census_panel == null:
+		_log_census_panel = LogCensusPanel.new()
+		_log_census_panel.name = "LogCensusPanel"
+		_center_panel(_log_census_panel)
+	_log_census_panel.visible = not _log_census_panel.visible
+
+
+func toggle_fly_as_panel() -> void:
+	if _root == null:
+		return
+	if _fly_as_panel == null:
+		_fly_as_panel = FlyAsPanel.new()
+		_fly_as_panel.name = "FlyAsPanel"
+		_fly_as_panel.setup(_root)
+		_center_panel(_fly_as_panel)
+	_fly_as_panel.visible = not _fly_as_panel.visible
+
+
+func _center_panel(panel: Control) -> void:
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	panel.visible = false
+	panel.z_index = 20
+	add_child(panel)
+	PopupSkin.skin(panel)
+	if _modals != null:
+		_modals.manage(panel)
+
+
+func mobile_layout_active() -> bool:
+	return _mobile_layout
+
+
+## The movement profile ([enum FlightRoot.MoveProfile]) the HUD is laid out for.
+var _move_profile := 0
+
+
+## Show only the controls the movement profile uses: swipe and slingshot fly
+## off the bare screen, so the stick, throttle, fire/boost/weapon buttons and
+## the speed/target read-outs go. Bars, markers, the menu and every debug
+## panel stay.
+func set_move_profile(p: int) -> void:
+	_move_profile = p
+	_apply_move_profile()
+	if _mobile_hud != null:
+		_mobile_hud.set_move_profile(p)
+
+
+func _apply_move_profile() -> void:
+	if _mobile_layout:
+		return
+	var shown := not FlightRoot.profile_is_one_thumb(_move_profile)
+	for c: Control in [_stick, _throttle, _fire_button, _boost_button, _weapon_button, _speed_label, _ground_speed_label, _target_label]:
+		if c != null:
+			c.visible = shown
+	# FPS: the stick's push is the speed, so no throttle lever.
+	if _throttle != null and _move_profile == FlightRoot.MoveProfile.FPS:
+		_throttle.visible = false
+
+
+## Swap the desktop chrome for the real phone layout ([MobileHud]) or back.
+## The drawn instruments (reticle, markers, lock brackets, damage numbers),
+## the hint line, event bubbles and the game-over card stay up in both; every
+## other desktop widget is hidden and restored as it was. F1 leaves, and so
+## does the HUD's own small menu button, for a phone with no keyboard.
+func set_mobile_layout(on: bool) -> void:
+	if on == _mobile_layout:
+		return
+	_mobile_layout = on
+	Session.prefs["mobile_layout"] = on
+	if on:
+		if _mobile_hud == null:
+			_mobile_hud = MobileHud.new()
+			_mobile_hud.setup(_root)
+			_mobile_hud.set_move_profile(_move_profile)
+			_mobile_hud.exit_requested.connect(func() -> void: set_mobile_layout(false))
+			_mobile_hud.scenario_requested.connect(toggle_scenario_panel)
+			add_child(_mobile_hud)
+			# Under the hint and pop-ups, over the drawn instruments.
+			move_child(_mobile_hud, _overlay.get_index() + 1)
+		_desktop_visible.clear()
+		var keep := [_overlay, _hint_label, _event_container, _game_over_modal, _mobile_hud]
+		for c in get_children():
+			# The graffiti targets are drawn instruments too (added by the root).
+			if c is CanvasItem and not c in keep and not c is InteractionMarkers:
+				_desktop_visible[c] = (c as CanvasItem).visible
+				(c as CanvasItem).visible = false
+		_mobile_hud.visible = true
+		# Let go of anything a desktop button was holding.
+		if _root != null:
+			_root.set_firing(false)
+			_root.set_boosting(false)
+		show_hint("Mobile HUD — F1 (or ☰) to go back")
+	else:
+		if _mobile_hud != null:
+			_mobile_hud.visible = false
+		for c in _desktop_visible:
+			if is_instance_valid(c):
+				(c as CanvasItem).visible = _desktop_visible[c]
+		_desktop_visible.clear()
+		_apply_move_profile()
+		show_hint("Desktop HUD")
+
+
+func toggle_perf_panel() -> void:
+	if _perf_panel == null:
+		_perf_panel = PerformancePanel.new()
+		_perf_panel.name = "PerformancePanel"
+		_perf_panel.setup(_root)
+		_perf_panel.set_anchors_preset(Control.PRESET_CENTER)
+		_perf_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		_perf_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+		_perf_panel.visible = false
+		add_child(_perf_panel)
+		_modals.manage(_perf_panel)
+	_perf_panel.visible = not _perf_panel.visible
 
 
 func toggle_combat_modal() -> void:
@@ -700,6 +1012,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func show_game_over() -> void:
 	if _game_over_modal == null:
 		return
+	# Above everything built after it (the phone controls, popups): under them,
+	# a tap on its buttons could land on a control and never reach it.
+	_game_over_modal.move_to_front()
+	_game_over_modal.z_index = 50
 	_game_over_modal.visible = true
 	_game_over_modal.modulate.a = 0.0
 	var tw := create_tween()
@@ -751,8 +1067,12 @@ func spawn_damage_number(amount: int, is_hull: bool, is_crit: bool, world_pos :=
 
 
 func _build_top_bar() -> void:
-	var bar := HBoxContainer.new()
+	# A flow, so the chips wrap onto a second line instead of running off a
+	# narrow screen.
+	var bar := HFlowContainer.new()
 	bar.name = "TopBar"
+	bar.add_theme_constant_override("h_separation", BuilderTheme.GAP)
+	bar.add_theme_constant_override("v_separation", BuilderTheme.GAP)
 	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	bar.offset_left = BuilderTheme.PAD
 	bar.offset_right = -BuilderTheme.PAD
@@ -777,7 +1097,14 @@ func _build_top_bar() -> void:
 	_menu.add_category(CAT_TRAILS, "shoes/lorc/footprint.png", "Trails — see which way things are moving")
 	_menu.add_category(CAT_CRAFT, "guns/lorc/cannon.png", "Large craft — spawn motherships, stations, gates to fly around")
 	_menu.add_action_icon(ACTION_HANGAR, "flashlight.png", "Back to the hangar (Esc)", func() -> void: _root.return_to_hangar())
+	_menu.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	bar.add_child(_menu)
+
+	# On a narrow screen the debug chips below fold into this one, which opens
+	# the debug column (where every one of them also lives).
+	_tools_chip = _chip("🛠", "Debug & tuning panels (D, or Back on a phone)", func() -> void: toggle_debug_panel())
+	_tools_chip.visible = false
+	bar.add_child(_tools_chip)
 
 	# Palette toggle & preview chip
 	_palette_chip = _chip("🎨 " + _get_active_palette_name(), "Color Palette (F10) — switch color palette & view swatches", func() -> void: toggle_palette_menu())
@@ -796,9 +1123,21 @@ func _build_top_bar() -> void:
 	_style_chip = _chip(_get_style_chip_label(), "Art Style (F9) — toggle cartoony/rounded vs grounded look", func() -> void: toggle_art_style())
 	bar.add_child(_style_chip)
 
+	# Every game-feel dial — camera zoom, hit effects, sound pacing, AI pacing,
+	# balance — in its own panel, next to the look settings.
+	bar.add_child(_chip("🎮 Controls", "Controls — movement profile (classic, swipe, slingshot, FPS), camera gestures, aim assist", func() -> void: toggle_controls_panel()))
+	bar.add_child(_chip("🎬 Juice", "Juice & feel — camera zoom, hit effects, shot sounds, enemy pacing, balance", func() -> void: toggle_juice_panel()))
+	bar.add_child(_chip("🧪 Stats", "Stats debugger — player & enemy health, damage, god mode, regen, spawn/kill", func() -> void: toggle_stats_panel()))
+	bar.add_child(_chip("⚡ Perf", "Performance — smooth motion, frame cap, resolution, shadows, AI/effects/debris budgets", func() -> void: toggle_perf_panel()))
+	bar.add_child(_chip("🛩 Fly as", "Fly another ship — tiny to titan, any weapon, any enemy firing style", func() -> void: toggle_fly_as_panel()))
+	bar.add_child(_chip("🐞 Bug hunt", "Flip suspect settings, record the shots, compare runs to find what bends them", func() -> void: toggle_bug_hunt_panel()))
+
 	# Mobile view fit chip
 	_mobile_chip = _chip("📱 Mobile" if Session.mobile_view_fit else "🖥 Desktop", "Mobile View (F8) — fit view & UI for mobile screen", func() -> void: toggle_mobile_view())
 	bar.add_child(_mobile_chip)
+	var first_debug := _palette_chip.get_index()
+	for i in range(first_debug, _mobile_chip.get_index() + 1):
+		_debug_chips.append(bar.get_child(i) as Control)
 
 	_target_label = Label.new()
 	_target_label.name = "Target"
@@ -814,6 +1153,10 @@ func _build_top_bar() -> void:
 	bar.add_child(_view_chip)
 	_assist_chip = _chip("ASSIST", "Flight assist (Z)", func() -> void: _root.toggle_assist())
 	bar.add_child(_assist_chip)
+	# In a flow, a child stretches to its line's height; the chips stay chips.
+	for c in bar.get_children():
+		(c as Control).size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_target_label.clip_text = true
 
 
 func _get_active_palette_name() -> String:
@@ -1197,7 +1540,30 @@ func _hold_button(text: String, tooltip: String, tint: Color) -> Button:
 ## Positions the thumb controls. Everything is anchored to a corner and
 ## sized from the shorter screen edge, so the layout is identical in portrait,
 ## landscape and on a desktop window — only the gaps grow.
+## Below this width (or in portrait) the debug chips fold into the 🛠 chip.
+const NARROW_WIDTH := 900.0
+
+
+func _fold_top_bar() -> void:
+	if _tools_chip == null:
+		return
+	var narrow := size.x < NARROW_WIDTH or size.y > size.x
+	_tools_chip.visible = narrow
+	for chip in _debug_chips:
+		chip.visible = not narrow
+	# Narrow: the icon toolbar takes a whole line of its own (wrapping inside
+	# it) and the chips flow onto the next, instead of every icon stacking in a
+	# column at its minimum width. Wide: one row of every icon — a flow's own
+	# minimum is its widest child, which stacked the toolbar into a column down
+	# the left edge, under the throttle and off the bottom of short screens.
+	var avail := maxf(size.x - BuilderTheme.PAD * 2.0, 0.0)
+	var n := _menu.get_child_count()
+	var row := n * (BuilderTheme.TOUCH_MIN + BuilderTheme.GAP) - BuilderTheme.GAP
+	_menu.custom_minimum_size.x = avail if narrow else minf(float(row), avail)
+
+
 func _layout_controls() -> void:
+	_fold_top_bar()
 	if _stick == null:
 		return
 	var is_mob := Session.mobile_view_fit
@@ -1282,6 +1648,10 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 	for entry: Array in [
 		["Cockpit", FlightCamera.Mode.COCKPIT],
 		["Chase", FlightCamera.Mode.CHASE],
+		["Action (tight chase)", FlightCamera.Mode.ACTION],
+		["Cinematic", FlightCamera.Mode.CINEMATIC],
+		["Side", FlightCamera.Mode.SIDE],
+		["Top-down", FlightCamera.Mode.TOP_DOWN],
 		["External", FlightCamera.Mode.ORBIT],
 		["Rear", FlightCamera.Mode.REAR],
 		["Far", FlightCamera.Mode.FAR],
@@ -1313,16 +1683,37 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.add_check_row("Drift field", _root.drift_field_on(), func(_on: bool) -> void: _root.toggle_drift_field())
 	popup.add_check_row("Rear view (B)", _root._rear_view_on, func(_on: bool) -> void: _root.toggle_rear_view())
 	popup.add_check_row("High res (restart)", _root.high_res_on(), func(_on: bool) -> void: _root.toggle_high_res())
+	popup.add_option_row(
+		"Planet quality (restart)", ["Low", "Medium", "High"], _root.planet_quality(),
+		func(index: int) -> void: _root.set_planet_quality(index)
+	)
+	# Which surface technique planets use — applied live and remembered, so
+	# the next flight starts with it for a side-by-side comparison.
+	var looks: Array[String] = []
+	for look: Dictionary in Planet.SURFACE_STYLES:
+		looks.append(String(look["name"]))
+	popup.add_option_row(
+		"Planet look (starts with this)", looks, Session.planet_surface_style,
+		func(index: int) -> void:
+			Planet.set_surface_style(index)
+			Session.planet_surface_style = index
+			Session.planet_surface_alt = index == 1
+			Session.save_to_disk()
+	)
 	popup.add_check_row("High contrast", BuilderTheme.high_contrast, func(_on: bool) -> void: _root.toggle_high_contrast())
 	popup.add_check_row("Test volume (restart)", not _root.location_is_space(), func(_on: bool) -> void: _root.toggle_location())
 	popup.add_check_row("Planet pointer (J)", _root.planet_pointer_on(), func(_on: bool) -> void: _root.toggle_planet_pointer())
 	popup.add_check_row("Cinematic sun lighting (Galaxy on Fire)", _root.cinematic_lighting_on(), func(_on: bool) -> void: _root.toggle_cinematic_lighting())
+	if _root.space != null:
+		popup.add_check_row("Nebula sky (painted galaxy backdrop)", Session.nebula_sky, func(on: bool) -> void: _root.space.set_nebula_sky(on))
 
 
 	# Visual & Palette Style
 	popup.add_section("Visual & Palette Style")
 	popup.add_action_row("Open Palette Menu & Swatches (F10)", func() -> void: toggle_palette_menu())
 	popup.add_check_row("Mobile View Fit (closer framing, responsive)", Session.mobile_view_fit, func(on: bool) -> void: toggle_mobile_view())
+	popup.add_action_row("📱 Real mobile HUD (F1 to go back)", func() -> void: set_mobile_layout(true))
+	popup.add_action_row("🔤 Mobile HUD look & fonts", func() -> void: toggle_fonts_panel())
 	popup.add_check_row("Cartoony & Rounded Style", StyleManager.instance().current_profile != null and StyleManager.instance().current_profile.id == "cartoony", func(_on: bool) -> void: toggle_art_style())
 	popup.add_check_row("Vector Arcade (Wireframe Neon) (F6)", StyleManager.instance().is_wireframe(), func(_on: bool) -> void: toggle_wireframe_mode())
 	popup.add_check_row("Bake Meshes (Draw call optimization)", Session.mesh_baking_enabled, func(_on: bool) -> void: toggle_mesh_baking())
@@ -1342,6 +1733,19 @@ func _fill_view_popup(popup: FlightMenu.DraggablePopup) -> void:
 
 func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Flight"
+	popup.add_section("Movement profile (U)")
+	for i in FlightRoot.MOVE_PROFILE_NAMES.size():
+		popup.add_radio_row(
+			String(FlightRoot.MOVE_PROFILE_NAMES[i]), _root.move_profile == i, i,
+			func(v: int) -> void: _root.set_move_profile(v)
+		)
+	popup.add_help_row(
+		"Classic: stick, throttle and buttons. Swipe: swipe to fly that way, tap to shoot, "
+		+ "hold to boost (keep holding to warp) — ramming hits hard. Slingshot: drag back from "
+		+ "your ship and let go; it bounces off everything it hits. Tap to shoot, touch it to catch it. "
+		+ "FPS: the stick moves you (push further = faster), drag the screen to look. All their dials: 🎮 Controls."
+	)
+	popup.add_separator()
 	popup.add_action_row("Cycle assist (Z)", func() -> void: _root.toggle_assist())
 	popup.add_value_row("Assist now", _assist_short())
 	popup.add_help_row(
@@ -1467,6 +1871,8 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 		)
 		popup.add_separator()
 	popup.add_value_row("AI ships alive", str(_root.ai_live_count()))
+	popup.add_action_row("⚔ Scenarios — duel, skirmish, waves…", func() -> void: toggle_scenario_panel())
+	popup.add_action_row("🛩 Fly as another ship…", func() -> void: toggle_fly_as_panel())
 	popup.add_action_row(
 		"Lock nearest ship (T)" if _root.locked_target == null else "Release lock (T)",
 		func() -> void: _root.toggle_lock()
@@ -1489,21 +1895,21 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 	var behaviors: Array[String] = ["Hunt player", "Patrol", "Boid swarm", "Flee", "Guard", "Sniper"]
 	popup.add_option_row(
 		"Behaviour", behaviors, _spawn_behavior,
-		func(idx: int) -> void: _spawn_behavior = idx
+		func(idx: int) -> void: _set_spawn_pref("behavior", idx)
 	)
 	var forms: Array[String] = ["Scatter", "V-formation", "Line", "Sphere", "Trail"]
 	popup.add_option_row(
 		"Formation", forms, _spawn_formation,
-		func(idx: int) -> void: _spawn_formation = idx
+		func(idx: int) -> void: _set_spawn_pref("formation", idx)
 	)
 	var teams: Array[String] = ["None", "Red", "Blue", "Green", "Gold"]
 	popup.add_option_row(
 		"Team", teams, _spawn_team,
-		func(idx: int) -> void: _spawn_team = idx
+		func(idx: int) -> void: _set_spawn_pref("team", idx)
 	)
 	popup.add_slider_row(
 		"Group size", 1.0, 8.0, 1.0, float(_spawn_count),
-		func(v: float) -> void: _spawn_count = int(v), "%.0f"
+		func(v: float) -> void: _set_spawn_pref("count", int(v)), "%.0f"
 	)
 	popup.add_action_row("Spawn group", func() -> void: _on_spawn_pressed())
 
@@ -1786,9 +2192,23 @@ func _draw_instruments() -> void:
 	var camera := _root.camera_node()
 	if camera == null or _root.model == null:
 		return
+	if _root.pilot() != null:
+		_root.pilot().draw(_overlay)
 	var centre := size * 0.5
 	if Session.hud_reticle:
-		_draw_reticle(centre)
+		# The gunsight sits where the guns converge (down the nose), not at
+		# the screen centre: the chase camera leads into turns, so the centre
+		# is often a little off where the shots go.
+		var sight := centre
+		var sys_now := _root.active_systems()
+		if sys_now != null:
+			var bp := sys_now.boresight_point()
+			if not camera.is_position_behind(bp):
+				sight = camera.unproject_position(bp)
+		_reticle_pos = centre if _reticle_pos == Vector2.INF else _reticle_pos.lerp(sight, 0.5)
+		_draw_reticle(_reticle_pos)
+		if sys_now != null:
+			_draw_reload_ring(_reticle_pos, sys_now)
 		if _root.locked_target != null and is_instance_valid(_root.locked_target):
 			var p_pos := camera.global_position
 			var p_vel := _root.model.velocity if _root.model != null else Vector3.ZERO
@@ -1812,16 +2232,25 @@ func _draw_instruments() -> void:
 		_draw_markers(camera)
 		_draw_lock_bracket(camera)
 		_draw_ai_lock_brackets(camera)
-	_draw_power_bars()
+	# The mobile layout draws its own health; the minimap would sit under its
+	# stick, so both give way to it.
+	if not _mobile_layout:
+		_draw_power_bars()
 	if Session.hud_indicators:
 		_draw_player_indicator(camera)
 		_draw_edge_indicators(camera, centre)
-		_draw_minimap(camera)
+		if not _mobile_layout:
+			_draw_minimap(camera)
 	_draw_damage_numbers()
 
 
 ## The gunsight. An open cross rather than a dot: a dot vanishes against a bright
 ## planet, and the gap in the middle keeps the target visible while you aim.
+## The gunsight's drawn position, eased a touch so a physics-tick step never
+## shows as a twitch. INF until the first frame.
+var _reticle_pos := Vector2.INF
+
+
 func _draw_reticle(centre: Vector2) -> void:
 	var col := BuilderTheme.accent()
 	var r := RETICLE_RADIUS
@@ -1829,6 +2258,24 @@ func _draw_reticle(centre: Vector2) -> void:
 		var dir := [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN][i] as Vector2
 		_overlay.draw_line(centre + dir * (r * 0.45), centre + dir * r, col, 1.5, true)
 	_overlay.draw_arc(centre, r * 1.5, 0.0, TAU, 32, Color(col, 0.35), 1.0, true)
+
+
+## The weapon cooldown round the gunsight: an arc that fills as the guns
+## reload and closes into a full ring when they are ready, in the weapon's
+## colour — red when the capacitor cannot pay for the next shot.
+func _draw_reload_ring(centre: Vector2, sys: SystemsSim) -> void:
+	var r := RETICLE_RADIUS * 1.5
+	var t := sys.reload_progress()
+	var col: Color = sys.get_active_weapon().get("color", BuilderTheme.accent())
+	if not sys.has_energy_for_shot():
+		col = BuilderTheme.bad()
+		t = 1.0
+	var ready := t >= 0.999
+	_overlay.draw_arc(centre, r, 0.0, TAU, 40, Color(0.0, 0.0, 0.0, 0.35), 4.5, true)
+	if ready:
+		_overlay.draw_arc(centre, r, 0.0, TAU, 40, Color(col, 0.9), 2.5, true)
+	else:
+		_overlay.draw_arc(centre, r, -PI * 0.5, -PI * 0.5 + TAU * t, 40, Color(col, 0.95), 3.0, true)
 
 
 ## Where the ship is actually going, which with assist off is rarely where it is
@@ -1979,6 +2426,14 @@ func _draw_power_bars() -> void:
 
 	# HULL with ghost lag
 	_draw_ghost_bar(Rect2(x, y, w, h), hp_frac, _hp_ghost, BuilderTheme.gauge_color(hp_frac), "HULL")
+	if hp_frac < 0.25 and hp_frac > 0.0:
+		# A colour shift alone is easy to miss mid-dogfight — how close to
+		# death the player actually is was hard to read at a glance, so a
+		# critical hull gets a pulsing outline on top of the colour cue.
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
+		_overlay.draw_rect(
+			Rect2(x - 2.0, y - 2.0, w + 4.0, h + 4.0), Color(1.0, 0.15, 0.15, pulse * 0.8), false, 2.0
+		)
 	# SHIELD with ghost lag
 	_draw_ghost_bar(Rect2(x, y + gap + h, w, h), shield_frac, _shield_ghost, Color("00d4ff"), "SHIELD")
 	# CAP
@@ -2118,12 +2573,11 @@ func _draw_indicator_arrow(at: Vector2, angle: float, r: float, col: Color, outl
 
 
 ## True when the external-view player indicator is armed: every mode except the
-## three that always keep the player's ship in frame.
+## views that always keep the player's ship in frame.
 func player_indicator_active() -> bool:
-	var mode := _root.camera_mode() if _root != null else FlightCamera.Mode.CHASE
-	return mode != FlightCamera.Mode.COCKPIT \
-		and mode != FlightCamera.Mode.REAR \
-		and mode != FlightCamera.Mode.CHASE
+	if _root == null or _root.camera_rig == null:
+		return false
+	return not _root.camera_rig.is_follow_mode()
 func _draw_edge_indicators(camera: Camera3D, centre: Vector2) -> void:
 	if _root._ai_spawner == null:
 		return

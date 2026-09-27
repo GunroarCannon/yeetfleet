@@ -82,6 +82,9 @@ func _check_reduce_motion() -> void:
 # --- Settings persistence ------------------------------------------------------
 
 func _check_settings_roundtrip() -> void:
+	# The player's real settings file: kept byte for byte and put back after,
+	# so running this smoke never changes what they set.
+	var saved_cfg := FileAccess.get_file_as_bytes(JuiceSettings.SETTINGS_PATH) 		if FileAccess.file_exists(JuiceSettings.SETTINGS_PATH) else PackedByteArray()
 	var was_intensity := JuiceSettings.intensity
 	var was_reduce := JuiceSettings.reduce_motion
 
@@ -96,6 +99,14 @@ func _check_settings_roundtrip() -> void:
 
 	JuiceSettings.set_intensity(was_intensity)
 	JuiceSettings.set_reduce_motion(was_reduce)
+	if saved_cfg.is_empty():
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(JuiceSettings.SETTINGS_PATH))
+	else:
+		var f := FileAccess.open(JuiceSettings.SETTINGS_PATH, FileAccess.WRITE)
+		if f != null:
+			f.store_buffer(saved_cfg)
+			f.close()
+	JuiceSettings.load_from_disk()
 	await process_frame
 
 

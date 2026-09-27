@@ -1,11 +1,17 @@
-## Verifies the high-res toggle rebuilds geometry denser instead of zooming.
+## Verifies two now-separate dials each do their own job: high-res raises the
+## render scale without resizing the window, and planet_quality rebuilds
+## geometry denser without touching either.
 ##
 ##     godot --path . --rendering-driver opengl3 --script modules/flight/tools/high_res_check.gd
 ##
-## Instantiates the flight test bed twice — once with high-res off, once with it
-## on — and compares the procedural geometry: starfield density, planet surface
-## resolution, atmosphere sphere segments, plus the window size (which must NOT
-## change; that was the "zoom") and the 3D render scale.
+## Instantiates the flight test bed three times — baseline, high-res on, and
+## planet_quality raised — and compares: starfield density, planet surface
+## resolution, atmosphere sphere segments, window size (must NOT change; that
+## was the old "zoom" bug) and the 3D render scale. See [member
+## Session.high_res] and [member Session.planet_quality]'s doc comments for
+## why they were split: supersampling and mesh density are different costs,
+## and a faceted planet stays faceted no matter how many pixels it's
+## rendered at.
 ##
 ## Stepped from _process like the flight smoke test: awaiting process_frame from
 ## _initialize proved fragile, and this is the pattern the repo's other SceneTree
@@ -15,14 +21,14 @@ extends SceneTree
 const SCENE_PATH := "res://modules/flight/flight_test.tscn"
 const FRAMES_PER_STEP := 15
 
-enum { PH_MEASURE_NORMAL, PH_MEASURE_HIGH, PH_DONE }
+enum { PH_MEASURE_NORMAL, PH_MEASURE_HIGH_RES, PH_MEASURE_HIGH_QUALITY, PH_DONE }
 
 var _root: FlightRoot
 var _phase := PH_MEASURE_NORMAL
 var _frames := 0
-var _settle := 0
 var _normal: Dictionary
-var _high: Dictionary
+var _high_res: Dictionary
+var _high_quality: Dictionary
 
 
 func _initialize() -> void:
@@ -37,19 +43,23 @@ func _process(_delta: float) -> bool:
 	_frames = 0
 	match _phase:
 		PH_MEASURE_NORMAL:
-			_normal = _measure(false)
+			_normal = _measure(false, 0)
 			_report("normal", _normal)
-			_phase = PH_MEASURE_HIGH
-		PH_MEASURE_HIGH:
-			_high = _measure(true)
-			_report("high", _high)
+			_phase = PH_MEASURE_HIGH_RES
+		PH_MEASURE_HIGH_RES:
+			_high_res = _measure(true, 0)
+			_report("high_res", _high_res)
+			_phase = PH_MEASURE_HIGH_QUALITY
+		PH_MEASURE_HIGH_QUALITY:
+			_high_quality = _measure(false, 2)
+			_report("high_quality", _high_quality)
 			_phase = PH_DONE
 		PH_DONE:
-			return _finish(_normal, _high)
+			return _finish(_normal, _high_res, _high_quality)
 	return false
 
 
-func _measure(high_res: bool) -> Dictionary:
+func _measure(high_res: bool, planet_quality: int) -> Dictionary:
 	if _root != null:
 		_root.queue_free()
 		_root = null
@@ -57,6 +67,7 @@ func _measure(high_res: bool) -> Dictionary:
 	# FRAMES_PER_STEP covers it; the settle frames are spent across the step.
 	var packed := load(SCENE_PATH) as PackedScene
 	Session.high_res = high_res
+	Session.planet_quality = planet_quality
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)
 	_root.get_node("Ui/Coach").visible = false
@@ -107,17 +118,24 @@ func _report(tag: String, m: Dictionary) -> void:
 		print("  %-20s %s" % [key, m[key]])
 
 
-func _finish(normal: Dictionary, high: Dictionary) -> bool:
+func _finish(normal: Dictionary, high_res: Dictionary, high_quality: Dictionary) -> bool:
 	var problems: Array[String] = []
 	var n_size: Vector2i = normal.get("window_size", Vector2i.ZERO)
-	var h_size: Vector2i = high.get("window_size", Vector2i.ZERO)
-	if h_size != n_size:
-		problems.append("the window resized — that is the zoom bug: %s -> %s" % [n_size, h_size])
-	if float(high.get("render_scale", 1.0)) <= 1.0:
-		problems.append("high res did not raise the 3D render scale")
+	var hr_size: Vector2i = high_res.get("window_size", Vector2i.ZERO)
+	var hq_size: Vector2i = high_quality.get("window_size", Vector2i.ZERO)
+	if hr_size != n_size:
+		problems.append("high_res resized the window — that is the zoom bug: %s -> %s" % [n_size, hr_size])
+	if hq_size != n_size:
+		problems.append("planet_quality resized the window: %s -> %s" % [n_size, hq_size])
+	if float(high_res.get("render_scale", 1.0)) <= 1.0:
+		problems.append("high_res did not raise the 3D render scale")
+	if float(high_quality.get("render_scale", 1.0)) != float(normal.get("render_scale", 1.0)):
+		problems.append("planet_quality changed the 3D render scale — it should only touch geometry")
 	for key: String in ["stars_vertices", "nebula_vertices", "planet_resolution", "atmosphere_radial", "atmosphere_rings"]:
-		if int(high.get(key, 0)) <= int(normal.get(key, 0)):
-			problems.append("%s did not get denser (%s -> %s)" % [key, normal.get(key, 0), high.get(key, 0)])
+		if int(high_quality.get(key, 0)) <= int(normal.get(key, 0)):
+			problems.append("%s did not get denser under planet_quality (%s -> %s)" % [key, normal.get(key, 0), high_quality.get(key, 0)])
+		if int(high_res.get(key, 0)) != int(normal.get(key, 0)):
+			problems.append("%s changed under high_res alone — it should be planet_quality's job only (%s -> %s)" % [key, normal.get(key, 0), high_res.get(key, 0)])
 
 	print("")
 	if problems.is_empty():

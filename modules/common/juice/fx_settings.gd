@@ -37,7 +37,7 @@ static func ensure_loaded() -> void:
 static func load_from_disk() -> void:
 	_loaded = true
 	var cfg := ConfigFile.new()
-	if cfg.load(SETTINGS_PATH) != OK:
+	if GameDefaults.load_layered(cfg, SETTINGS_PATH, FxSettings.load_from_disk) != OK:
 		return
 	library_sounds = bool(cfg.get_value(SECTION, "library_sounds", library_sounds))
 	addon_vfx = bool(cfg.get_value(SECTION, "addon_vfx", addon_vfx))

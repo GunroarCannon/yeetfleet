@@ -76,6 +76,22 @@ static func hitstop(seconds := 0.05, scale := 0.15) -> void:
 	_ensure().hitstop(seconds, scale)
 
 
+## A real freeze-frame: time all but stops for [param seconds] of real time
+## (capped at [constant JuiceRuntime.FREEZE_MAX]). [param depth] 1 = a dead
+## stop, 0.5 = half speed. Skipped under reduce_motion. Shares
+## [method hitstop_factor] with [method hitstop], so a scene that writes the
+## time scale itself picks it up the same way.
+static func freeze(seconds: float, depth := 1.0) -> void:
+	_ensure().freeze(seconds, depth)
+
+
+## The live hitstop slow-down, 1.0 when none is running. For a scene that
+## writes [member Engine.time_scale] itself every frame: multiply this in, or
+## the freeze-frame is cancelled the frame after it starts.
+static func hitstop_factor() -> float:
+	return _ensure().hitstop_factor
+
+
 ## Continuous, 0..1 — how close to top speed the caller is, not a one-shot.
 static func speed_lines(fraction: float) -> void:
 	_ensure().speed_lines(fraction)
@@ -86,14 +102,20 @@ static func speed_lines(fraction: float) -> void:
 static func burst(
 	preset: BurstPresets.Preset, xform: Transform3D, scale := 1.0, color := Color.TRANSPARENT
 ) -> void:
+	if not AddonVfx.worth_spawning(xform.origin, 2500.0):
+		return
 	_ensure().burst(preset, xform, scale, color)
 
 
 static func light_pop(position: Vector3, color: Color, energy: float, decay := 0.12) -> void:
+	if not AddonVfx.worth_spawning(position, 2500.0):
+		return
 	_ensure().light_pop(position, color, energy, decay)
 
 
 static func ring(xform: Transform3D, radius: float, color: Color, life := 0.4) -> void:
+	if not AddonVfx.worth_spawning(xform.origin, 2500.0):
+		return
 	_ensure().ring(xform, radius, color, life)
 
 

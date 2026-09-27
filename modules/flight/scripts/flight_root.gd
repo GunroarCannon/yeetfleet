@@ -133,6 +133,17 @@ var _rim_light: DirectionalLight3D
 ## All active debris nodes, tracked for drift and fade each frame.
 var _debris_list: Array[Dictionary] = []
 
+## Seconds left before another near-miss slowmo can trigger — a single
+## passing shot should read as one beat, not a stutter of hitstops while it
+## stays close. Starts positive (a brief grace period) rather than 0: a shot
+## passing close on the very first frames after spawning is not a moment the
+## player has had time to notice yet, so triggering slowmo there would just
+## read as an unexplained stutter — and briefly scaling Engine.time_scale
+## that early was enough to occasionally throw off other startup timing.
+var _near_miss_cooldown := 1.0
+const NEAR_MISS_RADIUS := 6.0
+const NEAR_MISS_COOLDOWN := 1.2
+
 ## Screen-space look drag, tracked here because the HUD's widgets each own their
 ## own gesture and whatever is left over is a look.
 var _look_pointer := -1
@@ -147,14 +158,31 @@ var _panning := false
 ## own reading of the same actions; see [method _read_keyboard].
 var _button_firing := false
 var _button_boost := false
+## How far above the hull centre a reaction emote spawns from (see [method
+## _emote]) -- cached at [method _assemble] from the hull's own bounds, so a
+## big design pops its emote clear of the canopy instead of from inside it.
+var _emote_height := 1.0
 ## Touch-to-accelerate: when the player holds anywhere on screen (that is not
 ## a widget), the ship accelerates forward. The throttle still sets the
 ## maximum speed; this just drives it to full while held. Only in the two
 ## views where looking IS flying — see [method _touch_accel_allowed].
 var _touch_accel := false
+## The pilot's last stick deflection (screen axes), kept apart from the command
+## so assists blend from it instead of from their own output.
+var _stick_input := Vector2.ZERO
+## Touch HUD roll buttons (see [method set_roll]).
+var _button_roll := 0.0
+## Whether an assist wrote yaw/pitch last tick (see [method _physics_process]).
+var _assist_steering := false
 var _keyboard_steering := false
 
 var _ai_spawner: AiSpawner = null
+## Set-piece fights: duel, skirmish, waves... (see [FlightScenarios]).
+var scenarios: FlightScenarios = null
+## The flight test's bug hunt — see [BugHunt] and the 🐞 panel.
+var bug_hunt: BugHunt = null
+## The player's team for AI targeting (0 = everyone's target).
+var _player_team := 0
 var gravity: GravitySystem = null
 var _gravity_viz: GravityVisualizer = null
 
@@ -198,6 +226,8 @@ var _planet_pointer: PlanetPointer = null
 var _spawn := Transform3D()
 ## Rear view camera: SubViewport + Camera3D looking backward from the ship.
 var _rear_viewport: SubViewport = null
+## Light shafts + grade over the 3D view; see [method _build_advanced_lighting].
+var _advanced_lighting: AdvancedLighting = null
 var _rear_camera: Camera3D = null
 var _rear_texture_rect: TextureRect = null
 var _rear_view_on := false
@@ -208,8 +238,26 @@ var player_hp := 500.0
 var player_max_hp := 500.0
 var player_shield := 0.0
 var player_max_shield := 0.0
+## Earliest tick (ms) the next shield flash / hull-hit spark may spawn — see
+## [method take_damage].
+var _next_shield_fx_ms := 0
+var _next_hit_fx_ms := 0
+## Earliest tick (ms) the next non-lethal hull explosion may go off.
+var _next_hit_boom_ms := 0
+## Earliest tick (ms) the next hit freeze may start — a volley is one freeze.
+var _next_hit_freeze_ms := 0
+## Real tick (ms) of the last damage the player took, for the shield-regen delay.
+var _last_hit_ms := 0
+## Earliest real tick (ms) the next kill cam may start.
+var _next_kill_cam_ms := 0
 var _player_dead := false
 var _game_over_timer := 0.0  # slow-mo duration before showing modal
+## Real tick (ms) the post-respawn grace ends ([member
+## JuiceSettings.respawn_grace]); 0 = none running.
+var _grace_until_ms := 0
+## The camera view the player had when they died — the death camera orbits in
+## FREE, and a respawn puts this back instead of leaving them in it.
+var _view_before_death := -1
 
 ## Debris from AI ship part scatter and player collision. Entries have:
 ## { node, velocity, spin_axis, spin_speed, life, material }
@@ -227,6 +275,24 @@ var _game_over_timer := 0.0  # slow-mo duration before showing modal
 ## hang its plumes on and [FlightCamera] has not made its camera. Those wait for
 ## [method _ready], by which time the whole subtree is up.
 func _enter_tree() -> void:
+	# This scene is reached two ways: through the ship builder's "Enter flight
+	# test" (which goes through the launcher, so [method Session.start] — and
+	# therefore this load — already ran once at boot), and run directly (F6,
+	# see the class doc's [enum Location] comment) — which skips the launcher
+	# entirely. Without this, every dial below that reads a `Session.*` value
+	# (camera FOV/chase, assist/damping multipliers, HUD toggles, render
+	# quality, ...) silently falls back to its hardcoded default on an F6 run
+	# instead of what was last saved. Idempotent, so it costs nothing on the
+	# normal path where [method Session.start] already loaded it once.
+	Session.load_from_disk()
+	# The 🎬 Juice dials too, before anything below reads one — see [method
+	# JuiceSettings.ensure_loaded].
+	JuiceSettings.ensure_loaded()
+	if Session.far_clip > 0.0:
+		_far_clip = Session.far_clip
+	if Session.far_view_max > 0.0:
+		_far_view_max = Session.far_view_max
+	_restore_early_prefs()
 	library = PartLibrary.instance()
 	library.load_all()
 	_load_design()
@@ -256,6 +322,9 @@ func _enter_tree() -> void:
 ## after [method _enter_tree] has run.
 func _ready() -> void:
 	_assemble()
+	# Deferred: gravity, the HUD, the rear view and the weapon systems all need
+	# to exist before their saved state can be put back.
+	_restore_prefs.call_deferred()
 	_setup_ship_lights()
 	# The player's own hull has to follow a global look and palette change, like the
 
@@ -267,9 +336,12 @@ func _ready() -> void:
 	camera_rig.set_far_clip(_far_clip)
 	camera_rig.set_far_view_max(_far_view_max)
 	camera_rig.set_mode(FlightCamera.Mode.CHASE)
+	if Session.camera_view in PERSISTED_VIEWS:
+		camera_rig.set_mode(Session.camera_view)
 	if Session.mobile_view_fit:
 		camera_rig.set_mobile_view(true)
 	camera_rig.adopt(model, model, view)
+	_build_advanced_lighting()
 	# Start closer to Tarn IV so gravity is immediately noticeable.
 	# Ship spawns in a stable orbit: correct tangential velocity and
 	# faces along the orbit direction so flight assist keeps you in orbit.
@@ -323,6 +395,17 @@ func _ready() -> void:
 	get_window().theme = BuilderTheme.build()
 
 	_hud = %Hud as FlightHud
+	bug_hunt = BugHunt.new()
+	bug_hunt.name = "BugHunt"
+	bug_hunt.root = self
+	add_child(bug_hunt)
+	# Spray-painted targets over the ships the player has tangled with; drawn
+	# on the HUD so they keep a fixed screen size at any range.
+	_interaction_markers = InteractionMarkers.new()
+	_interaction_markers.name = "InteractionMarkers"
+	_interaction_markers.ships_source = _marker_ships
+	_interaction_markers.exclude_source = func() -> Variant: return controlled_ai
+	_hud.add_child(_interaction_markers)
 	# Re-apply persisted trail toggles after a scene restart: the preference flags
 	# survive in static state, but the trail nodes themselves were rebuilt.
 	set_trail_player(Session.trail_player)
@@ -352,6 +435,9 @@ func _ready() -> void:
 		_hud.update_weapon_badge(systems.get_active_weapon())
 	model.assist_changed.connect(_on_model_assist_changed)
 	model.orbit_changed.connect(_on_orbit_changed)
+	model.collided.connect(_on_model_collided)
+	model.out_of_control_changed.connect(_on_model_ooc_changed)
+	model.boost_changed.connect(_on_model_boost_changed)
 	_build_incident_director()
 
 	BuilderTheme.apply_density_scale(get_window())
@@ -359,10 +445,26 @@ func _ready() -> void:
 		func() -> void: BuilderTheme.apply_density_scale(get_window())
 	)
 
-	# High-res renders the 3D scene at a higher internal resolution and
-	# downscales to the viewport — same FOV, just sharper. The window size is
-	# left alone (resizing it zoomed the stretch-scaled canvas).
-	get_viewport().scaling_3d_scale = 1.5 if Session.high_res else 1.0
+	apply_performance()
+	# Lights and environments that arrive later (AI ships' headlights, a
+	# rebuilt space scene) obey the shadow/glow dials too.
+	if not get_tree().node_added.is_connected(PerformanceSettings.apply_to_node):
+		get_tree().node_added.connect(PerformanceSettings.apply_to_node)
+
+
+## Push the ⚡ Performance panel's settings onto the engine and this scene.
+## High-res renders the 3D scene at a higher internal resolution and
+## downscales to the viewport: same FOV, just sharper. It multiplies with the
+## panel's render scale instead of overwriting it.
+##
+## Physics interpolation: only the ships opt in (see [method _build_ship] and
+## [AiShip]). They are the things moved on physics ticks. Everything else in
+## this scene is placed per render frame (camera, sky, HUD, emotes, effects),
+## and interpolating those would just drag them a tick behind, so this root
+## switches it off for its subtree and each ship switches it back on.
+func apply_performance() -> void:
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	PerformanceSettings.apply(get_tree(), 1.5 if Session.high_res else 1.0)
 
 
 # --- Construction -----------------------------------------------------------
@@ -397,12 +499,17 @@ func _build_location() -> void:
 		# flight-model tuning and has no confounders.
 		_ai_spawner = AiSpawner.new()
 		_ai_spawner.name = "AiSpawner"
+		_ai_spawner.ship_destroyed.connect(_on_ai_ship_destroyed)
 		add_child(_ai_spawner)
 	elif location == Location.GENERATED_SYSTEM:
 		_build_generated_system()
 		_build_test_volume_environment()
 	else:
 		_build_test_volume_environment()
+	scenarios = FlightScenarios.new()
+	scenarios.name = "Scenarios"
+	scenarios.setup(self)
+	add_child(scenarios)
 
 
 ## [constant Location.GENERATED_SYSTEM]: the solar_system_gen lab's own
@@ -437,6 +544,15 @@ func _build_generated_system() -> void:
 	# here can collide with them (this location builds no [PhysWorld]), so LIVE
 	# rocks are pure cost.
 	generated_system.belts_simulate = false
+	# The generator's own O(n²) collision sweep (see
+	# [method SolarSystemGenerator._resolve_collisions]) still runs every frame
+	# over the remaining planets/moons/manual belts even with live rocks off,
+	# and flight has no use for it catching an overlap within one frame — a
+	# stable system's bodies drift into each other over many seconds, not one.
+	# Checking every 4th frame keeps the safety net while cutting this sweep's
+	# cost by 4x, which is the other big chunk of "flying into a generated
+	# system lags worse than a hand-built one".
+	generated_system.collision_check_interval = 4
 	add_child(generated_system)
 	if recipe != null:
 		recipe.spawn_manual_belts(generated_system)
@@ -578,7 +694,9 @@ func _build_phys_world() -> void:
 		body.kinematic = true
 		if body.layer == PhysBody.Layer.ROCK:
 			body.mass = body.radius * body.radius * body.radius * ROCK_MASS_DENSITY
-			body.impacted.connect(_on_rock_impacted)
+			# Bound: the signal names only the other body, and the handler has
+			# to know which rock was struck (unbound, every knock errored).
+			body.impacted.connect(_on_rock_impacted.bind(body))
 		phys_world.add(body)
 
 	# The player's own ship: a driven body that keeps its hand integration.
@@ -617,11 +735,14 @@ func _build_incident_director() -> void:
 		incident_director.hud_container = _hud.get_event_container()
 	add_child(incident_director)
 	# Wire incident outcomes into the reputation system.
-	# Signature: incident_resolved(id: String, how: String, who: String)
+	# Signature: incident_resolved(id: String, how: String, who: Variant) —
+	# "who" is null when nobody in particular resolved it (a String here
+	# errored on every such incident).
 	incident_director.incident_resolved.connect(
-		func(_id: String, _how: String, _who: String) -> void:
+		func(_id: String, _how: String, who: Variant) -> void:
 			# "who" is the actor node name; "how" is the resolve verb.
 			# Only hostile resolutions generate grudges for now.
+			var _who := str(who) if who != null else ""
 			if _who.is_empty():
 				return
 			match _how:
@@ -720,9 +841,14 @@ func phys_profile_id() -> String:
 ## have taken from this hit if it had had mass all along (the solver resolved it
 ## as kinematic, so it absorbed the hit without moving).
 func _on_rock_impacted(
-	rock: PhysBody, _other: PhysBody, impulse: float, _point: Vector3, normal: Vector3, closing: float
+	_other: PhysBody, impulse: float, _point: Vector3, normal: Vector3, closing: float, rock: PhysBody
 ) -> void:
 	if not rock.kinematic or closing < ROCK_KNOCK_SPEED:
+		return
+	# Only a ship knocks a rock loose. A freed rock hitting its neighbours
+	# would free them too, and a chain through the belt filled the live-rock
+	# slots within a second.
+	if _other != null and _other.layer == PhysBody.Layer.ROCK:
 		return
 	if _live_rock_bodies.size() >= ROCK_LIVE_MAX:
 		_demote_rock(_live_rock_bodies[0])
@@ -1118,6 +1244,15 @@ func _build_ship() -> void:
 	# model: see [member FlightModel.speed_scale] for why the model does not read
 	# it from Session itself.
 	model.speed_scale = Session.player_speed_scale
+	# Restore the last control and assist modes. Both used to live only on this
+	# instance, so every launch came back in Arcade with default assist.
+	if Session.control_mode >= 0 and Session.control_mode < FlightModel.ControlMode.size():
+		model.control_mode = Session.control_mode
+	if Session.assist_mode >= 0:
+		model.set_assist_mode(Session.assist_mode)
+	# Drawn between physics ticks when interpolation is on — see [method
+	# apply_performance]. The hull, plumes and lights are children and ride along.
+	model.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_ON
 	add_child(model)
 
 	_ship_holder = Node3D.new()
@@ -1145,20 +1280,25 @@ func _assemble() -> void:
 	# The Ship-size setting scales the whole hull (and its offsets) at assembly.
 	view.apply_scale(Session.ship_scale)
 	_ship_holder.add_child(view.root)
+	_emote_height = view.aabb.size.y * 0.5 + 0.3
 	model.configure(view.resolution.stats, systems, damage, _ship_holder)
+	model.squash_pivot = view.aabb.get_center()
 	systems.bind(view, self)
+	systems.sustain_fire = true
+	systems.is_player_rig = true
 	damage.bind(view, model, _ship_holder)
 	damage.part_broken.connect(_on_part_broken)
 	if camera_rig != null:
 		camera_rig.adopt(model, model, view)
 
-	# Init player HP from ship stats (clamped to a playable range, 2.5× hero bonus)
+	# Init player HP from ship stats (clamped to a playable range, scaled by the
+	# global HP dial and the player's own extra durability -- see JuiceSettings).
 	_player_dead = false
 	var stats := view.resolution.stats
-	var base_hp := maxf(stats.get_stat("hull_hp"), 80.0)
-	player_max_hp = base_hp * 2.5
+	var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
+	player_max_hp = base_hp * JuiceSettings.player_durability_mult
 	player_hp = player_max_hp
-	player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0)
+	player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
 	player_shield = player_max_shield
 
 
@@ -1224,15 +1364,186 @@ func toggle_rear_view() -> void:
 
 # --- Per-frame --------------------------------------------------------------
 
+## Views worth coming back to after a restart. The orbit/planet/free/target
+## views are situational (game over switches to FREE, for one), so they aren't
+## remembered.
+const PERSISTED_VIEWS := [
+	FlightCamera.Mode.COCKPIT, FlightCamera.Mode.CHASE, FlightCamera.Mode.REAR,
+	FlightCamera.Mode.ACTION, FlightCamera.Mode.CINEMATIC, FlightCamera.Mode.SIDE,
+	FlightCamera.Mode.TOP_DOWN,
+]
+## Next [method Time.get_ticks_msec] at which [method _sync_session] runs.
+var _next_session_sync_ms := 0
+
+
+## Mirror live player state that has no persisting setter of its own into
+## [Session], then save if anything changed. It runs about once a second and
+## on exit, so a setting reaches disk however it was changed: the menu, a
+## hotkey, or a call site that forgot to save. Skipped headless, so a smoke
+## test's throwaway settings never overwrite the player's.
+func _sync_session() -> void:
+	if model != null:
+		Session.control_mode = model.control_mode
+		Session.assist_mode = model.assist_mode
+	Session.move_profile = move_profile
+	if camera_rig != null and camera_rig.mode in PERSISTED_VIEWS and not _player_dead:
+		Session.camera_view = camera_rig.mode
+	Session.far_clip = _far_clip
+	Session.far_view_max = _far_view_max
+	_capture_prefs()
+	if DisplayServer.get_name() != "headless":
+		Session.autosave()
+
+
+## Copy every live flight-test setting that has no persisting home of its own
+## into [member Session.prefs]. Read from the live objects rather than hooked
+## into each menu row, so a change is caught however it was made: menu,
+## hotkey, or combat panel. [method _restore_prefs] is the other half.
+func _capture_prefs() -> void:
+	if not _prefs_restored:
+		# Before the restore has run, the live state is still defaults, and
+		# capturing it would overwrite what was saved.
+		return
+	var p := Session.prefs
+	p["rear_view"] = _rear_view_on
+	p["high_contrast"] = BuilderTheme.high_contrast
+	p["phys_profile"] = _phys_profile_id
+	p["facing_target"] = facing_target
+	p["time_scale"] = _time_scale
+	p["craft_size"] = craft_size_preset
+	if camera_rig != null:
+		p["ooc_camera_hold"] = camera_rig.ooc_camera_hold
+	if model != null:
+		p["warp"] = model.warp_active
+		p["gravity_strength"] = model.gravity_strength
+		p["orbital_assist_rate"] = model.orbital_assist_rate
+	if systems != null:
+		p["weapon_index"] = systems.active_weapon_index
+	if gravity != null:
+		p["gravity_mode"] = gravity.mode
+		p["gravity_chaos"] = _gravity_chaos
+		# Chaos forces its own range; only a hand-picked range is worth keeping.
+		if not _gravity_chaos:
+			p["gravity_range"] = gravity.range_multiplier
+	p["gravity_viz"] = _gravity_viz != null and _gravity_viz.is_showing()
+	var style := StyleManager.instance().current_profile
+	if style != null:
+		p["star_style_" + style.id] = [style.star_size, style.star_five_point]
+
+
+## Set by [method _restore_prefs]; [method _capture_prefs] waits for it.
+var _prefs_restored := false
+
+
+## The prefs that must be in place before the scene builds: the collision feel
+## profile (read when the physics world is made), high contrast (read when
+## materials are made) and the star style (read when the sky is built).
+func _restore_early_prefs() -> void:
+	_phys_profile_id = String(Session.pref("phys_profile", _phys_profile_id))
+	var hc := bool(Session.pref("high_contrast", BuilderTheme.high_contrast))
+	BuilderTheme.high_contrast = hc
+	ShipMaterials.high_contrast = hc
+	var style := StyleManager.instance().current_profile
+	if style != null:
+		var star: Variant = Session.pref("star_style_" + style.id, null)
+		if star is Array and (star as Array).size() == 2:
+			style.star_size = float(star[0])
+			style.star_five_point = float(star[1])
+
+
+## Put the rest of [member Session.prefs] back once the scene is built.
+func _restore_prefs() -> void:
+	if not is_inside_tree():
+		return
+	if Session.move_profile != move_profile:
+		set_move_profile(Session.move_profile)
+	var p := Session.prefs
+	if BuilderTheme.high_contrast:
+		get_window().theme = BuilderTheme.build()
+	if bool(p.get("rear_view", false)) and not _rear_view_on:
+		toggle_rear_view()
+	if camera_rig != null:
+		camera_rig.ooc_camera_hold = bool(p.get("ooc_camera_hold", camera_rig.ooc_camera_hold))
+	facing_target = bool(p.get("facing_target", facing_target))
+	craft_size_preset = int(p.get("craft_size", craft_size_preset))
+	var saved_time := float(p.get("time_scale", 1.0))
+	if not is_equal_approx(saved_time, _time_scale):
+		set_time_scale(saved_time)
+		# Said out loud: a warp carried over from last time makes every fight
+		# run that many times faster (and the machine do that much more work).
+		if _hud != null and not is_equal_approx(saved_time, 1.0):
+			_hud.show_hint("Time warp ×%s carried over from last session" % str(snappedf(saved_time, 0.1)))
+	if model != null:
+		model.warp_active = bool(p.get("warp", model.warp_active))
+		model.gravity_strength = float(p.get("gravity_strength", model.gravity_strength))
+		model.orbital_assist_rate = float(p.get("orbital_assist_rate", model.orbital_assist_rate))
+	if systems != null and p.has("weapon_index"):
+		var idx := int(p["weapon_index"])
+		if idx >= 0 and idx < SystemsSim.WEAPONS.size() and idx != systems.active_weapon_index:
+			set_weapon_index(idx)
+	if gravity != null:
+		gravity.mode = int(p.get("gravity_mode", gravity.mode))
+		if bool(p.get("gravity_chaos", false)) and not _gravity_chaos:
+			toggle_gravity_chaos()
+		elif p.has("gravity_range"):
+			gravity.range_multiplier = float(p["gravity_range"])
+	if bool(p.get("gravity_viz", false)) and (_gravity_viz == null or not _gravity_viz.is_showing()):
+		toggle_gravity_viz()
+	_prefs_restored = true
+
+
+func _exit_tree() -> void:
+	_sync_session()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_sync_session()
+	elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_on_back(true)
+
+
+## Back (a phone's back button/gesture) and Escape: close the open panel or
+## popup first. With nothing open, Back does what D does on a keyboard — opens
+## the debug column (which has a Hangar button) — and Escape leaves for the
+## hangar as it always has.
+func _on_back(from_phone: bool) -> void:
+	if _hud != null and _hud.close_top_panel():
+		return
+	if from_phone:
+		if _hud != null:
+			_hud.toggle_debug_panel()
+	else:
+		return_to_hangar()
+
+
 func _process(delta: float) -> void:
+	if _pilot != null:
+		_pilot.frame_tick(delta)
+	if Time.get_ticks_msec() >= _next_session_sync_ms:
+		_next_session_sync_ms = Time.get_ticks_msec() + 1000
+		_sync_session()
 	# If the ship being piloted died, hand control back to the player's own ship.
 	if controlled_ai != null and (not is_instance_valid(controlled_ai) or not controlled_ai._alive):
 		leave_control()
+		if _hud != null:
+			_hud.show_hint("That ship was shot down — back in your own")
+	_update_grace_blink()
 	# Feed the lock-on target to whichever systems are firing so guided shots home.
+	# A lock whose target died this frame is a freed reference: typed-assigning
+	# it (even to null-typed Node3D) errors, so drop it first.
+	if not is_instance_valid(locked_target):
+		locked_target = null
 	if active_systems() != null:
 		active_systems().target_ref = locked_target
-	# Keep the time-scale (satellite X2/X4/X10) applied — Juice hitstop resets it.
-	Engine.time_scale = _time_scale
+	# The one place the flight scene's time-scale is written: the time warp
+	# (satellite X2/X4/X10) × death slow-mo × the live hitstop. Writing
+	# _time_scale alone here used to cancel both of the others a frame after
+	# they began.
+	# The kill cam's pause rides on the same product (see [method
+	# _kill_cam_factor]).
+	Engine.time_scale = _time_scale * _slowmo * Juice.hitstop_factor() * _kill_cam_factor()
+	_regen_player(delta)
 	# Update rear camera: position behind the ship, looking backward.
 	if _rear_view_on and _rear_camera != null and model != null:
 		var ship_xform := model.global_transform
@@ -1265,14 +1576,22 @@ func _process(delta: float) -> void:
 	_update_player_trail()
 	_update_ship_trails()
 	_update_aggro_indicators()
+	_update_near_miss(delta)
 	_update_large_craft_orbits(delta)
 	_update_large_craft_patrols(delta)
 	_update_large_craft_turrets(delta)
 	# Drift, spin and fade broken-off debris.
 	var still_alive: Array[Dictionary] = []
 	for d in _debris_list:
-		var node: Node3D = d["node"] as Node3D
-		if node == null or not is_instance_valid(node) or not node.is_inside_tree():
+		# DebrisRegistry can free a piece off-screen at any time without
+		# pruning this list — validate the raw reference *before* casting it,
+		# since casting an already-freed Object throws "Trying to cast a
+		# freed object" even though the very next check would have caught it.
+		var raw_node: Object = d["node"]
+		if raw_node == null or not is_instance_valid(raw_node):
+			continue
+		var node: Node3D = raw_node as Node3D
+		if not node.is_inside_tree():
 			continue
 		var vel: Vector3 = d["velocity"]
 		# Very gentle drag so debris slows down rather than flying forever.
@@ -1311,12 +1630,25 @@ func _physics_process(delta: float) -> void:
 		_sweep_live_rocks()
 	# A dead lock is no lock — drop it so facing assist stops fighting a freed
 	# reference and the HUD stops drawing a bracket around nothing.
-	if locked_target != null and not is_instance_valid(locked_target):
+	if not is_instance_valid(locked_target):
 		locked_target = null
 	# Nose-on assist: when armed (the facing toggle, or dogfight control mode)
 	# and a target is locked, steer yaw/pitch so the ship always faces it.
+	# Otherwise, the lighter-touch aim-assist nudge gets a turn instead.
+	# An assist that stopped (lock lost, cone left) hands the axes straight
+	# back to the stick; otherwise its last command would keep the ship turning.
+	var steered := active_model()
+	if _assist_steering and steered != null:
+		steered.command.yaw = -_stick_input.x
+		steered.command.pitch = -_stick_input.y
+	_assist_steering = locked_target != null
 	if locked_target != null and (facing_target or _dogfight_armed()):
 		_apply_target_facing()
+	elif locked_target != null:
+		_apply_aim_assist()
+	# A movement profile's pilot flies after the assists, so it has the last word.
+	_tick_pilot(delta)
+	_tick_ram_reach()
 	# Touch-to-accelerate: holding the screen drives throttle to full.
 	var flight := active_model()
 	var systems_now := active_systems()
@@ -1341,6 +1673,55 @@ func _physics_process(delta: float) -> void:
 
 
 
+# --- Ram reach --------------------------------------------------------------------
+
+## Earliest next reach-ram per ship (instance id -> msec), so a pass rams once.
+var _ram_reach_next: Dictionary = {}
+## Below this closing speed (m/s) the reach does nothing — a drift past is no ram.
+const RAM_REACH_MIN_CLOSING := 12.0
+
+
+## The player's attack reach: a ship inside [member JuiceSettings.player_ram_reach]
+## × the player's hull radius that the player is closing on fast is rammed as if
+## they had touched ([method FlightModel.take_reach_ram]) — a bigger hitbox for
+## dealing a ram, never for taking one. Hulls actually touching are left to the
+## physics. Friendly and harmless ships only with the one-thumb profiles' magnet
+## on them ([member JuiceSettings.magnet_friendlies]).
+func _tick_ram_reach() -> void:
+	var m := active_model()
+	if m == null or _player_dead or JuiceSettings.player_ram_reach <= 1.0:
+		return
+	var body := m.phys_body()
+	if body == null or m.velocity.length() < RAM_REACH_MIN_CLOSING:
+		return
+	var any_side := JuiceSettings.magnet_friendlies and profile_is_one_thumb(move_profile)
+	var now := Time.get_ticks_msec()
+	for ship in live_enemies():
+		if ship == controlled_ai or ship.model == null or not ship.is_inside_tree():
+			continue
+		if not any_side and ship.attitude_to_player() in [AiShip.Attitude.FRIENDLY, AiShip.Attitude.HARMLESS]:
+			continue
+		var other := ship.model.phys_body()
+		if other == null:
+			continue
+		var to := ship.model.global_position - m.global_position
+		var d := to.length()
+		if d < 0.01 or d <= body.radius + other.radius or d > body.radius * JuiceSettings.player_ram_reach + other.radius:
+			continue
+		var n := to / d
+		var closing := (m.velocity - ship.model.velocity).dot(n)
+		if closing < RAM_REACH_MIN_CLOSING or int(_ram_reach_next.get(ship.get_instance_id(), 0)) > now:
+			continue
+		_ram_reach_next[ship.get_instance_id()] = now + 450
+		var point := ship.model.global_position - n * other.radius
+		ship.model.take_reach_ram(body, point, n, closing)
+		# The rammer's own reaction (a slingshot bounce, a swipe's dash knocked
+		# out), as for a real hit — without any damage to it.
+		m.impacted.emit(other, -n, closing)
+		Juice.burst(BurstPresets.Preset.SPARKS, Transform3D(Basis(), point), 1.4, Color(1.0, 0.8, 0.35))
+		Juice.shake(clampf(closing * 0.003, 0.08, 0.4), 0.25)
+
+
 ## True when the active ship's control mode should implicitly keep the nose on a
 ## locked target: dogfight (built for knife-fight range) and arcade (the mode a
 ## player goes to to actually hit things). Realistic and Sim stay manual.
@@ -1350,6 +1731,83 @@ func _dogfight_armed() -> bool:
 		return false
 	return flight.control_mode == FlightModel.ControlMode.DOGFIGHT \
 		or flight.control_mode == FlightModel.ControlMode.ARCADE
+
+
+# --- Movement profiles ---
+
+## How the player moves: the classic stick and buttons, one swipe to go, or the
+## pull-back slingshot. A separate axis from [enum FlightModel.ControlMode],
+## which keeps tuning the flight numbers underneath. See [MovePilot].
+enum MoveProfile { CLASSIC, SWIPE, SLINGSHOT, FPS }
+const MOVE_PROFILE_NAMES := ["Classic", "Swipe", "Slingshot", "FPS"]
+
+var move_profile: int = MoveProfile.CLASSIC
+## The active profile's pilot, null for classic.
+var _pilot: MovePilot = null
+
+
+func set_move_profile(p: int) -> void:
+	p = clampi(p, 0, MoveProfile.size() - 1)
+	if _pilot != null:
+		_pilot.deactivate()
+		_pilot = null
+	move_profile = p
+	Session.move_profile = p
+	match p:
+		MoveProfile.SWIPE: _pilot = SwipePilot.new(self)
+		MoveProfile.SLINGSHOT: _pilot = SlingshotPilot.new(self)
+		MoveProfile.FPS: _pilot = FpsPilot.new(self)
+	if _pilot != null and active_model() != null:
+		_pilot.activate(active_model())
+	if _hud != null:
+		_hud.set_move_profile(p)
+		_hud.show_hint("Movement: %s — %s" % [MOVE_PROFILE_NAMES[p], _move_profile_hint(p)])
+
+
+func cycle_move_profile() -> void:
+	set_move_profile((move_profile + 1) % MoveProfile.size())
+
+
+func pilot() -> MovePilot:
+	return _pilot
+
+
+## Swipe and slingshot fly off the bare screen with no stick or buttons.
+static func profile_is_one_thumb(p: int) -> bool:
+	return p == MoveProfile.SWIPE or p == MoveProfile.SLINGSHOT
+
+
+## The touch/desktop stick's deflection (screen axes, right/down positive),
+## or zero while the arrow keys own it (they write it flipped).
+func touch_stick() -> Vector2:
+	return Vector2.ZERO if _keyboard_steering else _stick_input
+
+
+func _move_profile_hint(p: int) -> String:
+	match p:
+		MoveProfile.SWIPE: return "swipe to fly, tap to shoot, hold to boost (longer: warp)"
+		MoveProfile.SLINGSHOT: return "drag back from your ship and let go; tap to shoot, touch the ship to catch it"
+		MoveProfile.FPS: return "stick moves (push further = faster, all the way = boost); drag the screen to look"
+	return "stick, throttle and buttons"
+
+
+## Run the profile's pilot, re-seating it when the flown ship changed (fly as,
+## respawn) and parking it while the pilot is dead.
+func _tick_pilot(delta: float) -> void:
+	if _pilot == null:
+		return
+	var flown := active_model()
+	if _player_dead or flown == null:
+		return
+	if _pilot.model != flown:
+		if _pilot.model != null:
+			_pilot.deactivate()
+		_pilot.activate(flown)
+	_pilot.physics_tick(delta)
+
+
+## Seconds the nose-on assist takes to close most of its aim error.
+const FACING_TIME := 0.22
 
 
 ## Steer the active ship's yaw/pitch to keep it facing [member locked_target].
@@ -1362,13 +1820,91 @@ func _apply_target_facing() -> void:
 	if flight == null or ship == null or locked_target == null \
 		or not is_instance_valid(locked_target):
 		return
-	var to_target := locked_target.global_position - ship.global_position
-	if to_target.length_squared() < 0.001:
+	steer_nose_toward(locked_target.global_position - ship.global_position)
+
+
+## Turn the active ship's nose toward world direction [param dir] (yaw/pitch
+## only; roll and throttle are left alone). The same critically damped rate
+## solve the nose-on assist uses, shared with the movement profiles' pilots.
+func steer_nose_toward(dir: Vector3) -> void:
+	var flight := active_model()
+	var ship := active_ship_node()
+	if flight == null or ship == null or dir.length_squared() < 0.001:
 		return
-	var local := ship.global_transform.basis.inverse() * to_target.normalized()
-	flight.command.yaw = clampf(-atan2(local.x, -local.z), -1.0, 1.0)
+	var local := ship.global_transform.basis.inverse() * dir.normalized()
 	var flat := sqrt(local.x * local.x + local.z * local.z)
-	flight.command.pitch = clampf(atan2(local.y, flat), -1.0, 1.0)
+	# Ask for a turn *rate* proportional to the error (radians → the fraction
+	# of the hull's top rate that closes it in about [constant FACING_TIME]
+	# seconds), so the nose eases onto the target. A command straight from the
+	# angle over-drove agile hulls past the target every tick and the ship
+	# buzzed around its aim.
+	var tr := maxf(flight.turn_rate, 0.05)
+	# Capped by the hull's spool lag so the loop stays critically damped on a
+	# slow-spooling (Realistic) hull instead of wobbling around the target.
+	var gain := minf(1.0 / FACING_TIME, 0.25 / maxf(flight.turn_spool, 0.01)) / tr
+	flight.command.yaw = clampf(-atan2(local.x, -local.z) * gain, -1.0, 1.0)
+	flight.command.pitch = clampf(atan2(local.y, flat) * gain, -1.0, 1.0)
+
+
+## How close (as a dot-product threshold, ~30° half-cone) the predictive lead
+## point has to already be to dead ahead before [method _apply_aim_assist]
+## nudges at all -- magnetism for an aim that is already close, not autopilot
+## from any angle.
+const AIM_ASSIST_CAPTURE_COS := 0.86
+## At [member JuiceSettings.aim_assist_strength] == 1.0, how far each frame's
+## yaw/pitch command is blended toward the lead point -- capped well short of
+## 1.0 so this always reads as a nudge on top of the player's own stick, never
+## a snap.
+const AIM_ASSIST_MAX_PULL := 0.5
+
+
+## Crosshair magnetism: when a target is locked and the predictive lead point
+## (the same [TargetLeadReticle] math the HUD draws) is already roughly where
+## the player is aiming, nudge yaw/pitch toward it by a small, capped amount.
+## Distinct from [method _apply_target_facing]'s full nose-lock: this rides on
+## top of whatever the player's own stick just wrote to [member
+## FlightModel.command] instead of replacing it, so it stays "the gun found
+## the target" rather than the ship flying itself. See [JuiceSettings].
+func _apply_aim_assist() -> void:
+	if not JuiceSettings.aim_assist_enabled or locked_target == null or not is_instance_valid(locked_target):
+		return
+	var flight := active_model()
+	var ship := active_ship_node()
+	if flight == null or ship == null:
+		return
+	var shooter_pos := ship.global_position
+	var target_pos := locked_target.global_position
+	var target_vel := Vector3.ZERO
+	if locked_target is CharacterBody3D:
+		target_vel = (locked_target as CharacterBody3D).velocity
+	elif locked_target is RigidBody3D:
+		target_vel = (locked_target as RigidBody3D).linear_velocity
+	elif locked_target.get("velocity") != null:
+		target_vel = locked_target.get("velocity")
+	var proj_speed := 1100.0
+	var sys := active_systems()
+	if sys != null and sys.has_method("get_active_weapon"):
+		var cur_wep: Dictionary = sys.get_active_weapon()
+		proj_speed = float(cur_wep.get("speed", 1100.0))
+	var lead := TargetLeadReticle.calculate_lead_position(
+		shooter_pos, flight.velocity, target_pos, target_vel, proj_speed
+	)
+	var to_lead := lead - shooter_pos
+	if to_lead.length_squared() < 0.001:
+		return
+	var local := ship.global_transform.basis.inverse() * to_lead.normalized()
+	if -local.z < AIM_ASSIST_CAPTURE_COS:
+		return
+	var desired_yaw := clampf(-atan2(local.x, -local.z), -1.0, 1.0)
+	var flat := sqrt(local.x * local.x + local.z * local.z)
+	var desired_pitch := clampf(atan2(local.y, flat), -1.0, 1.0)
+	var pull := JuiceSettings.aim_assist_strength * AIM_ASSIST_MAX_PULL
+	# Blend from the pilot's own stick, not from last tick's command. The touch
+	# stick only reports when it moves, so lerping the command onto itself
+	# compounded every tick into full autopilot, and the next thumb twitch
+	# yanked it back: the ship shook between the two aims.
+	flight.command.yaw = lerpf(-_stick_input.x, desired_yaw, pull)
+	flight.command.pitch = lerpf(-_stick_input.y, desired_pitch, pull)
 
 
 ## Keyboard flying, feeding the same [FlightModel.Command] the touch widgets do.
@@ -1391,9 +1927,9 @@ func _read_keyboard(delta: float) -> void:
 		set_stick(Vector2.ZERO)
 		_keyboard_steering = false
 
-	flight.command.roll = (
+	flight.command.roll = clampf(
 		Input.get_action_strength("flight_roll_right")
-		- Input.get_action_strength("flight_roll_left")
+		- Input.get_action_strength("flight_roll_left") + _button_roll, -1.0, 1.0
 	)
 
 	var throttle_up := Input.get_action_strength("flight_thrust")
@@ -1434,6 +1970,23 @@ func _on_model_assist_changed(_on: bool) -> void:
 		_hud.show_hint(_assist_hint())
 
 
+## The player's own ship took a genuine physical hit (ship-to-ship, ship-to-
+## rock/scenery) — see [signal FlightModel.collided]. Pulls the camera back
+## briefly; [FlightModel] itself already handles the shake/squash/hitstop
+## side of the same event.
+##
+## A hit on massive kinematic scenery (a planet, station or anomaly) gets a
+## far bigger, slower-recovering pull-back than a normal ship-to-ship ram —
+## see [method FlightCamera.bump_zoom]'s doc. Without this the chase camera's
+## small fixed pull-back left it clipped inside the object's own geometry,
+## which read as the game breaking rather than as a crash.
+func _on_model_collided(closing: float, other_radius: float, other_kinematic: bool) -> void:
+	if not JuiceSettings.collision_bump_zoom or camera_rig == null:
+		return
+	var massive := other_kinematic and other_radius > FlightCamera.MASSIVE_HIT_RADIUS
+	camera_rig.bump_zoom(clampf(closing / 60.0, 0.0, 1.0), massive)
+
+
 # --- The interface the HUD calls -------------------------------------------
 
 func set_throttle(value: float) -> void:
@@ -1444,12 +1997,62 @@ func set_throttle(value: float) -> void:
 ## and right yaws right, which is the aircraft convention and the one every
 ## player arrives with.
 func set_stick(value: Vector2) -> void:
+	_stick_input = value
 	active_model().command.yaw = -value.x
 	active_model().command.pitch = -value.y
 
 
+## Held roll from the touch HUD's roll buttons, -1..1 (right positive). Added
+## to the keyboard's roll each tick, which otherwise owns the axis.
+func set_roll(value: float) -> void:
+	_button_roll = clampf(value, -1.0, 1.0)
+
+
 func set_firing(value: bool) -> void:
 	_button_firing = value
+
+
+## Pop a reaction emote off the player's own ship (see [method Whimsy.emote]) --
+## a triggered, one-shot "pops out and fades" reaction rather than the old
+## permanently-mounted face. Launches mostly upward off the hull with a little
+## sideways scatter so repeated pops in a scrap don't all overlap on screen.
+## Earliest tick (ms) the next emote may pop — see [method _emote].
+var _next_emote_ms := 0
+
+
+func _emote(expression: String, hold := 1.0) -> void:
+	if model == null or not is_inside_tree() or not JuiceSettings.player_emotes:
+		return
+	if expression != "dizzy" and randf() > JuiceSettings.player_emote_chance:
+		return
+	# One at a time: every damage tick asks for an "ouch", and a volley stacked
+	# a dozen identical icons on top of each other.
+	# "dizzy" (tumbling, death) always gets through: it's the one that matters.
+	var now := Time.get_ticks_msec()
+	if now < _next_emote_ms and expression != "dizzy":
+		return
+	_next_emote_ms = now + int(hold * 700.0)
+	var xform := model.global_transform
+	var pos := xform.origin + xform.basis.y * _emote_height
+	var side := xform.basis.x * randf_range(-0.6, 0.6)
+	var launch_dir := (xform.basis.y + side).normalized()
+	# Sized from the whole hull, not its height: a flat fighter used to get a
+	# sub-metre icon, invisible from a chase camera 15–40 m back.
+	var hull_r := camera_rig.hull_radius if camera_rig != null else 3.0
+	var size := clampf(hull_r * 0.9, 1.5, 8.0) * JuiceSettings.emote_size
+	if size <= 0.0:
+		return
+	Whimsy.emote(self, pos, expression, launch_dir, size, hold, model)
+
+
+func _on_model_ooc_changed(active: bool) -> void:
+	if active:
+		_emote("dizzy", 1.6)
+
+
+func _on_model_boost_changed(level: float) -> void:
+	if level > 0.0:
+		_emote("grin", 1.2)
 
 
 func set_boosting(value: bool) -> void:
@@ -1464,8 +2067,7 @@ func set_boosting(value: bool) -> void:
 func _touch_accel_allowed() -> bool:
 	if camera_rig == null:
 		return false
-	return camera_rig.mode == FlightCamera.Mode.COCKPIT \
-		or camera_rig.mode == FlightCamera.Mode.CHASE
+	return camera_rig.is_follow_mode() and camera_rig.mode != FlightCamera.Mode.REAR
 
 
 func toggle_assist() -> void:
@@ -1542,6 +2144,8 @@ func respawn() -> void:
 	model.global_transform = _spawn
 	model.command.throttle = 0.0
 	damage.reset()
+	# Same grace period as the initial spawn — see _near_miss_cooldown's doc.
+	_near_miss_cooldown = 1.0
 	# Re-derive stats from the design so damage penalties are undone.
 	if view != null:
 		model.configure(view.resolution.stats, systems, damage)
@@ -1554,17 +2158,46 @@ func respawn() -> void:
 	# Reset player HP on respawn
 	if view != null:
 		var stats := view.resolution.stats
-		var base_hp := maxf(stats.get_stat("hull_hp"), 80.0)
-		player_max_hp = base_hp * 2.5
+		var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
+		player_max_hp = base_hp * JuiceSettings.player_durability_mult
 		player_hp = player_max_hp
-		player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0)
+		player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
 		player_shield = player_max_shield
+	_after_respawn()
+	_hud.show_hint("Back at the start point")
+
+
+## Everything a respawn owes the player, whichever way it came (R, the
+## popup's button, the debug respawn): alive, the popup gone, normal time, the
+## view they had before the death camera, and a short grace in which nothing
+## can hurt them — they used to die again the moment they reappeared.
+func _after_respawn() -> void:
 	_player_dead = false
+	_slowmo = 1.0
 	if _hud != null and _hud.has_method("hide_game_over"):
 		_hud.hide_game_over()
-	if Engine.time_scale < 1.0:
-		Engine.time_scale = 1.0
-	_hud.show_hint("Back at the start point")
+	if camera_rig != null:
+		camera_rig.set_mode(_view_before_death if _view_before_death >= 0 else FlightCamera.Mode.CHASE)
+	_view_before_death = -1
+	if JuiceSettings.respawn_grace > 0.0:
+		_grace_until_ms = Time.get_ticks_msec() + int(JuiceSettings.respawn_grace * 1000.0)
+
+
+## Whether the post-respawn grace is still running.
+func in_respawn_grace() -> bool:
+	return Time.get_ticks_msec() < _grace_until_ms
+
+
+## The hull blinks while the grace runs, and shows solid again after.
+func _update_grace_blink() -> void:
+	if _grace_until_ms == 0 or view == null or view.root == null or not is_instance_valid(view.root):
+		return
+	var left := _grace_until_ms - Time.get_ticks_msec()
+	if left <= 0:
+		_grace_until_ms = 0
+		view.root.visible = true
+		return
+	view.root.visible = (left / 120) % 2 == 0
 
 
 ## Accept damage to the player ship (called by AI weapons and collision model).
@@ -1572,10 +2205,27 @@ func respawn() -> void:
 func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 	if _player_dead:
 		return
+	# The debugger's god mode and damage-taken dial (see CombatStatsPanel), over
+	# the player's own toughness (the hero's hull is sturdier than the AI's).
+	amount *= JuiceSettings.player_damage_taken_mult / maxf(JuiceSettings.player_toughness, 0.05)
+	if JuiceSettings.player_invulnerable or amount <= 0.0 or in_respawn_grace():
+		return
+	_last_hit_ms = Time.get_ticks_msec()
 	var where := hit_point if hit_point != Vector3.ZERO else (
 		model.global_position if model != null else Vector3.ZERO
 	)
+	# [param hit_point] can be anywhere along the line of fire (AI weapons pass
+	# the shooter's own position, which gives the direction). Pull it onto the
+	# hull on that side, so effects land on the ship instead of out at the
+	# attacker, and never in the middle of the ship where the chase camera looks.
+	if model != null:
+		var hull_r := camera_rig.hull_radius if camera_rig != null else 3.0
+		var off := where - model.global_position
+		if off.length() > hull_r * 0.8:
+			where = model.global_position + off.normalized() * hull_r * 0.8
+	var now_ms := Time.get_ticks_msec()
 	# Shield absorbs 65% of incoming damage while it holds.
+	var prev_shield := player_shield
 	if player_shield > 0.0:
 		var absorbed := minf(player_shield, amount * 0.65)
 		player_shield -= absorbed
@@ -1583,23 +2233,79 @@ func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 		if audio != null:
 			audio.play_shield_hit_sound(model.global_position if model != null else Vector3.ZERO, true)
 		# A lighter flash than a hull hit: this is the shield blooming, not the
-		# hull taking a bite.
-		AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, 1.0)
+		# hull taking a bite. Dimmed and rate-limited by its own dial: one flash
+		# per hit, under sustained fire, was both too much on screen and a new
+		# sprite node every few frames.
+		var shield_fx := JuiceSettings.shield_fx_intensity
+		if shield_fx > 0.0 and now_ms >= _next_shield_fx_ms:
+			AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, 1.4 * shield_fx)
+			_next_shield_fx_ms = now_ms + int(lerpf(600.0, 120.0, shield_fx))
+	var vfx_scale := JuiceSettings.hit_vfx_scale
+	if prev_shield > 0.0 and player_shield <= 0.0:
+		# The shield failing outright is a moment worth its own explosion, not
+		# just the sprite bloom above — explosions used to be reserved
+		# entirely for ship death.
+		if vfx_scale > 0.0:
+			AddonVfx.explosion(self, where, 1.2 * vfx_scale, false, Color("6ec6ff"))
+		Juice.ring(Transform3D(Basis(), where), 3.0, Color("6ec6ff"), 0.4)
+		if JuiceSettings.kill_freeze_frame:
+			Juice.hitstop(0.03, 0.4)
 	if amount <= 0.0:
 		return
 	var prev_hp := player_hp
 	player_hp = maxf(player_hp - amount, 0.0)
+	_emote("ouch", 0.9)
 	# Addon layer on the hull hit, scaled by the damage taken, plus the library's
 	# hit sound. No sound comes from the addon itself — [SpaceAudio] owns the
 	# mix, and the two would just be twice as loud.
-	var hit_scale := clampf(amount * 0.04, 0.6, 2.4)
-	AddonVfx.spawn(self, AddonVfx.Kind.HIT, where, Vector3.UP, hit_scale, Color("ffb347"))
-	AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, hit_scale)
+	var hit_scale := clampf(amount * 0.04, 0.6, 2.4) * vfx_scale
+	# Rate-limited like the shield flash: under sustained fire, a spark per
+	# tick stacked into one big additive blob in front of the camera.
+	if hit_scale > 0.0 and now_ms >= _next_hit_fx_ms:
+		AddonVfx.spawn(self, AddonVfx.Kind.HIT, where, Vector3.UP, hit_scale, Color("ffb347"))
+		AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, hit_scale)
+		_next_hit_fx_ms = now_ms + 120
 	if audio != null:
 		audio.play_hit(where, true)
-	if _hud != null and _hud.has_method("spawn_damage_number"):
-		var is_crit := amount > player_max_hp * 0.15
-		_hud.spawn_damage_number(roundi(amount), true, is_crit, hit_point)
+	# A single heavy hit gets its own small explosion too — see the shield
+	# note above, same reasoning.
+	var hit_severity := clampf(amount / maxf(player_max_hp, 1.0), 0.1, 1.0)
+	# Lighter hits roll the same chance an enemy hull does (see [member
+	# JuiceSettings.hit_explosions]), rate-limited so a stream is a crackle.
+	var heavy_hit := amount >= player_max_hp * 0.18
+	if JuiceSettings.hit_explosions and vfx_scale > 0.0 and now_ms >= _next_hit_boom_ms \
+			and (heavy_hit or randf() < JuiceSettings.hit_explosion_chance):
+		_next_hit_boom_ms = now_ms + (90 if heavy_hit else 260)
+		AddonVfx.explosion(self, where, (0.9 if heavy_hit else 0.4) * vfx_scale * JuiceSettings.hit_explosion_size,
+			false, Color("ff8844"))
+	# A real freeze-frame on any hit past the Juice panel's threshold. It used
+	# to be a 60 ms slow-down on heavy hits only, which never read as a freeze.
+	# Rate-limited so a volley is one beat, not a stutter.
+	if JuiceSettings.kill_freeze_frame and JuiceSettings.freeze_on_player_hit \
+			and amount >= player_max_hp * JuiceSettings.freeze_hit_threshold \
+			and now_ms >= _next_hit_freeze_ms and player_hp > 0.0:
+		_next_hit_freeze_ms = now_ms + 350
+		Juice.freeze(JuiceSettings.freeze_hit_ms / 1000.0, JuiceSettings.freeze_depth)
+	# Being shot is a camera event too, not just a physical ram -- see [method
+	# _on_model_collided]. Reuses the same bump-zoom trauma model so a sustained
+	# volley keeps the camera pulled back for as long as the hits keep landing
+	# (each one just re-raises the same decaying target) and eases back in on
+	# its own once they stop.
+	if JuiceSettings.collision_bump_zoom and camera_rig != null:
+		camera_rig.bump_zoom(lerpf(0.3, 1.0, hit_severity))
+	# Weapon-hit juice: squash, knockback and screen shake — distinct from
+	# FlightModel._on_phys_impacted's own set, which only fires for a genuine
+	# physical collision, never a weapon hit.
+	if model != null:
+		if JuiceSettings.hit_squash_stretch:
+			model.squash_from_weapon_hit(where - model.global_position, hit_severity)
+		if JuiceSettings.hit_knockback:
+			var push_dir := (model.global_position - where)
+			if push_dir.length_squared() < 0.01:
+				push_dir = -model.global_transform.basis.z
+			model.apply_knockback(push_dir, clampf(amount * 0.15, 1.0, 18.0))
+	if JuiceSettings.hit_screen_shake:
+		Juice.shake(clampf(amount * 0.01, 0.05, 0.5) * JuiceSettings.hit_shake_strength, 0.25)
 	if player_hp <= 0.0 and prev_hp > 0.0:
 		game_over()
 
@@ -1611,6 +2317,8 @@ func game_over() -> void:
 	_player_dead = true
 	model.halt()
 	model.clear_phys_world()
+	_emote("dizzy", 1.4)
+	Whimsy.confetti(self, model.global_position, 1.6)
 
 	# Scatter every remaining part from the player ship
 	if damage != null:
@@ -1632,8 +2340,17 @@ func game_over() -> void:
 	if audio != null:
 		audio.play_explosion(model.global_position, true)
 	# The addon's heaviest effect on top of the debris scatter. Sound stays with
-	# SpaceAudio just above, so this only adds the visuals.
-	AddonVfx.explosion(self, model.global_position, 3.0, true, Color("ff8844"))
+	# SpaceAudio just above, so this only adds the visuals. Ship death should
+	# read as the single biggest moment in a fight — much bigger than any
+	# in-combat hit explosion above.
+	var death_scale := JuiceSettings.kill_explosion_size
+	if death_scale > 0.0:
+		AddonVfx.explosion(self, model.global_position, 6.0 * death_scale, true, Color("ff8844"))
+	# A chance (the Juice panel's dial) of a bigger secondary blast a beat
+	# later — real ships breaking apart don't all detonate identically.
+	if JuiceSettings.enemy_death_random_explosion and death_scale > 0.0 \
+			and randf() < JuiceSettings.kill_explosion_chance:
+		AddonVfx.nuke(self, model.global_position, 5.0 * death_scale, Color("ffaa44"))
 	# ExplosionRegistry: player ship death gets the assigned SLOT_SHIP_DEATH effect.
 	# This stacks on top of the Juice / AddonVfx layer rather than replacing it,
 	# so the best-of-both-worlds result is always used.
@@ -1641,13 +2358,18 @@ func game_over() -> void:
 	_reg.spawn_event(self, ExplosionRegistry.SLOT_SHIP_DEATH,
 		model.global_position, Vector3.UP, 1.5)
 
-	Juice.hitstop(0.06, 0.3)
+	if JuiceSettings.kill_freeze_frame and JuiceSettings.freeze_on_kill:
+		Juice.freeze(JuiceSettings.freeze_kill_ms / 1000.0, JuiceSettings.freeze_depth)
+	if camera_rig != null:
+		camera_rig.cancel_kill_cam()
 
 	# Slow motion
-	Engine.time_scale = 0.25
+	_slowmo = 0.25
 
-	# Switch to a death orbiting camera
+	# Switch to a death orbiting camera, remembering the view to come back to.
 	if camera_rig != null:
+		if camera_rig.mode != FlightCamera.Mode.FREE:
+			_view_before_death = camera_rig.mode
 		camera_rig.set_mode(FlightCamera.Mode.FREE)
 		camera_rig.recentre()
 
@@ -1655,45 +2377,17 @@ func game_over() -> void:
 	var tw := create_tween()
 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw.tween_interval(1.4)
-	tw.tween_callback(func() -> void:
-		Engine.time_scale = 1.0
-		if _hud != null and _hud.has_method("show_game_over"):
-			_hud.show_game_over()
-	)
+	tw.tween_callback(_show_game_over_if_dead)
 
 
-## Register a debris node with a specific velocity so it gets updated by the
-## flight root's per-frame debris ticker. Called by AiShip when it scatters parts.
-func register_debris(node: Node3D, velocity: Vector3, spin_speed := 0.0) -> void:
-	if node == null or not is_instance_valid(node):
+## The game-over popup, unless the player already respawned during the
+## slow-mo beat — it used to pop up over a live ship and stay there.
+func _show_game_over_if_dead() -> void:
+	if not _player_dead:
 		return
-	# Fade material: look for the first mesh child with a StandardMaterial3D.
-	var fade_mat: StandardMaterial3D = null
-	for child in node.get_children():
-		if child is MeshInstance3D:
-			var mi := child as MeshInstance3D
-			if mi.material_override is StandardMaterial3D:
-				var m := (mi.material_override as StandardMaterial3D).duplicate() as StandardMaterial3D
-				m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-				mi.material_override = m
-				fade_mat = m
-				break
-	if node is MeshInstance3D:
-		if (node as MeshInstance3D).material_override is StandardMaterial3D:
-			var m := ((node as MeshInstance3D).material_override as StandardMaterial3D).duplicate() as StandardMaterial3D
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			(node as MeshInstance3D).material_override = m
-			fade_mat = m
-
-	var actual_spin := spin_speed if spin_speed > 0.0 else randf_range(1.5, 5.0)
-	_debris_list.append({
-		"node": node,
-		"velocity": velocity,
-		"spin_axis": Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized(),
-		"spin_speed": actual_spin,
-		"life": randf_range(7.0, 12.0),
-		"material": fade_mat,
-	})
+	_slowmo = 1.0
+	if _hud != null and _hud.has_method("show_game_over"):
+		_hud.show_game_over()
 
 
 func return_to_hangar() -> void:
@@ -1746,6 +2440,118 @@ func set_planet_spacing(value: float) -> void:
 	Session.save_to_disk()
 
 
+# --- Kill cam ---------------------------------------------------------------------
+
+## Any roster ship died. A player kill may get the kill cam: the game pauses
+## under the camera while it swoops onto the wreck, then comes back. See
+## [method FlightCamera.start_kill_cam] and [member JuiceSettings.kill_cam].
+func _on_ai_ship_destroyed(ship: AiShip) -> void:
+	if ship == null or not is_instance_valid(ship) or not ship.killed_by_player:
+		return
+	if not JuiceSettings.kill_cam or JuiceSettings.reduce_motion or _player_dead:
+		return
+	if camera_rig == null or controlled_ai == ship:
+		return
+	var now := Time.get_ticks_msec()
+	if now < _next_kill_cam_ms or randf() > JuiceSettings.kill_cam_chance:
+		return
+	var radius := 4.0
+	if ship._view != null:
+		radius = maxf(ship._view.aabb.size.length() * 0.5, 1.0)
+	if camera_rig.start_kill_cam(ship, ship.global_position, radius):
+		var total := JuiceSettings.kill_cam_blend * 2.0 + JuiceSettings.kill_cam_hold
+		_next_kill_cam_ms = now + int((total + JuiceSettings.kill_cam_cooldown) * 1000.0)
+
+
+## The kill cam's share of [member Engine.time_scale]: eases down to [member
+## JuiceSettings.kill_cam_time_scale] as the camera swoops in and back up as
+## it returns. Never quite zero (see [constant JuiceRuntime.FREEZE_FLOOR]).
+func _kill_cam_factor() -> float:
+	if camera_rig == null or not camera_rig.kill_cam_active():
+		return 1.0
+	var paused := maxf(JuiceSettings.kill_cam_time_scale, JuiceRuntime.FREEZE_FLOOR)
+	return lerpf(1.0, paused, camera_rig.kill_cam_weight())
+
+
+# --- Player & enemy stats (the 🧪 Stats debugger panel) -----------------------
+
+## Hull and shield regeneration from the debugger's dials, per real second of
+## game time. The shield waits out its delay after the last hit.
+func _regen_player(delta: float) -> void:
+	if _player_dead:
+		return
+	if JuiceSettings.player_hp_regen > 0.0 and player_hp < player_max_hp:
+		player_hp = minf(player_hp + player_max_hp * JuiceSettings.player_hp_regen * 0.01 * delta, player_max_hp)
+	if JuiceSettings.player_shield_regen > 0.0 and player_shield < player_max_shield:
+		var since := (Time.get_ticks_msec() - _last_hit_ms) / 1000.0
+		if since >= JuiceSettings.player_shield_regen_delay:
+			player_shield = minf(
+				player_shield + player_max_shield * JuiceSettings.player_shield_regen * 0.01 * delta,
+				player_max_shield
+			)
+
+
+## Re-derive the player's max hull and shield from the design and the current
+## dials, keeping the same fraction of each that the ship had.
+func refresh_player_max_stats() -> void:
+	if view == null:
+		return
+	var stats := view.resolution.stats
+	var hp_frac := player_hp / maxf(player_max_hp, 1.0)
+	var sh_frac := player_shield / maxf(player_max_shield, 1.0) if player_max_shield > 0.0 else 1.0
+	player_max_hp = maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult \
+		* JuiceSettings.player_durability_mult
+	player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
+	if not _player_dead:
+		player_hp = player_max_hp * hp_frac
+	player_shield = player_max_shield * sh_frac
+
+
+## Set the player's hull to [param fraction] of max (0 kills the ship).
+func set_player_hp_fraction(fraction: float) -> void:
+	if _player_dead:
+		return
+	player_hp = player_max_hp * clampf(fraction, 0.0, 1.0)
+	if player_hp <= 0.0:
+		game_over()
+
+
+func refill_player_shield() -> void:
+	player_shield = player_max_shield
+
+
+## Live AI ships, for the debugger.
+func live_enemies() -> Array[AiShip]:
+	var out: Array[AiShip] = []
+	if _ai_spawner == null:
+		return out
+	for ship in _ai_spawner._ships:
+		if is_instance_valid(ship) and ship._alive:
+			out.append(ship)
+	return out
+
+
+## Rescale every live AI ship's hull after the enemy-HP dial moved from
+## [param old_mult] to the current value, keeping each ship's fraction.
+func rescale_enemy_hp(old_mult: float) -> void:
+	var ratio := JuiceSettings.enemy_hp_mult / maxf(old_mult, 0.01)
+	for ship in live_enemies():
+		ship.max_hp *= ratio
+		ship.hp *= ratio
+
+
+## Deal [param fraction] of each live AI ship's max hull as damage — not the
+## player's hit, so no kill cam.
+func damage_all_enemies(fraction: float) -> void:
+	for ship in live_enemies():
+		ship.take_damage(ship.max_hp * fraction)
+
+
+func heal_all_enemies() -> void:
+	for ship in live_enemies():
+		ship.hp = ship.max_hp
+
+
 # --- Take control + weapons lock -------------------------------------------------
 
 ## The AI ship the player is currently piloting, or null.
@@ -1781,6 +2587,13 @@ func take_control(ship: AiShip) -> void:
 	leave_control()
 	controlled_ai = ship
 	ship._ai_paused = true
+	ship.pilot_host = self
+	ship.model.frame_velocity = Vector3.ZERO
+	if ship.systems != null:
+		ship.systems.player_flown = true
+	# The piloted hull stands in for the player: the AI hunts it (see
+	# [method AiSpawner._find_player_node]) and team checks read its meta.
+	ship.model.set_meta("team", _player_team)
 	if camera_rig != null:
 		camera_rig.adopt(ship, ship.model, ship._view)
 		camera_rig.set_mode(FlightCamera.Mode.CHASE)
@@ -1790,10 +2603,16 @@ func take_control(ship: AiShip) -> void:
 			_hud.update_weapon_badge(ship.systems.get_active_weapon())
 
 
-## Give control back to the player's own ship.
+## Give control back to the player's own ship. A ship spawned just to be
+## flown ([method fly_as]) goes away with it.
 func leave_control() -> void:
 	if controlled_ai != null and is_instance_valid(controlled_ai):
 		controlled_ai._ai_paused = false
+		controlled_ai.pilot_host = null
+		if controlled_ai.systems != null:
+			controlled_ai.systems.player_flown = false
+		if controlled_ai.is_pilot_vessel:
+			controlled_ai.teardown()
 	controlled_ai = null
 	if camera_rig != null and model != null:
 		camera_rig.adopt(model, model, view)
@@ -1823,9 +2642,119 @@ func toggle_lock() -> void:
 				best = ship
 	if best != null:
 		locked_target = best
+		best.mark_engaged()
 		_hud.show_hint("Locked: %s" % best.preset_name)
 	else:
 		_hud.show_hint("No target to lock")
+
+
+# --- Fly as another ship -------------------------------------------------------
+
+## Hull sizes the flight test's "Fly as" picker offers, as a multiplier on the
+## normal ship size — from a dart to something the size of a station.
+const FLY_AS_SIZES := {
+	"Tiny (0.35x)": 0.35,
+	"Small (0.6x)": 0.6,
+	"Normal (1x)": 1.0,
+	"Large (2.5x)": 2.5,
+	"Hauler (5x)": 5.0,
+	"Capital (12x)": 12.0,
+	"Titan (24x)": 24.0,
+}
+
+
+## Spawn a random ship of [param size_mult] alongside the player's, armed with
+## weapon [param weapon_index] (-1 = whatever fits its size) and firing style
+## [param style] ("" = the plain weapon), and take control of it — to feel how
+## other ships fly and fight. Handing control back ([method leave_control])
+## frees it and returns to the player's own ship.
+func fly_as(size_mult: float, weapon_index := -1, style := "") -> AiShip:
+	var spawner := ensure_ai_spawner()
+	var host := active_ship_node()
+	if spawner == null or host == null:
+		return null
+	var ship := spawner.spawn_pilot_vessel(host.global_transform, size_mult)
+	if ship == null:
+		return null
+	if weapon_index >= 0 and ship.systems != null:
+		ship.systems.set_weapon_index(weapon_index)
+	if style != "":
+		ship.reroll_fire_pattern(style)
+	else:
+		ship.fire_pattern = {}
+		if ship.systems != null:
+			ship.systems.fire_pattern = {}
+	ship.team_id = _player_team
+	# Built as an enemy, it had an enemy's hit points; flown by the player it
+	# gets the player's own hull, scaled a little with its size.
+	ship.max_hp = maxf(ship.max_hp, player_max_hp * clampf(sqrt(size_mult), 0.6, 4.0))
+	ship.hp = ship.max_hp
+	take_control(ship)
+	if _hud != null:
+		_hud.show_hint("Flying a %s — L to hand it back" % _size_label(size_mult))
+	return ship
+
+
+func _size_label(size_mult: float) -> String:
+	for label: String in FLY_AS_SIZES.keys():
+		if is_equal_approx(float(FLY_AS_SIZES[label]), size_mult):
+			return label
+	return "%.2fx ship" % size_mult
+
+
+# --- Enemy fire on the player's hull -----------------------------------------
+
+## An enemy shot has struck the player's own hull (called by [SystemsSim]
+## when a real projectile or beam lands, and by [AiShip]'s dice fallback).
+## The player-favouring rules live here: no friendly fire, and a ship the
+## player cannot see only rarely lands a hit (see [member
+## JuiceSettings.cheat_offscreen_mercy]). Returns whether it counted.
+func take_enemy_fire(amount: float, hit_point: Vector3, shooter: SystemsSim) -> bool:
+	if shooter != null and shooter == active_systems():
+		return false
+	var ship: AiShip = shooter.get("_root") as AiShip if shooter != null else null
+	if ship != null and _player_team != 0 and ship.team_id == _player_team:
+		return false
+	# Real shots were already held back at the gun (see [method
+	# AiShip.fire_gate]); the dice fallback has no gun to hold, so it asks here.
+	if ship != null and not JuiceSettings.ai_real_projectiles and not ship.fire_gate():
+		return false
+	if ship != null:
+		ship.note_hit_player()
+	take_damage(amount * JuiceSettings.enemy_damage_mult, hit_point)
+	return true
+
+
+## A ship the player is flying ([member AiShip.pilot_host]) is hit: how much
+## of [param amount] it takes. The player's own rules — god mode, the respawn
+## grace, no friendly fire, and an enemy's shots at their tuned strength — so a
+## borrowed hull is not shot out from under them in a few seconds.
+func pilot_damage(ship: AiShip, amount: float, source: Object) -> float:
+	if JuiceSettings.player_invulnerable or in_respawn_grace():
+		return 0.0
+	var shooter := source as SystemsSim
+	if shooter != null:
+		if shooter == ship.systems:
+			return 0.0
+		var s_ship := shooter.get("_root") as AiShip
+		if s_ship != null:
+			if _player_team != 0 and s_ship.team_id == _player_team:
+				return 0.0
+			s_ship.note_hit_player()
+		amount *= JuiceSettings.enemy_shot_damage_scale
+	_last_hit_ms = Time.get_ticks_msec()
+	return amount * JuiceSettings.enemy_damage_mult * JuiceSettings.player_damage_taken_mult 		/ maxf(JuiceSettings.player_toughness, 0.05)
+
+
+# --- Interaction markers ---------------------------------------------------------
+
+var _interaction_markers: InteractionMarkers = null
+
+
+func _marker_ships() -> Array[AiShip]:
+	if _ai_spawner == null or not is_instance_valid(_ai_spawner):
+		return []
+	return _ai_spawner.ships()
 
 
 # --- Satellites + time-scale --------------------------------------------------
@@ -1833,6 +2762,8 @@ func toggle_lock() -> void:
 ## The global time scale (×1/×2/×4/×10), re-applied every frame so Juice hitstop
 ## cannot wipe it. For watching satellites orbit.
 var _time_scale := 1.0
+## Death slow-mo multiplier on top of [member _time_scale] (1.0 = none).
+var _slowmo := 1.0
 ## Spawned ballistic orbit probes, tracked so they can be deleted together.
 var _satellites: Array[AiShip] = []
 
@@ -2388,12 +3319,26 @@ func toggle_cinematic_lighting() -> void:
 	Session.save_to_disk()
 	if space != null:
 		space.set_cinematic_lighting(Session.cinematic_lighting)
+	if _advanced_lighting != null:
+		_advanced_lighting.enabled = Session.cinematic_lighting
 	if _hud != null:
 		_hud.show_hint("Cinematic sun lighting: %s" % ("ON" if Session.cinematic_lighting else "OFF"))
 
 
 func cinematic_lighting_on() -> bool:
 	return Session.cinematic_lighting
+
+
+## The screen-space light shafts and grade, riding on the cinematic toggle. Only
+## in [constant Location.SPACE]: it is the one location with a fixed star
+## direction to march toward.
+func _build_advanced_lighting() -> void:
+	if space == null or camera_rig == null or camera_rig.camera == null:
+		return
+	_advanced_lighting = AdvancedLighting.create(camera_rig.camera, SpaceScene.SUN_DIR)
+	_advanced_lighting.set_shaft_color(Palette.color("star").lerp(Color.WHITE, 0.35))
+	add_child(_advanced_lighting)
+	_advanced_lighting.enabled = Session.cinematic_lighting
 
 ## Toggle high-detail rendering. Does NOT resize the window (that just zoomed
 ## the stretch-scaled canvas); it raises the 3D render scale and rebuilds the
@@ -2403,6 +3348,19 @@ func toggle_high_res() -> void:
 	Session.high_res = not Session.high_res
 	Session.save_to_disk()
 	_hud.show_hint("High res: %s — rebuilding scene…" % ("ON" if Session.high_res else "OFF"))
+	restart_scene()
+
+
+## Planet mesh quality tier — 0 Low, 1 Medium, 2 High. Separate from [method
+## toggle_high_res] (viewport supersampling): see [member Session.planet_quality].
+func planet_quality() -> int:
+	return Session.planet_quality
+
+
+func set_planet_quality(tier: int) -> void:
+	Session.planet_quality = clampi(tier, 0, 2)
+	Session.save_to_disk()
+	_hud.show_hint("Planet quality: %s — rebuilding scene…" % ["Low", "Medium", "High"][Session.planet_quality])
 	restart_scene()
 
 
@@ -2443,13 +3401,29 @@ func set_npc_speed_scale(scale: float) -> void:
 			ship.model.rescale_speed(Session.npc_speed_scale)
 
 
+## First [MeshInstance3D] found anywhere under [param n] (depth-first),
+## including [param n] itself. Debris pieces are usually a RigidBody3D
+## wrapper (see [method DebrisRegistry.wrap_rigidbody]) around the actual
+## part node, so the mesh is one level deeper than a direct child.
+func _find_first_mesh(n: Node) -> MeshInstance3D:
+	if n is MeshInstance3D:
+		return n
+	for child in n.get_children():
+		var found := _find_first_mesh(child)
+		if found != null:
+			return found
+	return null
+
+
 ## Called by the damage system when a part breaks off. The damage system
 ## already moved the actual part node to world space as debris_node. We
 ## track that node, add a transparency fade, and spawn particle bursts.
 func _on_part_broken(broken: DamageSystem.BrokenPart, _effects: Array) -> void:
 	var node := broken.debris_node
 	if node == null or not is_instance_valid(node):
-		# No real node provided — skip the fallback box; the burst alone is enough.
+		# No real node provided — skip the fallback box; a burst and a small
+		# explosion are enough.
+		AddonVfx.explosion(self, broken.world_pos, 0.7, false, Color("ff9944"))
 		var break_xform := Transform3D(Basis(), broken.world_pos)
 		Juice.burst(BurstPresets.Preset.SPARKS, break_xform, 1.2, Color("ffcc44"))
 		Juice.burst(BurstPresets.Preset.DEBRIS, break_xform, 0.8)
@@ -2462,51 +3436,54 @@ func _on_part_broken(broken: DamageSystem.BrokenPart, _effects: Array) -> void:
 			broken.world_pos, Vector3.UP, 0.7)
 		return
 
-	# Enable transparency fade on all mesh children of the debris node.
+	# Enable transparency fade on the first mesh found under the debris node.
+	# Since DamageSystem now wraps every broken part in a RigidBody3D (see
+	# DebrisRegistry.wrap_rigidbody), the mesh is usually nested one level
+	# inside that wrapper rather than a direct child.
 	var fade_mat: StandardMaterial3D = null
-	for child in node.get_children():
-		if child is MeshInstance3D:
-			var mi := child as MeshInstance3D
-			# Check material_override first, then surface 0.
-			var mo = mi.material_override
-			if mo is StandardMaterial3D:
-				var m := (mo as StandardMaterial3D).duplicate() as StandardMaterial3D
-				m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-				mi.material_override = m
-				if fade_mat == null:
-					fade_mat = m
-			else:
-				var surf := mi.get_surface_override_material(0) as StandardMaterial3D
-				if surf == null:
-					surf = mi.mesh.surface_get_material(0) as StandardMaterial3D if mi.mesh != null else null
-				if surf != null:
-					surf = surf.duplicate() as StandardMaterial3D
-					surf.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-					mi.set_surface_override_material(0, surf)
-					if fade_mat == null:
-						fade_mat = surf
-
-	# Also handle the node itself if it is a MeshInstance3D.
-	if node is MeshInstance3D:
-		var mi := node as MeshInstance3D
+	var mi := _find_first_mesh(node)
+	if mi != null:
 		var mo = mi.material_override
 		if mo is StandardMaterial3D:
 			var m := (mo as StandardMaterial3D).duplicate() as StandardMaterial3D
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			mi.material_override = m
-			if fade_mat == null:
-				fade_mat = m
+			fade_mat = m
+		else:
+			var surf := mi.get_surface_override_material(0) as StandardMaterial3D
+			if surf == null:
+				surf = mi.mesh.surface_get_material(0) as StandardMaterial3D if mi.mesh != null else null
+			if surf != null:
+				surf = surf.duplicate() as StandardMaterial3D
+				surf.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mi.set_surface_override_material(0, surf)
+				fade_mat = surf
 
-	var debris_life := 10.0 if _player_dead else 8.0
-	_debris_list.append({
-		"node": node,
-		"velocity": broken.drift_dir * broken.drift_speed + model.velocity * 0.15,
-		"spin_axis": Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized(),
-		"spin_speed": randf_range(2.5, 7.5),
-		"life": debris_life,
-		"material": fade_mat,
-	})
+	# wrap_rigidbody already gave a RigidBody3D piece its velocity, early-cull
+	# timer and self-cleanup tween. Driving it kinematically via _debris_list
+	# too would fight Godot's own physics step for the same transform every
+	# frame, so only a plain node is tracked here. This used to `return` for
+	# rigid bodies instead, and every part break is one now, so the whole
+	# effect block below (sparks, explosion, "part lost" hint) never ran.
+	if not node is RigidBody3D:
+		var debris_life := 10.0 if _player_dead else 8.0
+		DebrisRegistry.maybe_cull_when_unseen(node)
+		_debris_list.append({
+			"node": node,
+			"velocity": broken.drift_dir * broken.drift_speed + model.velocity * 0.15,
+			"spin_axis": Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized(),
+			"spin_speed": randf_range(2.5, 7.5),
+			"life": debris_life,
+			"material": fade_mat,
+		})
 
+	# A lost part goes out with a bang, not just a spark. Skipped in the
+	# game-over break-up, where every part lands here in the same frame and
+	# the death explosion already covers it.
+	if not _player_dead:
+		AddonVfx.explosion(self, broken.world_pos, 0.7, false, Color("ff9944"))
+		if audio != null:
+			audio.play_explosion(broken.world_pos, false)
 	# Particle bursts at the break socket.
 	var break_xform := Transform3D(Basis(), broken.world_pos)
 	Juice.burst(BurstPresets.Preset.SPARKS, break_xform, 1.5, Color("ffcc44"))
@@ -2566,6 +3543,7 @@ func toggle_gravity_viz() -> void:
 	# The [ORBIT] console stream rides on the visualizer: it exists to watch orbits
 	# and is too chatty (a line per ship per second) to run all the time.
 	Session.debug_orbit_log = _gravity_viz.is_showing()
+	Session.save_to_disk()
 	var viz_state := "ON" if _gravity_viz.is_showing() else "OFF"
 	_hud.show_hint("Gravity viz: %s — arrows = pull at your ship, cyan rings = orbit, green = bound / orange-red = escaping" % viz_state)
 
@@ -2773,6 +3751,28 @@ const AGGRO_MARKER_RANGE := 6000.0
 ## The HUD's lock bracket already answers "which ship am I after"; this answers
 ## the question a pilot actually gets shot over — "which of these six are after
 ## *me*". Shares the Markers toggle with the rest of the ship markings.
+## A fast enemy shot passing close by without hitting is its own beat — a
+## brief, gentle slowmo, distinct from the sharper hitstop a landed hit gets.
+## There is no cross-ship collision layer for "did a shot pass near me", so
+## this walks every live AI ship's own [SystemsSim.live_shot_positions] each
+## frame instead.
+func _update_near_miss(delta: float) -> void:
+	_near_miss_cooldown = maxf(_near_miss_cooldown - delta, 0.0)
+	if not JuiceSettings.near_miss_slowmo or _near_miss_cooldown > 0.0:
+		return
+	if model == null or _ai_spawner == null or _player_dead:
+		return
+	var p_pos := model.global_position
+	for ship in _ai_spawner.ships():
+		if not is_instance_valid(ship) or ship.systems == null:
+			continue
+		for pos in ship.systems.live_shot_positions():
+			if p_pos.distance_to(pos) < NEAR_MISS_RADIUS:
+				Juice.hitstop(0.05, 0.35)
+				_near_miss_cooldown = NEAR_MISS_COOLDOWN
+				return
+
+
 func _update_aggro_indicators() -> void:
 	var keep: Dictionary = {}
 	var focus_pos := model.global_position if model != null else Vector3.ZERO
@@ -3089,6 +4089,10 @@ func go_arena() -> void:
 ## buttons all stop their own events, so by the time input reaches here the
 ## player is touching bare screen and means to look around.
 func _unhandled_input(event: InputEvent) -> void:
+	# A one-thumb movement profile reads the bare screen first.
+	if _pilot != null and not _player_dead and _pilot.handle_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
@@ -3201,6 +4205,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				respawn_player_ship()
 			else:
 				respawn()
+		KEY_U:
+			cycle_move_profile()
 		KEY_D:
 			if key.shift_pressed:
 				_dump_scene_tree()
@@ -3318,10 +4324,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			set_debug_visible("everything", _render_visible)
 			if _hud != null:
 				_hud.show_hint("Rendering: %s" % ("ON" if _render_visible else "OFF (Collisions Only)"))
-		KEY_QUESTION, KEY_SLASH, KEY_F1:
+		KEY_F1:
+			# F1 is the way back out of the mobile HUD (see FlightHud); with
+			# the normal HUD up it keeps its old job, the controls card.
+			if _hud != null and _hud.mobile_layout_active():
+				_hud.set_mobile_layout(false)
+			else:
+				toggle_help()
+		KEY_QUESTION, KEY_SLASH:
 			toggle_help()
 		KEY_ESCAPE:
-			return_to_hangar()
+			_on_back(false)
 	if vp != null:
 		vp.set_input_as_handled()
 
@@ -3335,6 +4348,41 @@ var spawn_cooldown := 1.0  # Seconds between manual respawns
 ## manual respawn for flight testing: unlike [method respawn], which just resets
 ## the existing ship in place, this replaces the vessel so a broken hull comes
 ## back fresh — while AI traffic and scenery carry on.
+## The AI spawner, made on demand in the locations that start without one
+## (the test volume, a generated system) so scenarios work everywhere. A
+## spawner made here starts with no ambient traffic.
+func ensure_ai_spawner() -> AiSpawner:
+	if _ai_spawner == null or not is_instance_valid(_ai_spawner):
+		_ai_spawner = AiSpawner.new()
+		_ai_spawner.name = "AiSpawner"
+		_ai_spawner.auto_fleet = false
+		_ai_spawner.ship_destroyed.connect(_on_ai_ship_destroyed)
+		add_child(_ai_spawner)
+	return _ai_spawner
+
+
+## Put the player on an AI team (0 = none: every AI hunts the player).
+func set_player_team(team: int) -> void:
+	_player_team = team
+	if model != null:
+		model.set_meta("team", team)
+
+
+## Full hull and shield; rebuilds the ship first if it was shot down.
+func revive_player() -> void:
+	if _player_dead or model == null:
+		respawn_player_ship()
+	player_hp = player_max_hp
+	player_shield = player_max_shield
+	set_player_team(_player_team)
+
+
+## A headline for the player: the hint line on both HUDs.
+func announce(text: String) -> void:
+	if _hud != null:
+		_hud.show_hint(text)
+
+
 func respawn_player_ship() -> void:
 	# Tear down the current ship. Drop the physics body first so the world never
 	# steps a body pointing at a node that is about to be freed.
@@ -3366,6 +4414,9 @@ func respawn_player_ship() -> void:
 		_hud.update_weapon_badge(systems.get_active_weapon())
 	model.assist_changed.connect(_on_model_assist_changed)
 	model.orbit_changed.connect(_on_orbit_changed)
+	model.collided.connect(_on_model_collided)
+	model.out_of_control_changed.connect(_on_model_ooc_changed)
+	model.boost_changed.connect(_on_model_boost_changed)
 
 	# Position: a stable circular orbit around the current dominant body, or the
 	# origin when there is no space scene to orbit.
@@ -3398,9 +4449,9 @@ func respawn_player_ship() -> void:
 		model.global_transform.basis = Basis.looking_at(spawn_velocity.normalized(), Vector3.UP)
 	else:
 		model.global_transform.basis = Basis()  # Reset rotation
+	_after_respawn()
 	if _hud != null:
 		_hud.show_hint("Player ship rebuilt into orbit")
-	print("Player ship respawned at position: %s" % spawn_pos)
 
 
 func cycle_weapon() -> void:

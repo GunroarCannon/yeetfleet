@@ -1407,8 +1407,14 @@ func get_collision_spheres() -> Array[Dictionary]:
 					"offset": Vector3(side * span * t, 0.0, -chord * 0.42),
 					"radius": maxf(chord * 0.4, 1.0),
 				})
-		elif part.kind == "biosphere_dome":
-			var radius := float(part.spec.get("radius", 8.0))
+		elif part.kind == "biosphere_dome" or part.kind == "dome":
+			# Both domes are the same hemisphere-loft shape (see
+			# LargeCraftPartFactory._dome/_biosphere_dome): occupying only the
+			# upper (or, flipped, lower) half of their AABB. Falling through
+			# to the box fallback below would centre the sphere on the box
+			# midpoint — half in empty air above/below the actual dome — so
+			# this needs the same off-centre offset both kinds share.
+			var radius := float(part.spec.get("radius", 8.0 if part.kind == "biosphere_dome" else 4.0))
 			var flip := float(part.spec.get("flip", 0.0)) > 0.5
 			var y_sign := -1.0 if flip else 1.0
 			hull.append({

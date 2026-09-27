@@ -9,7 +9,16 @@ var shake := JuiceShake.new()
 
 var speed_lines_fraction := 0.0
 
-var _hitstop_timer := 0.0
+## Current hitstop slow-down (1.0 = none). A scene that sets
+## [member Engine.time_scale] itself every frame (FlightRoot's time warp) must
+## multiply this in, or it cancels the freeze-frame on the very next frame.
+## That turned every hitstop into a one-frame hiccup that read as the ship
+## jerking.
+var hitstop_factor := 1.0
+## Real-time end of the current hitstop, in [method Time.get_ticks_msec].
+## Real time rather than delta, because delta itself is slowed by the hitstop.
+var _hitstop_end_ms := 0
+var _base_time_scale := 1.0
 
 var _screen_flash: ScreenFlash = null
 var _light_pool: FxLight = null
@@ -19,16 +28,18 @@ var _burst_pools: Dictionary = {}   # BurstPresets.Preset -> ParticleBurst
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	JuiceSettings.load_from_disk()
+	# Pools here are placed per render frame; interpolating them would only
+	# drag them a physics tick behind where they were put.
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	JuiceSettings.ensure_loaded()
 	set_process(true)
 
 
 func _process(delta: float) -> void:
 	shake.update(delta)
-	if _hitstop_timer > 0.0:
-		_hitstop_timer -= delta
-		if _hitstop_timer <= 0.0:
-			Engine.time_scale = 1.0
+	if hitstop_factor < 1.0 and Time.get_ticks_msec() >= _hitstop_end_ms:
+		hitstop_factor = 1.0
+		Engine.time_scale = _base_time_scale
 
 
 # --- Shake -------------------------------------------------------------------
@@ -77,8 +88,32 @@ func vignette(color: Color, strength: float, decay: float) -> void:
 func hitstop(seconds: float, scale: float) -> void:
 	if JuiceSettings.reduce_motion or seconds <= 0.0:
 		return
-	_hitstop_timer = minf(seconds, 0.06)
-	Engine.time_scale = clampf(scale, 0.01, 1.0)
+	_slow(minf(seconds, 0.06), clampf(scale, 0.01, 1.0))
+
+
+## A real freeze-frame (see [method Juice.freeze]): unlike [method hitstop],
+## which is a short slow-down capped at 60 ms, this all but stops time for up
+## to [constant FREEZE_MAX] real seconds. [param depth] 1 = a dead stop.
+func freeze(seconds: float, depth: float) -> void:
+	if JuiceSettings.reduce_motion or seconds <= 0.0 or depth <= 0.0:
+		return
+	_slow(minf(seconds, FREEZE_MAX), lerpf(1.0, FREEZE_FLOOR, clampf(depth, 0.0, 1.0)))
+
+
+## Longest freeze [method freeze] will run, in real seconds.
+const FREEZE_MAX := 0.6
+## The slowest a freeze goes. Never exactly zero: a zero time scale hands every
+## `_process` a zero delta, and a divide by delta anywhere would blow up.
+const FREEZE_FLOOR := 0.002
+
+
+func _slow(seconds: float, factor: float) -> void:
+	if hitstop_factor >= 1.0:
+		_base_time_scale = Engine.time_scale
+	var end_ms := Time.get_ticks_msec() + int(seconds * 1000.0)
+	_hitstop_end_ms = maxi(_hitstop_end_ms, end_ms)
+	hitstop_factor = minf(hitstop_factor, factor)
+	Engine.time_scale = _base_time_scale * hitstop_factor
 
 
 func speed_lines(fraction: float) -> void:

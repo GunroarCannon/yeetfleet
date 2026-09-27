@@ -50,7 +50,26 @@ uniform float solidity : hint_range(0.0, 1.0) = 0.72;
 
 uniform vec4 rim_color : source_color = vec4(0.55, 0.75, 1.0, 1.0);
 uniform float rim_strength : hint_range(0.0, 2.0) = 0.16;
-uniform float rim_power : hint_range(0.5, 12.0) = 7.0;
+uniform float rim_power : hint_range(0.5, 12.0) = 3.2;
+
+// --- Toy lighting ---
+// The self-lit floor above used to be one flat value on every facet, which is
+// what made hulls read as flat stickers: lit side and shadow side landed within
+// a few percent of each other. The floor now takes a two-colour hemisphere --
+// a cool lavender sky over a warm plum bounce -- so the floor itself carries
+// the form, the way a soft studio dome does in a toy render.
+uniform vec4 hemi_sky_color : source_color = vec4(0.80, 0.86, 1.0, 1.0);
+uniform vec4 hemi_ground_color : source_color = vec4(0.52, 0.40, 0.64, 1.0);
+// Wrapped diffuse: how far light creeps past the terminator. A soft wrap is the
+// single biggest step from "lit polygon" to "squishy vinyl toy".
+uniform float wrap_amount : hint_range(0.0, 1.0) = 0.45;
+// A warm tint on the band where light turns to shade -- the fake subsurface
+// glow that makes painted plastic look soft rather than chalky.
+uniform vec4 terminator_color : source_color = vec4(1.0, 0.55, 0.45, 1.0);
+uniform float terminator_strength : hint_range(0.0, 1.0) = 0.40;
+// A tight lacquer glint on top of the paint's own specular, independent of the
+// preset's roughness, so even a matte hull gets one candy-bright highlight.
+uniform float clearcoat : hint_range(0.0, 1.0) = 0.55;
 
 // Cartoony shading step, driven by StyleProfile.shading_bands. 0 leaves the
 // smooth hemisphere gradient alone; 2-3 quantizes it into a friendly toon ramp.
@@ -129,11 +148,13 @@ void fragment() {
 	// In cartoon mode: add crisp comic panel seams
 	vec3 tech_glow = vec3(0.0);
 	if (toon > 0.5) {
-		vec3 p_grid = fract(local_pos * panel_scale);
+		// Large, faint plates: a toy is moulded in a few big pieces, and a dense
+		// dark grid at panel_scale read as a wireframe over the paint.
+		vec3 p_grid = fract(local_pos * panel_scale * 0.5);
 		vec3 p_dist = abs(p_grid - 0.5);
 		float edge = max(p_dist.x, max(p_dist.y, p_dist.z));
-		float seam = smoothstep(0.47, 0.495, edge);
-		base *= mix(1.0, 0.78, seam);
+		float seam = smoothstep(0.482, 0.497, edge);
+		base *= mix(1.0, 0.9, seam);
 	}
 
 	// Hemisphere occlusion. Up-facing plate: full ambient. Down-facing: shaded,
@@ -160,11 +181,16 @@ void fragment() {
 
 	float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
 	float fresnel = pow(1.0 - facing, rim_power);
-	float rim = smoothstep(0.55, 1.0, fresnel) * mix(0.25, 1.0, sky);
+	float rim = smoothstep(0.18, 0.85, fresnel) * mix(0.35, 1.0, sky);
 	if (toon > 0.5) {
-		// Clean stylized cartoon rim contour
-		rim = smoothstep(0.48, 0.60, fresnel) * (0.85 + 0.15 * sky);
+		// A soft-edged cartoon contour: wide enough to wrap a rounded hull like
+		// the backlight in a toy render, not a one-pixel ink line.
+		rim = smoothstep(0.22, 0.55, fresnel) * (0.7 + 0.3 * sky);
 	}
+	// The floor's colour: cool from above, warm bounce from below. Uses the
+	// unbanded normal so toon bands step the *amount* but the hue stays smooth.
+	float hemi_t = smoothstep(0.0, 1.0, world_normal.y * 0.5 + 0.5);
+	vec3 hemi = mix(hemi_ground_color.rgb, hemi_sky_color.rgb, hemi_t);
 
 	vec3 re_glow = vec3(0.0);
 	if (reentry_burn > 0.001) {
@@ -173,13 +199,13 @@ void fragment() {
 		re_glow = reentry_color.rgb * (nose_heat * 2.2 + comp_heat);
 	}
 
-	// In cartoon mode, scale down the flat self-illumination so directional
-	// sunlight still produces readable cel-shaded shadows, while keeping
-	// the shadow side rich and colorful.
-	float eff_solidity = (toon > 0.5) ? (solidity * 0.60) : solidity;
+	// In cartoon mode, scale the floor down a little so the sun's cel bands
+	// still read. Not by much: the toy look wants a bright lavender shadow
+	// side, and anything near black is the "see-through hull" problem again.
+	float eff_solidity = (toon > 0.5) ? (solidity * 0.85) : solidity;
 
-	EMISSION = base * eff_solidity * (1.0 - dim * 0.5)
-		+ rim_color.rgb * rim * (rim_strength * 0.35) * rim_mult * (1.0 - dim * 0.6)
+	EMISSION = base * hemi * eff_solidity * (1.0 - dim * 0.5)
+		+ rim_color.rgb * rim * (rim_strength * 0.75) * rim_mult * (1.0 - dim * 0.6)
 		+ highlight_color.rgb * highlight * (0.12 + 0.9 * fresnel)
 		+ re_glow
 		+ tech_glow;
@@ -216,42 +242,40 @@ void light() {
 	if (wireframe_mode <= 0.5) {
 		float NdotL = dot(NORMAL, LIGHT);
 		float toon = (shading_bands > 0.5 || toon_override > 0.5) ? 1.0 : 0.0;
+		// Wrapped Lambert: light creeps past the terminator, so a rounded hull
+		// rolls from lit to shade over a wide band instead of a knife edge.
+		float wrap = (toon > 0.5) ? wrap_amount : wrap_amount * 0.6;
+		float wrapped = clamp((NdotL + wrap) / (1.0 + wrap), 0.0, 1.0);
+		float diff = wrapped * wrapped * (3.0 - 2.0 * wrapped);
 		if (toon > 0.5) {
-			// High-quality stepped cel-shading reflecting the shading_bands dial
+			// Soft cel bands: the shading_bands dial still steps the light, but
+			// each step is eased rather than cut, and the dark side falls all
+			// the way to the hemisphere floor. The old 42% floor on every light
+			// is what flattened hulls -- lit and unlit faces barely differed.
 			float num_bands = max(shading_bands, (toon_override > 0.5 ? 3.0 : 2.0));
-			float band = 0.42;
-			if (num_bands <= 2.0) {
-				band = smoothstep(-0.20, -0.10, NdotL) * 0.40 + smoothstep(0.12, 0.22, NdotL) * 0.60;
-			} else {
-				float normalized_light = clamp((NdotL + 0.35) / 1.35, 0.0, 1.0);
-				float stepped = floor(normalized_light * num_bands) / (num_bands - 1.0);
-				float frac_part = fract(normalized_light * num_bands);
-				float transition = smoothstep(0.0, 0.10, frac_part);
-				band = mix(stepped, (floor(normalized_light * num_bands) + 1.0) / (num_bands - 1.0), transition * 0.20);
-			}
-			band = clamp(max(band, 0.42), 0.42, 1.0);
-			vec3 toon_diffuse = LIGHT_COLOR * (band * ATTENUATION);
-			DIFFUSE_LIGHT += ALBEDO * toon_diffuse;
+			float x = wrapped * num_bands;
+			float soft_step = floor(x) + smoothstep(0.30, 0.70, fract(x));
+			diff = clamp(soft_step / num_bands, 0.0, 1.0);
+		}
+		// Warm glow where light turns to shade: peaks mid-terminator, zero at
+		// full light and full dark.
+		float term = clamp(1.0 - abs(wrapped * 2.0 - 1.0), 0.0, 1.0);
+		vec3 tint = mix(vec3(1.0), terminator_color.rgb * 1.25, term * terminator_strength);
+		DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * tint * (diff * ATTENUATION);
 
-			// Cartoon circular specular glint: crisp, tight glint
-			vec3 half_vec = normalize(VIEW + LIGHT);
-			float NdotH = max(dot(NORMAL, half_vec), 0.0);
-			float spec_power = max(36.0 * (1.0 - ROUGHNESS * 0.5), 20.0);
-			float spec = smoothstep(0.92, 0.97, pow(NdotH, spec_power));
-			SPECULAR_LIGHT += LIGHT_COLOR * (spec * spec_mult * ATTENUATION * 0.65);
+		vec3 half_vec = normalize(VIEW + LIGHT);
+		float NdotH = max(dot(NORMAL, half_vec), 0.0);
+		float lit = step(0.0, NdotL);
+		if (toon > 0.5) {
+			// A broad soft sheen plus one crisp candy glint.
+			float sheen = pow(NdotH, 10.0) * 0.18;
+			float spec_power = max(48.0 * (1.0 - ROUGHNESS * 0.5), 24.0);
+			float glint = smoothstep(0.80, 0.90, pow(NdotH, spec_power));
+			SPECULAR_LIGHT += LIGHT_COLOR * ((sheen + glint * 0.8 * clearcoat) * spec_mult * ATTENUATION * lit);
 		} else {
-			// Grounded standard lambert diffuse
-			float diff = max(NdotL, 0.0);
-			DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * (diff * ATTENUATION);
-
-			// Grounded specular
-			vec3 half_vec = normalize(VIEW + LIGHT);
-			float NdotH = max(dot(NORMAL, half_vec), 0.0);
 			float spec = pow(NdotH, 16.0 / max(ROUGHNESS * ROUGHNESS, 0.01));
-			SPECULAR_LIGHT += LIGHT_COLOR * (spec * specular_amount * spec_mult * ATTENUATION);
+			float coat = pow(NdotH, 160.0) * clearcoat * 1.4;
+			SPECULAR_LIGHT += LIGHT_COLOR * ((spec * specular_amount + coat) * spec_mult * ATTENUATION * lit);
 		}
 	}
 }
-
-
-

@@ -74,9 +74,27 @@ static var ship_scale := 1.0
 ## console. Off by default — the log exists for orbit tuning and, left on, flushes
 ## the console every second per ship, which stutters windowed runs.
 static var debug_orbit_log := false
-## High-res: render at a higher internal resolution and rebuild geometry denser.
-## Formerly `FlightRoot._high_res_on`.
+## High-res: render at a higher internal viewport resolution (supersampling).
+## Formerly `FlightRoot._high_res_on`. Planet mesh density is its own separate
+## dial — [member planet_quality] — since supersampling and geometry
+## resolution are different costs and a faceted planet stays faceted no
+## matter how many pixels it's rendered at.
 static var high_res := false
+## Planet mesh quality tier: 0 = Low, 1 = Medium (default), 2 = High. Scales
+## sphere_resolution (and, via [method SpaceScene._detail], cloud/ring/
+## asteroid/star segment counts too) so a planet is rounder and less faceted
+## at higher tiers instead of relying on [member high_res]'s supersampling to
+## paper over low geometry.
+static var planet_quality := 1
+## Which planet surface shader technique a session starts with — see
+## [method Planet.swap_all_surface_shaders]. Lets the flight-test "Planet
+## look" picker start pinned to one so it can be compared against the other
+## across a restart.
+static var planet_surface_alt := false
+## Which planet look (an index into [constant Planet.SURFACE_STYLES]) a flight
+## starts with — the flight test's "Planet look" picker. Supersedes
+## [member planet_surface_alt], which is kept in step for old saves.
+static var planet_surface_style := 0
 ## Player-ship exhaust trail. Formerly `FlightRoot._trail_player`.
 static var trail_player := false
 ## Trails on every live AI ship. Formerly `FlightRoot._trail_ships`.
@@ -125,10 +143,16 @@ static var star_size_mult := 1.25
 static var asteroid_density := 1.0
 ## Enhanced backdrop: corona, distant galaxy and nebula dust around the star.
 static var render_backdrop := true
+## The flight sky's baked nebula panorama (see [NebulaSky]): curling gas, a
+## galactic band with dust lanes and a dense star field behind everything.
+## Off = the flat palette background colour.
+static var nebula_sky := true
 ## Enhanced lighting: increases rim strength and warms the main light.
 static var enhanced_lighting := true
 ## Cinematic lighting (Galaxy on Fire 2 style): dramatic sunflare starburst, intense bloom, high-contrast rim & shadows.
-static var cinematic_lighting := true
+## Also drives the screen-space light shafts and colour grade ([AdvancedLighting]),
+## which is why it starts off on phones: the shafts cost a march per pixel.
+static var cinematic_lighting := not OS.has_feature("mobile")
 ## Weird glare/flare effects toggle: solar corona, flare petals, intense bloom.
 static var glare_enabled := true
 ## Tactical high-beam headlights and navigation lights on ships.
@@ -139,6 +163,10 @@ static var trail_length := 1.0
 ## needed) by [SolarSystemGenerator.time_scale]. Persisted so reopening the lab
 ## resumes at the speed it was left at.
 static var solar_time_scale := 1.0
+## Solar system gen lab: the last "Distance" preset's scale, read by
+## [method SolarSystemGenLabRoot._build_generator] so reopening the lab
+## regenerates at the spacing it was left at instead of resetting to Default.
+static var solar_distance_scale := 1.0
 ## How fast the *player's* ship flies, as a fraction of the speed its design
 ## resolves to. Scales [code]FlightModel[/code]'s top speed and acceleration
 ## together, so a slowed ship takes the same time to reach its (lower) top speed
@@ -187,6 +215,34 @@ static var pending_solar_system: Resource = null
 ## Body name within [member pending_solar_system] to spawn the player near.
 ## "" means "the first planet".
 static var pending_spawn_body_name := ""
+## The player's flight control mode (Arcade / Sim / Realistic / Dogfight), as
+## the flight module's own enum value, or -1 for "the model's default". An int
+## for the same reason as [member flight_location]. It used to live only on the
+## player's FlightModel instance, so a restart always fell back to Arcade.
+static var control_mode := -1
+## Movement profile ([enum FlightRoot.MoveProfile]): 0 classic stick & buttons,
+## 1 swipe, 2 slingshot. A separate axis from [member control_mode], which
+## tunes the flight numbers underneath whichever profile is flying.
+static var move_profile := 0
+## Flight-assist mode (0 manual, 1 damping, 2 full), or -1 for the default.
+static var assist_mode := -1
+## The chase/cockpit/rear view the player last picked, or -1 for the default.
+static var camera_view := -1
+## Render distance (far clip) and FAR-view ceiling, metres; -1 = defaults.
+static var far_clip := -1.0
+static var far_view_max := -1.0
+## Every other flight-test preference, keyed by name: the menus' gravity,
+## orbit, combat and camera toggles, the debug strip, star style, and so on.
+## One saved dictionary rather than a static per dial, since these belong to
+## the flight scene's own UI and change often. The flight scene fills it (see
+## FlightRoot._capture_prefs) and reads it back on build. Values must be plain
+## Variants (bool/int/float/String/Array) so ConfigFile can store them.
+static var prefs := {}
+
+
+## A saved flight-test preference, or [param default] if never set.
+static func pref(key: String, default: Variant) -> Variant:
+	return prefs.get(key, default)
 
 
 # --- Boot -------------------------------------------------------------------
@@ -268,8 +324,28 @@ const SETTINGS_PATH := "user://session_settings.cfg"
 const SECTION := "session"
 
 
+## What was last written by [method save_to_disk], so [method autosave] can
+## tell whether anything changed.
+static var _last_saved_text := ""
+
+
+## Save only if something changed since the last save. A scene calls this on
+## a timer and on exit as a safety net. Settings are changed from dozens of
+## call sites, and any one that forgot its own [method save_to_disk] used to
+## silently lose the setting on the next launch.
+static func autosave() -> void:
+	if _build_cfg().encode_to_text() != _last_saved_text:
+		save_to_disk()
+
+
 ## Save all user-adjustable preferences to disk.
 static func save_to_disk() -> void:
+	var cfg := _build_cfg()
+	_last_saved_text = cfg.encode_to_text()
+	cfg.save(SETTINGS_PATH)
+
+
+static func _build_cfg() -> ConfigFile:
 	var cfg := ConfigFile.new()
 	cfg.set_value(SECTION, "planet_scale", planet_scale)
 	cfg.set_value(SECTION, "planet_spacing", planet_spacing)
@@ -277,6 +353,9 @@ static func save_to_disk() -> void:
 	cfg.set_value(SECTION, "planet_debris_glow", planet_debris_glow)
 	cfg.set_value(SECTION, "ship_scale", ship_scale)
 	cfg.set_value(SECTION, "high_res", high_res)
+	cfg.set_value(SECTION, "planet_quality", planet_quality)
+	cfg.set_value(SECTION, "planet_surface_alt", planet_surface_alt)
+	cfg.set_value(SECTION, "planet_surface_style", planet_surface_style)
 	cfg.set_value(SECTION, "trail_player", trail_player)
 	cfg.set_value(SECTION, "trail_ships", trail_ships)
 	cfg.set_value(SECTION, "flight_location", flight_location)
@@ -296,6 +375,7 @@ static func save_to_disk() -> void:
 	cfg.set_value(SECTION, "star_size_mult", star_size_mult)
 	cfg.set_value(SECTION, "asteroid_density", asteroid_density)
 	cfg.set_value(SECTION, "render_backdrop", render_backdrop)
+	cfg.set_value(SECTION, "nebula_sky", nebula_sky)
 	cfg.set_value(SECTION, "enhanced_lighting", enhanced_lighting)
 	cfg.set_value(SECTION, "cinematic_lighting", cinematic_lighting)
 	cfg.set_value(SECTION, "glare_enabled", glare_enabled)
@@ -306,13 +386,23 @@ static func save_to_disk() -> void:
 	cfg.set_value(SECTION, "fast_orbits", fast_orbits)
 	cfg.set_value(SECTION, "orbit_speed_scale", orbit_speed_scale)
 	cfg.set_value(SECTION, "arcade_pivot", arcade_pivot)
-	cfg.save(SETTINGS_PATH)
+	cfg.set_value(SECTION, "debug_orbit_log", debug_orbit_log)
+	cfg.set_value(SECTION, "solar_time_scale", solar_time_scale)
+	cfg.set_value(SECTION, "solar_distance_scale", solar_distance_scale)
+	cfg.set_value(SECTION, "control_mode", control_mode)
+	cfg.set_value(SECTION, "move_profile", move_profile)
+	cfg.set_value(SECTION, "assist_mode", assist_mode)
+	cfg.set_value(SECTION, "camera_view", camera_view)
+	cfg.set_value(SECTION, "far_clip", far_clip)
+	cfg.set_value(SECTION, "far_view_max", far_view_max)
+	cfg.set_value(SECTION, "prefs", prefs)
+	return cfg
 
 
 ## Load user preferences from disk.
 static func load_from_disk() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(SETTINGS_PATH) != OK:
+	if GameDefaults.load_layered(cfg, SETTINGS_PATH, Session.load_from_disk) != OK:
 		return
 	planet_scale = float(cfg.get_value(SECTION, "planet_scale", planet_scale))
 	planet_spacing = float(cfg.get_value(SECTION, "planet_spacing", planet_spacing))
@@ -320,6 +410,9 @@ static func load_from_disk() -> void:
 	planet_debris_glow = bool(cfg.get_value(SECTION, "planet_debris_glow", planet_debris_glow))
 	ship_scale = float(cfg.get_value(SECTION, "ship_scale", ship_scale))
 	high_res = bool(cfg.get_value(SECTION, "high_res", high_res))
+	planet_quality = clampi(int(cfg.get_value(SECTION, "planet_quality", planet_quality)), 0, 2)
+	planet_surface_alt = bool(cfg.get_value(SECTION, "planet_surface_alt", planet_surface_alt))
+	planet_surface_style = int(cfg.get_value(SECTION, "planet_surface_style", 1 if planet_surface_alt else 0))
 	trail_player = bool(cfg.get_value(SECTION, "trail_player", trail_player))
 	trail_ships = bool(cfg.get_value(SECTION, "trail_ships", trail_ships))
 	flight_location = int(cfg.get_value(SECTION, "flight_location", flight_location))
@@ -339,6 +432,7 @@ static func load_from_disk() -> void:
 	star_size_mult = float(cfg.get_value(SECTION, "star_size_mult", star_size_mult))
 	asteroid_density = float(cfg.get_value(SECTION, "asteroid_density", asteroid_density))
 	render_backdrop = bool(cfg.get_value(SECTION, "render_backdrop", render_backdrop))
+	nebula_sky = bool(cfg.get_value(SECTION, "nebula_sky", nebula_sky))
 	enhanced_lighting = bool(cfg.get_value(SECTION, "enhanced_lighting", enhanced_lighting))
 	cinematic_lighting = bool(cfg.get_value(SECTION, "cinematic_lighting", cinematic_lighting))
 	glare_enabled = bool(cfg.get_value(SECTION, "glare_enabled", glare_enabled))
@@ -349,6 +443,19 @@ static func load_from_disk() -> void:
 	fast_orbits = bool(cfg.get_value(SECTION, "fast_orbits", fast_orbits))
 	orbit_speed_scale = float(cfg.get_value(SECTION, "orbit_speed_scale", orbit_speed_scale))
 	arcade_pivot = float(cfg.get_value(SECTION, "arcade_pivot", arcade_pivot))
+	debug_orbit_log = bool(cfg.get_value(SECTION, "debug_orbit_log", debug_orbit_log))
+	solar_time_scale = float(cfg.get_value(SECTION, "solar_time_scale", solar_time_scale))
+	solar_distance_scale = float(cfg.get_value(SECTION, "solar_distance_scale", solar_distance_scale))
+	control_mode = int(cfg.get_value(SECTION, "control_mode", control_mode))
+	move_profile = clampi(int(cfg.get_value(SECTION, "move_profile", move_profile)), 0, 3)
+	assist_mode = int(cfg.get_value(SECTION, "assist_mode", assist_mode))
+	camera_view = int(cfg.get_value(SECTION, "camera_view", camera_view))
+	far_clip = float(cfg.get_value(SECTION, "far_clip", far_clip))
+	far_view_max = float(cfg.get_value(SECTION, "far_view_max", far_view_max))
+	var saved_prefs: Variant = cfg.get_value(SECTION, "prefs", {})
+	if saved_prefs is Dictionary:
+		prefs = (saved_prefs as Dictionary).duplicate(true)
+	_last_saved_text = _build_cfg().encode_to_text()
 
 
 ## Restore every persisted display/menu setting to its shipped default. The
@@ -361,6 +468,9 @@ static func reset_to_defaults() -> void:
 	planet_debris_glow = true
 	ship_scale = 1.0
 	high_res = false
+	planet_quality = 1
+	planet_surface_alt = false
+	planet_surface_style = 0
 	trail_player = false
 	trail_ships = false
 	flight_location = 0
@@ -382,16 +492,24 @@ static func reset_to_defaults() -> void:
 	asteroid_density = 1.0
 	render_backdrop = true
 	enhanced_lighting = true
-	cinematic_lighting = true
+	cinematic_lighting = not OS.has_feature("mobile")
 	glare_enabled = true
 	ship_headlights = true
 	trail_length = 1.0
 	solar_time_scale = 1.0
+	solar_distance_scale = 1.0
 	player_speed_scale = 1.0
 	npc_speed_scale = 0.3
 	fast_orbits = false
 	orbit_speed_scale = 4.0
 	arcade_pivot = 3.0
+	control_mode = -1
+	move_profile = 0
+	assist_mode = -1
+	camera_view = -1
+	far_clip = -1.0
+	far_view_max = -1.0
+	prefs = {}
 	pending_solar_system = null
 	pending_spawn_body_name = ""
 	# Remove config file so fresh defaults are preserved
@@ -400,4 +518,7 @@ static func reset_to_defaults() -> void:
 	var path_global := ProjectSettings.globalize_path(SETTINGS_PATH)
 	if FileAccess.file_exists(path_global):
 		DirAccess.remove_absolute(path_global)
+	# Every other settings file too, then re-read: each class lands on the
+	# tuning that ships ([GameDefaults]), not only on the code's defaults.
+	GameDefaults.reset_player_files()
 

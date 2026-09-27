@@ -7,7 +7,8 @@
 ##
 ## A fifth argument picks what is going on: "all" (default), "boost", "fire", or
 ## "planet" — which parks the ship off Tarn IV's shoulder for a look at what the
-## planet renderer is putting on screen.
+## planet renderer is putting on screen. A sixth picks the planet look (an index
+## into [constant Planet.SURFACE_STYLES]) for comparing the techniques.
 extends SceneTree
 
 func _initialize() -> void:
@@ -83,6 +84,8 @@ func _initialize() -> void:
 		if body != null:
 			await body.wait_for_build()
 		f.shatter_nearest_planet()
+	if args.size() >= 6:
+		Planet.set_surface_style(int(args[5]))
 	for i in warm:
 		await process_frame
 	var img := root.get_texture().get_image()

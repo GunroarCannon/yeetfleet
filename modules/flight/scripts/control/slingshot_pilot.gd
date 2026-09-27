@@ -1,0 +1,310 @@
+## SlingshotPilot: the pull-back-and-let-go movement profile.
+##
+## Put a thumb on the ship and drag back: the ship is aimed the opposite way,
+## harder the further you pull. The aim is 3D: pulling down throws it into the
+## screen (away from the camera, [member JuiceSettings.sling_aim_depth]),
+## sideways throws it left or right, and it snaps onto a ship close to the aim
+## line. Let go and it launches — the hull tumbles (or flies like a rocket),
+## the launch magnet bends it onto a ship ahead ([method MovePilot.magnet_bend])
+## and it ping-pongs off whatever it hits, each bounce turned toward the next
+## body ([SlingRun]). It can be caught by a planet's orbit. When it slows down
+## or runs out of time it brakes and it is ready again.
+##
+## The camera: while aiming it pulls out and looks along the aim; in flight it
+## follows the flight path (not the spin), looks ahead of the ship (at the
+## magnet's pick when there is one) and pulls out with speed; as the ship slows
+## or nears another ship it eases back in ([member JuiceSettings.sling_close_zoom]).
+##
+## While it flies: a tap shoots toward the tapped point (pulled onto a ship near
+## it), and a thumb on the ship catches it for the next launch — both toggles.
+class_name SlingshotPilot
+extends MovePilot
+
+## Seconds of fire per tap.
+const VOLLEY_TIME := 0.35
+## A tap within this many pixels of a ship shoots that ship.
+const TAP_MAGNET_PX := 90.0
+## The aim snaps onto a ship within this many degrees of the aim line.
+const AIM_SNAP_DEG := 12.0
+
+var run: SlingRun = null
+## Finger → ship screen offset while aiming (pixels), and the launch it gives.
+var pull := Vector2.ZERO
+var aim_dir := Vector3.ZERO
+var aim_power := 0.0
+## A finger that caught the flying ship: it turns into the next aim once the
+## ship has stopped.
+var _catching := false
+var _fire_time := 0.0
+## The camera's frame when the aim began: the pull is read in it, so the view
+## easing out and looking ahead doesn't move the aim under the thumb.
+var _aim_frame := Basis()
+## The ship the aim has snapped onto, or null.
+var aim_target: AiShip = null
+## The flight direction the camera follows (see [member FlightCamera.follow_dir]).
+var _dir_cb := Callable()
+
+
+func _init(flight_root: FlightRoot) -> void:
+	super(flight_root)
+	gestures.pressed.connect(_on_pressed)
+	gestures.dragged.connect(_on_dragged)
+	gestures.released.connect(_on_released)
+	gestures.tap.connect(_on_tap)
+	_dir_cb = _flight_dir
+
+
+func activate(flight: FlightModel) -> void:
+	super(flight)
+	run = SlingRun.new(flight)
+	run.seek = _seek
+	model.command.throttle = 0.0
+
+
+func deactivate() -> void:
+	if run != null:
+		run.release()
+		if model != null and is_instance_valid(model):
+			if model.impacted.is_connected(run._on_impacted):
+				model.impacted.disconnect(run._on_impacted)
+			if model.orbit_changed.is_connected(run._on_orbit_changed):
+				model.orbit_changed.disconnect(run._on_orbit_changed)
+	run = null
+	if root.camera_rig != null:
+		root.camera_rig.hold_zoom(0.0)
+	aim_target = null
+	var sys := root.active_systems()
+	if sys != null:
+		sys.aim_override = Vector3.INF
+	super()
+
+
+## Off the ship, a drag swings the camera (a tap there still shoots).
+func _drag_orbits(pos: Vector2) -> bool:
+	return not near_ship(pos)
+
+
+func _on_pressed(pos: Vector2) -> void:
+	if run == null:
+		return
+	match run.state:
+		SlingRun.State.READY:
+			if near_ship(pos):
+				_begin_aim()
+				_update_aim(pos)
+		SlingRun.State.FLYING, SlingRun.State.RECALLING:
+			if JuiceSettings.sling_catch and near_ship(pos):
+				run.catch_ship()
+				_catching = true
+
+
+func _on_dragged(pos: Vector2, _start: Vector2) -> void:
+	if run != null and run.state == SlingRun.State.AIMING:
+		_update_aim(pos)
+
+
+func _begin_aim() -> void:
+	run.set_aiming(true)
+	var cam := root.camera_node()
+	_aim_frame = cam.global_transform.basis.orthonormalized() if cam != null else Basis()
+
+
+func _update_aim(finger: Vector2) -> void:
+	var s := ship_screen_pos()
+	if s == Vector2.INF:
+		return
+	pull = finger - s
+	aim_dir = MovePilot.depth_dir(-pull, _aim_frame, JuiceSettings.sling_aim_depth)
+	aim_power = clampf(pull.length() / (short_edge() * 0.38), 0.0, 1.0)
+	# Snap onto a ship close to the aim line: a 3D aim doesn't have to be exact.
+	aim_target = find_magnet(aim_dir, AIM_SNAP_DEG) if aim_dir != Vector3.ZERO else null
+	if aim_target != null:
+		var speed := clampf(aim_power, 0.05, 1.0) * JuiceSettings.sling_power * maxf(model.top_speed, 40.0)
+		var to := (intercept_point(aim_target, speed) - model.global_position).normalized()
+		aim_dir = aim_dir.slerp(to, 0.85).normalized()
+
+
+func _on_released(_pos: Vector2) -> void:
+	_catching = false
+	if run == null or run.state != SlingRun.State.AIMING:
+		return
+	if aim_power > 0.08 and aim_dir != Vector3.ZERO:
+		run.launch(aim_dir, aim_power)
+	else:
+		run.set_aiming(false)
+	pull = Vector2.ZERO
+	aim_power = 0.0
+	aim_target = null
+
+
+func _on_tap(pos: Vector2) -> void:
+	if run == null or run.state != SlingRun.State.FLYING or not JuiceSettings.sling_tap_fire:
+		return
+	if near_ship(pos) and JuiceSettings.sling_catch:
+		return
+	var cam := root.camera_node()
+	if cam == null:
+		return
+	# Pulled onto a ship near the tap, else at the tapped point at the ship's depth.
+	var best: AiShip = null
+	var best_px := TAP_MAGNET_PX
+	for ship in root.live_enemies():
+		if cam.is_position_behind(ship.global_position):
+			continue
+		var px := cam.unproject_position(ship.global_position).distance_to(pos)
+		if px < best_px:
+			best_px = px
+			best = ship
+	var sys := root.active_systems()
+	if best != null:
+		root.locked_target = best
+		if sys != null:
+			sys.aim_override = best.global_position
+	else:
+		root.locked_target = null
+		var depth := cam.global_position.distance_to(model.global_position) + 400.0
+		if sys != null:
+			sys.aim_override = cam.project_position(pos, depth)
+	_fire_time = VOLLEY_TIME
+
+
+## The next body a bounce heads for: the best target ship, else the nearest body.
+func _seek(from: Vector3, just_hit: Node3D) -> Vector3:
+	var ships: Array = []
+	for s in root.live_enemies():
+		if s != just_hit and not (just_hit != null and s.model == just_hit):
+			ships.append(s)
+	var t := TargetPriority.best(ships, from, Vector3.ZERO, -1.0, SlingRun.SEEK_RANGE, JuiceSettings.magnet_friendlies)
+	return t.global_position if t != null else Vector3.INF
+
+
+func physics_tick(delta: float) -> void:
+	if run == null or model == null:
+		return
+	run.tick(delta)
+	model.command.throttle = 0.0
+	model.command.roll = 0.0
+	if _catching and run.state == SlingRun.State.READY and gestures.is_down():
+		_catching = false
+		_begin_aim()
+		_update_aim(gestures.current_position())
+	magnet_target = null
+	match run.state:
+		SlingRun.State.AIMING:
+			if aim_dir != Vector3.ZERO:
+				root.steer_nose_toward(aim_dir)
+		SlingRun.State.FLYING:
+			# The launch magnet bends the flight onto a ship ahead.
+			var v := model.velocity
+			var sp := v.length()
+			if sp > 5.0:
+				model.velocity = magnet_bend(v / sp, sp, delta) * sp
+		SlingRun.State.READY, SlingRun.State.RECALLING:
+			model.command.yaw = 0.0
+			model.command.pitch = 0.0
+	var firing := _fire_time > 0.0 and run.state == SlingRun.State.FLYING
+	if _fire_time > 0.0:
+		_fire_time -= delta
+	var sys := root.active_systems()
+	if not firing and sys != null:
+		sys.aim_override = Vector3.INF
+	elif firing and sys != null and root.locked_target != null and is_instance_valid(root.locked_target):
+		sys.aim_override = root.locked_target.global_position
+	root.set_firing(firing)
+
+
+## Where the steady camera looks: along the flight while the ship moves;
+## held still (ZERO) while it sits or is being aimed.
+func _flight_dir() -> Vector3:
+	if model == null or run == null or run.state == SlingRun.State.AIMING:
+		return Vector3.ZERO
+	var v := model.velocity
+	return v if v.length() > 8.0 else Vector3.ZERO
+
+
+func frame_tick(delta: float) -> void:
+	super(delta)
+	if run == null or root.camera_rig == null:
+		return
+	# The camera rides the flight, not the tumbling hull.
+	root.camera_rig.follow_dir = _dir_cb if JuiceSettings.sling_steady_cam else Callable()
+	root.camera_rig.follow_dir_rate = 1.6
+	if run.state == SlingRun.State.AIMING and aim_power > 0.02:
+		var tint := ARROW_BLUE.lerp(Color(0.75, 0.35, 1.0), aim_power * 0.7)
+		lay_arrow(0, aim_dir, aim_power, tint, 0.6 + 0.4 * aim_power)
+	else:
+		hide_arrows()
+	_update_camera()
+
+
+## The dynamic camera (see the class doc): pull-out, look-ahead and the
+## ease back in near ships and as the ship slows. All targets the camera eases
+## to — nothing here moves it directly.
+func _update_camera() -> void:
+	var rig := root.camera_rig
+	var cam := root.camera_node()
+	if model == null or cam == null:
+		return
+	var pos := model.global_position
+	# Look-ahead is measured against the camera's distance, so it frames the
+	# same at any zoom (capped, so it can't run away with itself).
+	var reach := minf(cam.global_position.distance_to(pos), rig.hull_length * 40.0) * JuiceSettings.sling_look_ahead
+	var near := _closeness()
+	var zoom := 0.0
+	var ahead := Vector3.ZERO
+	var close_in := 0.0
+	match run.state:
+		SlingRun.State.AIMING:
+			zoom = aim_power * JuiceSettings.sling_zoom * 0.5
+			ahead = aim_dir * reach * aim_power
+		SlingRun.State.FLYING:
+			var sf := run.speed_fraction()
+			zoom = maxf(sf, 0.35) * JuiceSettings.sling_zoom * (1.0 - near * 0.8)
+			var v := model.velocity
+			var look := v.normalized() if v.length() > 5.0 else Vector3.ZERO
+			if magnet_target != null and is_instance_valid(magnet_target):
+				# What it is about to hit, when it has a pick.
+				var to := magnet_target.global_position - pos
+				look = (look + to.normalized()).normalized()
+				reach = minf(reach, to.length() * 0.6)
+			ahead = look * reach * maxf(sf, 0.35)
+			close_in = maxf(near, (1.0 - sf) * 0.7)
+		_:
+			close_in = maxf(near, 0.7)
+	rig.hold_zoom(zoom)
+	rig.look_ahead = ahead
+	rig.profile_distance = 1.0 - close_in * JuiceSettings.sling_close_zoom
+
+
+## 0..1: how close the nearest other ship is (1 = nearly touching, 0 = far).
+func _closeness() -> float:
+	var r := root.camera_rig.hull_radius if root.camera_rig != null else 3.0
+	var best := INF
+	for s in root.live_enemies():
+		if s == root.controlled_ai or s.model == model:
+			continue
+		best = minf(best, s.global_position.distance_to(model.global_position))
+	return 1.0 - smoothstep(r * 6.0, maxf(r * 40.0, 250.0), best)
+
+
+func draw(canvas: Control) -> void:
+	if run == null:
+		return
+	var s := ship_screen_pos()
+	if s == Vector2.INF:
+		return
+	if run.state == SlingRun.State.READY:
+		# A soft ring: "grab me".
+		canvas.draw_arc(s, grab_radius() * 0.8, 0.0, TAU, 40, Color(1.0, 0.85, 0.35, 0.35), 2.0, true)
+	elif run.state == SlingRun.State.AIMING and pull.length() > 1.0:
+		var col := Color(1.0, 0.8, 0.3).lerp(Color(1.0, 0.3, 0.2), aim_power)
+		# The band back to the finger, and the launch arrow the other way.
+		canvas.draw_line(s, s + pull, Color(col, 0.6), 3.0, true)
+		canvas.draw_circle(s + pull, 8.0, Color(col, 0.8))
+		if JuiceSettings.move_arrows:
+			return
+		var tip := s - pull.normalized() * (40.0 + 160.0 * aim_power)
+		canvas.draw_line(s, tip, col, 5.0, true)
+		var side := (tip - s).normalized().orthogonal() * 10.0
+		var back := tip - (tip - s).normalized() * 16.0
+		canvas.draw_colored_polygon(PackedVector2Array([tip, back + side, back - side]), col)

@@ -27,6 +27,22 @@ class_name Planet
 extends Node3D
 
 const SURFACE_SHADER_PATH := "res://modules/common/planets/shaders/planet_surface.gdshader"
+## Alternative surface technique — real per-pixel bump instead of one manual
+## unshaded sun term. See [method swap_all_surface_shaders] and that
+## shader's own header comment.
+const SURFACE_SHADER_ALT_PATH := "res://modules/common/planets/shaders/planet_surface_textured.gdshader"
+## Third technique: cel-shaded bands, tinted shade, rim light and halftone —
+## adapted from the UltimateToonSource addon but self-contained.
+const SURFACE_SHADER_TOON_PATH := "res://modules/common/planets/shaders/planet_surface_toon.gdshader"
+## Every surface technique the Planet look picker offers, in menu order. Each
+## honours the same uniform set ([method _write_surface_params]), so a planet
+## can switch between them live. Deleting a technique's shader file leaves its
+## entry falling back to the painted look — see [method set_surface_style].
+const SURFACE_STYLES: Array[Dictionary] = [
+	{"name": "Painted (flat, sun-shaded)", "path": SURFACE_SHADER_PATH},
+	{"name": "Textured (real bump lighting)", "path": SURFACE_SHADER_ALT_PATH},
+	{"name": "Toon (cel bands, rim, halftone)", "path": SURFACE_SHADER_TOON_PATH},
+]
 const RING_SHADER_PATH := "res://modules/common/planets/shaders/planet_rings.gdshader"
 const CLOUD_SHADER_PATH := "res://modules/common/planets/shaders/planet_clouds.gdshader"
 const LIMB_SHADER_PATH := "res://modules/common/juice/shaders/limb_glow.gdshader"
@@ -49,6 +65,11 @@ var _ring: MeshInstance3D
 var _atmosphere: MeshInstance3D
 ## Translucent cloud layer, above the surface and inside/around the atmosphere.
 var _clouds: MeshInstance3D
+## The billboard face rocks already wear (see [method Whimsy.attach_billboard_face]);
+## null when whimsy is off. Stars skip this — they get [method Whimsy.make_sun_face]
+## from whoever builds them, since [Planet] only ever sees planets and moons (see
+## [method SolarSystemGenerator._make_planet_node]'s doc).
+var _face: Node3D = null
 
 # What the current noise layers were built from. Assigning a Noise makes the
 # generator regenerate, and a freshly constructed FastNoiseLite never compares
@@ -84,6 +105,35 @@ static func swap_all_atmosphere_shaders(use_safe: bool) -> void:
 				mat.shader = shader
 
 
+## Which surface shader technique to use. Set from the debug menu ("AltSurface")
+## and the flight-test planet-look picker — see [member Session.planet_surface_alt].
+static var surface_shader_path := SURFACE_SHADER_PATH
+
+## Swap the surface shader technique on ALL existing planets — same group-walk
+## pattern as [method swap_all_atmosphere_shaders]. [method _write_surface_params]
+## sets the same uniform set on either shader (see [constant
+## SURFACE_SHADER_ALT_PATH]'s own note), so no other change is needed.
+static func swap_all_surface_shaders(use_alt: bool) -> void:
+	set_surface_style(1 if use_alt else 0)
+
+
+## Switch every planet (and the ones built from now on) to technique
+## [param style], an index into [constant SURFACE_STYLES]. A technique whose
+## shader file has been removed falls back to the painted one.
+static func set_surface_style(style: int) -> void:
+	style = clampi(style, 0, SURFACE_STYLES.size() - 1)
+	var path: String = SURFACE_STYLES[style]["path"]
+	if not ResourceLoader.exists(path):
+		path = SURFACE_SHADER_PATH
+	surface_shader_path = path
+	var shader := load(surface_shader_path) as Shader
+	for node in Engine.get_main_loop().get_nodes_in_group("planets"):
+		if node is Planet and node._body != null:
+			var mat := node._body.material_override as ShaderMaterial
+			if mat != null:
+				mat.shader = shader
+
+
 ## Bind a [PlanetData] and build the meshes. Safe to call again — tears
 ## down the previous build first.
 func configure(new_data: PlanetData) -> void:
@@ -104,6 +154,7 @@ func configure(new_data: PlanetData) -> void:
 	# default) this is a no-op, so an authored planet keeps exactly the colours
 	# the editor gave it.
 	apply_palette()
+	_build_face()
 
 
 ## Pull this planet's colours toward the active palette's planet roles, keeping
@@ -276,7 +327,7 @@ func _build_body() -> void:
 	_apply_noise(_body)
 
 	var mat := ShaderMaterial.new()
-	mat.shader = load(SURFACE_SHADER_PATH) as Shader
+	mat.shader = load(surface_shader_path) as Shader
 	_write_surface_params(mat)
 	_body.material_override = mat
 	_body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -394,7 +445,7 @@ func _process(delta: float) -> void:
 
 
 func _teardown() -> void:
-	for child: Node in [_body, _ring, _atmosphere, _clouds]:
+	for child: Node in [_body, _ring, _atmosphere, _clouds, _face]:
 		if child != null:
 			# Removed before freeing so the rebuild can reuse the names. A
 			# freed-next-frame node is still a child right now, and add_child
@@ -405,7 +456,49 @@ func _teardown() -> void:
 	_ring = null
 	_atmosphere = null
 	_clouds = null
+	_face = null
 	_noise_signature = ""
+
+
+## A face on the globe, same idea as the ones scattered rocks already wear —
+## see [member _face]'s doc for why stars never reach this. [method
+## configure] calls this on every (re)build, guarded like the rest of that
+## pipeline so a bare preview with no data placed yet just has nothing to draw.
+func _build_face() -> void:
+	if data == null:
+		return
+	_face = Whimsy.attach_billboard_face(self, data.planet_radius * 0.42, "happy")
+
+
+## Show [param expression] for a beat, same contract as [method
+## FaceSticker.react] — a no-op when whimsy found nowhere to put a face (or
+## is off). Called on a weapon hit that didn't finish the planet off.
+func react_face(expression: String, hold := 0.8) -> void:
+	if _face != null and is_instance_valid(_face):
+		_face.react(expression, hold)
+
+
+## Give the face to the caller instead of letting it go down with this node —
+## for planet destruction, which hides the whole planet in the same tick it
+## detonates (see [member _face]'s doc on the ship-debris equivalent). Global
+## position is preserved so the caller can re-parent it elsewhere and it does
+## not visibly jump; returns null when there was never a face to give.
+func detach_face() -> Node3D:
+	if _face == null or not is_instance_valid(_face):
+		return null
+	var face := _face
+	remove_child(face)
+	_face = null
+	return face
+
+
+## Freeze the face on [param expression] for good — the beat right before
+## whoever is destroying this planet hides the whole node, same "wear the
+## last look" contract ship death uses ([code]_face.freeze("dizzy")[/code] in
+## both [method AiShip._destroy] and [method FlightRoot.game_over]).
+func freeze_face(expression: String) -> void:
+	if _face != null and is_instance_valid(_face):
+		_face.freeze(expression)
 
 
 # --- Terrain --------------------------------------------------------------

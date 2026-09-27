@@ -101,7 +101,7 @@ static func apply_palette(mat: ShaderMaterial, design: ShipDesign, overrides: Di
 		return
 	for channel in ShipDesign.CHANNELS:
 		var color: Color = overrides.get(channel, design.get_color(channel))
-		mat.set_shader_parameter(channel + "_color", Palette.get_sat_lifted_color(color))
+		mat.set_shader_parameter(channel + "_color", paint_value(Palette.get_sat_lifted_color(color)))
 	var params := design.material_params()
 	mat.set_shader_parameter("roughness_amount", float(params.get("roughness", 0.88)))
 	mat.set_shader_parameter("metallic_amount", float(params.get("metallic", 0.0)))
@@ -126,6 +126,23 @@ static func apply_palette(mat: ShaderMaterial, design: ShipDesign, overrides: Di
 	mat.set_shader_parameter("ao_strength", 0.24 if high_contrast else 0.32)
 	mat.set_shader_parameter("solidity", 0.80 if high_contrast else 0.72)
 	apply_style_dials(mat)
+
+
+## Brightest paint value a hull is given. A neon faction colour at full value
+## has nowhere left to go when the sun hits it -- lit and shaded faces both clip
+## to the same flat sheet. Toy renders keep paint around three-quarter value and
+## let the light supply the sparkle; hue and saturation are left exactly as
+## chosen.
+const PAINT_MAX_VALUE := 0.8
+
+
+## [param color] with its HSV value capped at [constant PAINT_MAX_VALUE].
+static func paint_value(color: Color) -> Color:
+	if color.v <= PAINT_MAX_VALUE:
+		return color
+	var out := color
+	out.v = PAINT_MAX_VALUE
+	return out
 
 
 ## Pushes the *shading* (live-apply) style dials onto any part-shader material —

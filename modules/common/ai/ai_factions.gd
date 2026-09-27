@@ -87,6 +87,71 @@ enum Archetype {
 }
 
 
+## Political factions (see factions.md): the powers ships trade and fight
+## under. Colour is the whole point of this layer — [enum Archetype] already
+## says WHAT a ship does (patrol, pirate, convoy, ...); this says WHOSE colours
+## it flies, so a patrol reads as police at a glance and which power's police
+## it is at a second glance. [constant NONE] is not a fifth faction: it marks
+## an archetype that sits outside the conflict entirely (wildlife, anomalies,
+## automation, solo drifters) and keeps its own varied hull colours instead of
+## claiming a side — see [method pick_political_faction].
+enum PoliticalFaction { RED, BLUE, YELLOW, PURPLE, NONE }
+
+## Strong, maximally-distinct hues: the ask is spotting a faction across a busy
+## HUD at a glance, not a tasteful palette. Capped to [constant
+## ShipMaterials.PAINT_MAX_VALUE] like any other hull paint when it is applied.
+const FACTION_COLORS := {
+	PoliticalFaction.RED: Color("e0263c"),
+	PoliticalFaction.BLUE: Color("1f5fdb"),
+	PoliticalFaction.YELLOW: Color("f2c200"),
+	PoliticalFaction.PURPLE: Color("9b30d9"),
+}
+
+## Archetypes that ARE the red faction — piracy, not merely a role red ships
+## sometimes fill. factions.md: "Red is the exception: it is only pirates."
+const _PIRATE_ARCHETYPES := [
+	Archetype.WOLF_PIRATE, Archetype.PIRATE_FLEET, Archetype.AMBUSHER, Archetype.SMUGGLER,
+]
+
+## Archetypes with no political affiliation: wildlife, anomalies, unmanned
+## automation and solo drifters that were never party to the four factions'
+## conflict, so painting them red/blue/yellow/purple would claim a side that
+## does not apply to them.
+const _NEUTRAL_ARCHETYPES := [
+	Archetype.BASIC_SWARM, Archetype.ELDRITCH_SWARM, Archetype.ALIEN_DRONE,
+	Archetype.DERELICT_PATROL, Archetype.SCAVENGERS, Archetype.CULT_ORBITAL,
+	Archetype.DEFENSE_GRID, Archetype.MIGRATION_FLEET, Archetype.EXPERIMENT_DRONE,
+	Archetype.ANOMALY, Archetype.LONE_WOLF,
+]
+
+const _CIVILIZED_FACTIONS := [
+	PoliticalFaction.BLUE, PoliticalFaction.YELLOW, PoliticalFaction.PURPLE,
+]
+
+
+## Which political faction a freshly spawned GROUP of [param archetype] flies
+## under. Called once per group from [method create] (every ship in the group
+## shares the one [ArchetypeData] instance this returns), so a whole patrol or
+## wolfpack reads as one faction rather than a mixed bag, not a colour rolled
+## per ship. Pirates are always red; wildlife/anomaly archetypes take no side;
+## everything else — police, military, traders, escorts, bounty hunters, and
+## so on — rolls one of the three civilized colours.
+static func pick_political_faction(archetype: int) -> int:
+	if _PIRATE_ARCHETYPES.has(archetype):
+		return PoliticalFaction.RED
+	if _NEUTRAL_ARCHETYPES.has(archetype):
+		return PoliticalFaction.NONE
+	return _CIVILIZED_FACTIONS[randi() % _CIVILIZED_FACTIONS.size()]
+
+
+## The hull paint colour for [param faction]. [constant PoliticalFaction.NONE]
+## has no colour of its own — callers check for it before painting rather than
+## reading a fallback here, so a neutral archetype's own varied design colours
+## are left alone instead of being silently overwritten with something.
+static func faction_color(faction: int) -> Color:
+	return FACTION_COLORS.get(faction, Color.WHITE)
+
+
 ## Behaviour profiles for [method custom] — what the HUD's spawn panel lets the
 ## player pick for a manually-spawned group.
 enum Behavior {
@@ -141,14 +206,27 @@ class ArchetypeData:
 	## rotate fully onto it instead of chasing — a turret or sniper reads as
 	## deadly because it stops moving and aims.
 	var hold_to_aim := false
+	## Which of the four political colours (see [enum PoliticalFaction]) every
+	## ship spawned with this [ArchetypeData] flies. Set once, for the whole
+	## group, by [method create].
+	var political_faction: int = PoliticalFaction.NONE
+	## Popcorn: a weak, mindless-swarm archetype gets a low flat HP and breaks
+	## apart on any ramming hit (see [method AiShip.set_group_context] and
+	## [method FlightModel._apply_collision_damage]) -- momentum-based ramming
+	## needs something that actually pops instead of a real ship's hit points.
+	var popcorn := false
 
 
-## Returns a new [ArchetypeData] with defaults for the given archetype.
-## Call this once per ship at spawn time.
+## Returns a new [ArchetypeData] with defaults for the given archetype,
+## including its political faction (see [method pick_political_faction]).
+## Call this once per spawned group — every ship in the group takes the same
+## [ArchetypeData] instance, which is what makes them share one faction colour
+## instead of each rolling their own.
 static func create(archetype: int) -> ArchetypeData:
 	var data := ArchetypeData.new()
 	data.archetype = archetype
 	_apply_defaults(data)
+	data.political_faction = pick_political_faction(archetype)
 	return data
 
 
@@ -218,6 +296,7 @@ static func custom(behavior: int, formation: int, count: int) -> ArchetypeData:
 			d.default_response = AiGroupBehaviour.ThreatResponse.ATTACK
 			d.speed_mult = 1.2
 			d.can_boost = false
+			d.popcorn = true
 			d.tags = ["swarm"]
 		Behavior.FLEE:
 			d.aggression = 0.05
@@ -288,6 +367,7 @@ static func _apply_defaults(d: ArchetypeData) -> void:
 			d.default_response = AiGroupBehaviour.ThreatResponse.FLEE
 			d.speed_mult = 0.8
 			d.can_boost = false
+			d.popcorn = true
 			d.tags = ["mindless", "flocking"]
 
 		Archetype.MILITARY_SQUAD:
@@ -379,6 +459,7 @@ static func _apply_defaults(d: ArchetypeData) -> void:
 			d.default_response = AiGroupBehaviour.ThreatResponse.ATTACK
 			d.speed_mult = 1.2
 			d.can_boost = true
+			d.popcorn = true
 			d.tags = ["eldritch", "alien", "swarm"]
 
 		Archetype.ALIEN_DRONE:

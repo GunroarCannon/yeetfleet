@@ -69,6 +69,10 @@ var angular_damping := 0.5
 ## the fallback a profile author starts from). In play, the profile's per-layer
 ## restitution is authoritative — see [method PhysProfile.restitution_for_pair].
 var restitution := 0.4
+## When >= 0, this body bounces at least this much whatever the profile says
+## (see [method ImpulseSolver._restitution]). A slingshot-launched ship sets it
+## so it ping-pongs off what it hits; -1 leaves the profile in charge.
+var restitution_override := -1.0
 
 var layer := Layer.SHIP
 ## Which layers this body collides with, as a bitmask over [enum Layer]. 0xFF
@@ -131,8 +135,17 @@ func inv_mass() -> float:
 func position() -> Vector3:
 	if node != null:
 		return node.global_position if node.is_inside_tree() else node.position
-	push_error("PhysBody has no node and no standalone position — attach a Node3D")
+	# [PhysWorld.step] prunes a body in this state before it ever reaches here
+	# (see [method PhysWorld._prune_nodeless_bodies]), so reaching this branch
+	# means something called position() directly on a body outside a step —
+	# logged once rather than every call so it stays discoverable without
+	# becoming its own spam source.
+	if not _warned_no_node:
+		_warned_no_node = true
+		push_warning("PhysBody.position(): no node — mass=%s radius=%s kinematic=%s driven=%s layer=%s faction=%s" % [mass, radius, kinematic, driven, layer, faction_id])
 	return Vector3.ZERO
+
+var _warned_no_node := false
 
 
 func set_position(p: Vector3) -> void:
