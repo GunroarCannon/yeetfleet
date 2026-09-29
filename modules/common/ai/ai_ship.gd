@@ -16,6 +16,17 @@ extends Node3D
 
 ## Emitted when this ship is destroyed, so the spawner can replace it.
 signal destroyed(ship: AiShip)
+## A comic mark over the ship: "!" (it noticed an enemy, or it is going
+## down) or "?" (someone it didn't count as an enemy shot it). Rate-limited
+## per ship and across all ships — see [method _mark].
+signal marked(ship: AiShip, mark: String)
+
+## The player's power-up boost on their guns and rams, × (1 = none). Written
+## by the flight root while a boost runs; read in [method take_damage].
+static var player_power_boost := 1.0
+## The garage's GUNS upgrade on the player's ship (1.0 = none). Separate from
+## [member player_power_boost], which a power-up resets to 1.0 when it ends.
+static var player_upgrade_power := 1.0
 
 ## Maximum hit points. Set from the design's hull stat.
 var max_hp := 200.0
@@ -168,10 +179,27 @@ var pilot_host: Node = null
 ## Shots this ship may still fire at the player from out of their view — see
 ## [method fire_gate]. Refilled only while it is out of view.
 var _offview_tokens := 2.0
+## Game time since this ship last thought (see [method AiSpawner._think]).
+var _think_lag := 0.0
 ## What [method _update_combat] is shooting at this tick.
 var _combat_target: Node3D = null
 ## A ship this close to the player counts as having tangled with them.
 const INTERACT_RANGE := 180.0
+
+# --- Shield veil, EMP freeze, comic marks ---
+
+## What the shield veil can still soak, and its full strength (0 = no veil).
+var shield_hp := 0.0
+var shield_max := 0.0
+var _veil: ShieldBubble = null
+## Real time (ms) an EMP freeze ends.
+var _frozen_until_ms := 0
+## The last enemy this ship noticed (its "!"), and when it may mark again.
+var _noticed: Node3D = null
+var _next_mark_ms := 0
+## No two marks anywhere closer together than this, ms.
+const MARK_GAP_MS := 700
+static var _next_any_mark_ms := 0
 
 
 func _init() -> void:
@@ -281,6 +309,7 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 	max_hp = maxf(_view.resolution.stats.get_stat("hull_hp"), 50.0) * JuiceSettings.hull_hp_mult \
 		* JuiceSettings.enemy_hp_mult
 	hp = max_hp
+	_roll_shield()
 
 	# Create and initialise the behaviour.
 	behaviour = AiBehaviour.new()
@@ -437,6 +466,9 @@ func tick_ai(delta: float) -> void:
 	# Update detection — pick the nearest enemy (a ship on an aggressive team, or
 	# the player). In the arena ships fight each other; in space (no teams set)
 	# this falls back to hunting the player as before.
+	if is_frozen():
+		_tick_frozen(delta)
+		return
 	var target := _find_enemy()
 	current_target = target
 	if systems != null:
@@ -458,6 +490,10 @@ func tick_ai(delta: float) -> void:
 	if target == player_ref and target != null:
 		if is_aggroed_to_player() or global_position.distance_to(target_pos) < INTERACT_RANGE:
 			mark_interacted()
+	# First sight of a new enemy: a "!".
+	if target_visible and target != _noticed:
+		_noticed = target
+		_mark("!")
 
 	behaviour.player_position = target_pos
 	behaviour.player_visible = target_visible
@@ -481,7 +517,7 @@ func tick_ai(delta: float) -> void:
 	var cmd: Dictionary = behaviour.update(
 		delta, global_position, global_transform.basis, model.top_speed
 	)
-	if not _sling_tick(delta, target, target_velocity):
+	if not _yeet_tick(delta, target, target_velocity) and not _sling_tick(delta, target, target_velocity):
 		model.command.throttle = float(cmd.get("throttle", 0.0))
 		model.command.yaw = float(cmd.get("yaw", 0.0))
 		model.command.pitch = float(cmd.get("pitch", 0.0))
@@ -499,6 +535,50 @@ func tick_ai(delta: float) -> void:
 
 	# Combat: fire at the chosen enemy if in range and roughly aligned.
 	_update_combat(delta, target)
+
+
+# --- Yeet combat ---
+
+## This ship's dash attack ([YeetDash]), made the first time it is allowed one.
+var _yeet: YeetDash = null
+## The yeet wind-up's glow and aim line (its own, so the gun telegraph hiding
+## itself every tick it isn't firing never blinks it).
+var _yeet_tele: AiTelegraph = null
+
+
+## [member JuiceSettings.yeet_combat]: in the player's view, dash at them now
+## and then. Returns true while the dash owns the flight model's command.
+func _yeet_tick(delta: float, target: Node3D, target_velocity: Vector3) -> bool:
+	if not JuiceSettings.yeet_combat:
+		if _yeet != null:
+			_yeet.release()
+		return false
+	if _yeet == null:
+		_yeet = YeetDash.new(self)
+	return _yeet.tick(delta, target, target_velocity)
+
+
+## Drop any yeet in progress (the player is taking this ship over).
+func stop_yeet() -> void:
+	if _yeet != null:
+		_yeet.release()
+
+
+## Draw the yeet wind-up toward [param aim_at], [param t] 0..1 through it
+## (below 0: hide it).
+func show_yeet_charge(aim_at: Vector3, t: float) -> void:
+	if t < 0.0:
+		if _yeet_tele != null:
+			_yeet_tele.hide_charge()
+		return
+	if _yeet_tele == null:
+		_yeet_tele = AiTelegraph.new()
+		_yeet_tele.name = "YeetTelegraph"
+		add_child(_yeet_tele)
+	var r := 4.0
+	if model != null and model.phys_body() != null:
+		r = model.phys_body().radius
+	_yeet_tele.show_charge(global_position - global_transform.basis.z * r * 0.9, aim_at, r * 1.3, t)
 
 
 # --- Slingshot fighting ---
@@ -690,6 +770,8 @@ func _tick_offview(delta: float) -> void:
 ## firing frame spends one. Ships fighting ships, a ship the player is
 ## flying, and everything with the cheat off are never held.
 func fire_gate() -> bool:
+	if is_frozen():
+		return false
 	if not JuiceSettings.cheat_offscreen_mercy or pilot_host != null:
 		return true
 	var t := _combat_target
@@ -900,8 +982,11 @@ func take_damage(amount: float, from_player := false, source: Object = null) -> 
 		amount = pilot_host.pilot_damage(self, amount, source)
 		if amount <= 0.0:
 			return
+	if _hit_by_non_enemy(from_player, source):
+		_mark("?")
 	if from_player:
-		amount *= JuiceSettings.player_damage_dealt_mult * JuiceSettings.player_power
+		amount *= JuiceSettings.player_damage_dealt_mult * JuiceSettings.player_power * player_power_boost \
+				* player_upgrade_power
 		if JuiceSettings.one_hit_kills:
 			amount = maxf(amount, hp + 1.0)
 		_last_player_hit_ms = Time.get_ticks_msec()
@@ -910,6 +995,9 @@ func take_damage(amount: float, from_player := false, source: Object = null) -> 
 				and amount < hp and _last_player_hit_ms >= _next_hit_freeze_ms:
 			_next_hit_freeze_ms = _last_player_hit_ms + 250
 			Juice.freeze(JuiceSettings.freeze_enemy_hit_ms / 1000.0, JuiceSettings.freeze_depth)
+	amount = _soak_shield(amount)
+	if amount <= 0.0:
+		return
 	hp -= amount
 	_emote("ouch", 0.9)
 
@@ -1049,9 +1137,17 @@ func _destroy() -> void:
 	_alive = false
 	locked_enemy = null
 	_stop_telegraph()
+	if _yeet != null:
+		_yeet.release()
 	killed_by_player = Time.get_ticks_msec() - _last_player_hit_ms <= PLAYER_KILL_WINDOW_MS
-	# A last "seeing stars" reaction before the parts scatter.
+	# A last "seeing stars" reaction before the parts scatter, and now and
+	# then a "!" as it goes.
 	_emote("dizzy", 1.2)
+	if _rng.randf() < 0.5:
+		_mark("!", true)
+	if _veil != null and is_instance_valid(_veil):
+		_veil.pop_out()
+	_veil = null
 	systems.set_firing(false)
 	systems.set_throttle(0.0)
 	systems.set_boost(false)
@@ -1059,6 +1155,15 @@ func _destroy() -> void:
 	if model != null:
 		model.clear_phys_world()
 
+	# A baked hull (Session.mesh_baking_enabled) draws the whole ship as one
+	# mesh with every part's own mesh hidden: scattering the parts then threw
+	# invisible debris while the intact baked hull stayed put — the kill cam
+	# swooped onto a ship that looked alive, which later just vanished. Back
+	# to the parts first, so they are what flies apart.
+	if _view != null and _view.baked_mesh_instance != null and is_instance_valid(_view.baked_mesh_instance):
+		_view.enable_baked_mesh(false)
+		_view.baked_mesh_instance.queue_free()
+		_view.baked_mesh_instance = null
 	# Scatter all remaining parts into tumbling debris
 	if _view != null and not _view.part_nodes.is_empty():
 		var world_parent := get_parent()
@@ -1304,6 +1409,8 @@ func _build_random_design(library: PartLibrary) -> ShipDesign:
 
 ## Clean up and free this ship's resources.
 func teardown() -> void:
+	if _yeet != null and model != null:
+		_yeet.release()
 	_alive = false
 	set_physics_process(false)
 	set_process(false)
@@ -1326,3 +1433,116 @@ func _get_asteroid_data() -> Array:
 			return root.space.get_meta("asteroid_data") as Array
 		root = root.get_parent()
 	return []
+
+
+# --- Shield veil ---------------------------------------------------------------
+
+## Some armed ships spawn with a veil ([member JuiceSettings.enemy_shields]).
+func _roll_shield() -> void:
+	if not JuiceSettings.enemy_shields or is_satellite or _view == null:
+		return
+	if _rng.randf() >= JuiceSettings.enemy_shield_chance:
+		return
+	give_shield(max_hp * JuiceSettings.enemy_shield_hp)
+
+
+## Put a veil of [param strength] HP round this ship (replacing any).
+func give_shield(strength: float) -> void:
+	shield_max = maxf(strength, 1.0)
+	shield_hp = shield_max
+	if _veil != null and is_instance_valid(_veil):
+		_veil.queue_free()
+	if _hull_holder == null or _view == null:
+		return
+	var r := maxf(_view.aabb.size.length() * 0.5, 2.0) * 1.08
+	_veil = ShieldBubble.attach(_hull_holder, r)
+	_veil.position = _view.aabb.get_center()
+
+
+## The veil soaks what it can of [param amount]; returns what gets through.
+func _soak_shield(amount: float) -> float:
+	if shield_hp <= 0.0:
+		return amount
+	var soaked := minf(shield_hp, amount)
+	shield_hp -= soaked
+	if _veil != null and is_instance_valid(_veil):
+		_veil.hit_flash()
+	if shield_hp <= 0.0:
+		shield_hp = 0.0
+		if _veil != null and is_instance_valid(_veil):
+			_veil.pop_out()
+			var host := get_parent()
+			if host != null and host.is_inside_tree():
+				AddonVfx.electric(host, global_position, clampf(scale_multiplier, 1.0, 4.0), false)
+		_veil = null
+	return amount - soaked
+
+
+# --- EMP freeze -------------------------------------------------------------------
+
+## Freeze this ship for [param seconds]: no thinking, no firing, it drifts to
+## a stop. A later freeze only ever extends it.
+func emp_freeze(seconds: float) -> void:
+	if not _alive:
+		return
+	_frozen_until_ms = maxi(_frozen_until_ms, Time.get_ticks_msec() + int(seconds * 1000.0))
+	_stop_telegraph()
+	if _yeet != null:
+		_yeet.release()
+	if systems != null:
+		systems.set_firing(false)
+	var host := get_parent()
+	if host != null and host.is_inside_tree():
+		AddonVfx.electric(host, global_position, clampf(scale_multiplier, 1.0, 4.0), false)
+	_emote("dizzy", seconds)
+
+
+func is_frozen() -> bool:
+	return Time.get_ticks_msec() < _frozen_until_ms
+
+
+func _tick_frozen(delta: float) -> void:
+	locked_enemy = null
+	if systems != null:
+		systems.set_firing(false)
+	if model != null:
+		model.command.throttle = 0.0
+		model.command.yaw = 0.0
+		model.command.pitch = 0.0
+		model.command.roll = 0.0
+		model.command.boost = false
+		model.velocity = model.velocity * exp(-2.5 * delta)
+
+
+# --- Comic marks ------------------------------------------------------------------
+
+## Pop [param mark] ("!" / "?") over this ship, if the dial allows, it is in
+## the player's view, and neither this ship's own cooldown ([member
+## JuiceSettings.enemy_mark_cooldown]) nor the global gap has it waiting.
+## [param dying] skips the per-ship cooldown (it is its last chance).
+func _mark(mark: String, dying := false) -> void:
+	if not JuiceSettings.enemy_marks or is_satellite or pilot_host != null:
+		return
+	if not is_inside_tree() or not in_player_view():
+		return
+	var now := Time.get_ticks_msec()
+	if now < _next_any_mark_ms or (now < _next_mark_ms and not dying):
+		return
+	_next_any_mark_ms = now + MARK_GAP_MS
+	_next_mark_ms = now + int(JuiceSettings.enemy_mark_cooldown * 1000.0)
+	marked.emit(self, mark)
+
+
+## True when this hit came from someone this ship did not count as an enemy:
+## the player while it wasn't hostile to them, or a ship not on a team it
+## is at war with.
+func _hit_by_non_enemy(from_player: bool, source: Object) -> bool:
+	if from_player:
+		return attitude_to_player() != Attitude.HOSTILE
+	var n := source as Node
+	while n != null and not n is AiShip:
+		n = n.get_parent()
+	var attacker := n as AiShip
+	if attacker == null or attacker == self:
+		return false
+	return not (attacker.team_id != 0 and aggressive_to.has(attacker.team_id))

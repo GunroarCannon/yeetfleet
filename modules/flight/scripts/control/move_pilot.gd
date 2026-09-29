@@ -246,6 +246,46 @@ func magnet_bend(dir: Vector3, speed: float, delta: float) -> Vector3:
 	return out
 
 
+# --- Chain magnet ---
+# Right after a kill (while [ComboChain] says the chain is live) the flight
+# path is pulled toward the next enemy, so ramming or shooting one ship flows
+# into the next. It fades as the chain window runs out, only looks at ships
+# roughly ahead (a swipe away still gets away) and never at friends.
+
+## Widest the chain magnet looks off the flight direction, degrees.
+const CHAIN_CONE_DEG := 100.0
+## The enemy the chain magnet is pulling toward this tick, or null.
+var chain_target: AiShip = null
+
+
+## [param dir] (the unit flight direction) turned this tick toward the next
+## enemy while a chain is live, at up to 20–220°/s by [member
+## JuiceSettings.chain_magnet], fading with the window. Sets [member chain_target].
+func chain_bend(dir: Vector3, speed: float, delta: float) -> Vector3:
+	chain_target = null
+	var chain := root.combo
+	if model == null or dir == Vector3.ZERO or JuiceSettings.chain_magnet <= 0.0 or not chain.is_live():
+		return dir
+	var ships: Array = []
+	for s in root.live_enemies():
+		if s != root.controlled_ai and s.model != model:
+			ships.append(s)
+	chain_target = TargetPriority.best(ships, model.global_position, dir, cos(deg_to_rad(CHAIN_CONE_DEG)), MAGNET_RANGE * 1.5)
+	if chain_target == null:
+		return dir
+	var to := intercept_point(chain_target, speed) - model.global_position
+	if to.length() < 1.0:
+		return dir
+	var want := to.normalized()
+	var rate := deg_to_rad(lerpf(20.0, 220.0, JuiceSettings.chain_magnet)) * chain.fraction_left()
+	var ang := dir.angle_to(want)
+	var out := want
+	if ang > rate * delta and ang > 1e-4:
+		out = dir.slerp(want, rate * delta / ang).normalized()
+	pull_into_path(chain_target, out, delta)
+	return out
+
+
 ## Drift [param ship] toward the closest point ahead on the line the player
 ## flies along [param dir] ([method AiShip.drift_toward]).
 func pull_into_path(ship: AiShip, dir: Vector3, delta: float) -> void:

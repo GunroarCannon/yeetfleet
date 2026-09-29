@@ -42,10 +42,15 @@ var _root: FlightRoot
 var _stick: VirtualStick
 var _throttle: ThrottleLever
 var _overlay: Control
+var _hit_words: HitWords
+## Persona-style shouts from the player's ship ([PlayerCallouts]).
+var _callouts: PlayerCallouts
 var _menu: FlightMenu
 var _fire_button: Button
 var _boost_button: Button
 var _weapon_button: Button
+## A timed level's clock, under the weapon button.
+var _timer_label: Label
 var _assist_chip: Button
 var _view_chip: Button
 var _speed_label: Label
@@ -128,6 +133,16 @@ func _build() -> void:
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.draw.connect(_draw_instruments)
 	add_child(_overlay)
+	# Comic shouts pinned to the world, over the instruments, in both layouts.
+	_hit_words = HitWords.new()
+	_hit_words.setup(func() -> Camera3D: return _root.camera_node() if _root != null else null)
+	add_child(_hit_words)
+	_callouts = PlayerCallouts.new()
+	_callouts.setup(
+		func() -> Camera3D: return _root.camera_node() if _root != null else null,
+		func() -> Vector3: return _root.active_ship_node().global_position 			if _root != null and _root.active_ship_node() != null else Vector3.INF
+	)
+	add_child(_callouts)
 
 	_build_top_bar()
 	_build_palette_drawer()
@@ -197,6 +212,15 @@ func _build_debug_panel() -> void:
 	_add_debug_button("🕹 Next movement profile (U)", func() -> void: _root.cycle_move_profile())
 	_add_debug_button("📱 Mobile HUD (F1 back)", func() -> void: set_mobile_layout(true))
 	_add_debug_button("⚡ Performance", func() -> void: toggle_perf_panel())
+	_add_setting_check("🎯 Auto-shoot while launched (slingshot)", JuiceSettings.sling_auto_fire,
+		func(on: bool) -> void: JuiceSettings.set_effect("sling_auto_fire", on))
+	_add_setting_check("🎯 Tap auto-aims (slingshot)", JuiceSettings.sling_tap_auto_aim,
+		func(on: bool) -> void: JuiceSettings.set_effect("sling_tap_auto_aim", on))
+	_add_setting_check("🔮 Power-ups from kills", JuiceSettings.power_ups,
+		func(on: bool) -> void: JuiceSettings.set_effect("power_ups", on))
+	if GameDefaults.can_bake():
+		_add_setting_check("💾 Settings save into the game's defaults", GameDefaults.auto_bake, _set_auto_bake)
+	_add_debug_button("🎓 Tutorial", func() -> void: _root.start_tutorial())
 	_add_debug_button("🎨 Palette", func() -> void: toggle_palette_menu())
 	if GameDefaults.can_bake():
 		_add_debug_button("💾 Save as game defaults", _bake_game_defaults)
@@ -248,6 +272,26 @@ func _add_debug_button(label: String, action: Callable) -> void:
 	b.add_theme_font_size_override("font_size", 10)
 	b.pressed.connect(action)
 	_debug_panel.add_child(b)
+
+
+## [member GameDefaults.auto_bake], remembered in the session prefs.
+func _set_auto_bake(on: bool) -> void:
+	GameDefaults.auto_bake = on
+	Session.prefs["auto_bake"] = on
+	Session.save_to_disk()
+
+
+## A checkbox in the debug column bound straight to a saved setting: it
+## shows [param value] and calls [param on_toggle] with each change. Unlike
+## [method _add_debug_toggle] the setting's own class persists it.
+func _add_setting_check(label: String, value: bool, on_toggle: Callable) -> void:
+	var cb := CheckBox.new()
+	cb.text = label
+	cb.button_pressed = value
+	cb.focus_mode = Control.FOCUS_NONE
+	cb.add_theme_font_size_override("font_size", 10)
+	cb.toggled.connect(on_toggle)
+	_debug_panel.add_child(cb)
 
 
 func _add_debug_toggle(label: String, default: bool) -> void:
@@ -816,7 +860,7 @@ func toggle_scenario_panel() -> void:
 	if _scenario_panel == null:
 		_scenario_panel = ScenarioPanel.new()
 		_scenario_panel.name = "ScenarioPanel"
-		_scenario_panel.setup(_root.scenarios)
+		_scenario_panel.setup(_root.scenarios, _root)
 		_center_panel(_scenario_panel)
 	_scenario_panel.visible = not _scenario_panel.visible
 
@@ -870,6 +914,43 @@ func mobile_layout_active() -> bool:
 	return _mobile_layout
 
 
+## Show the mobile HUD's speed as a meter up to [param max_mps] (0 = back to
+## the big number). Kept for a mobile HUD made later.
+var _speed_meter_max := 0.0
+
+
+func set_speed_meter(max_mps: float) -> void:
+	_speed_meter_max = maxf(max_mps, 0.0)
+	if _mobile_hud != null:
+		_mobile_hud.speed_meter_max = _speed_meter_max
+
+
+## Pop a comic shout at [param world_pos] (see [HitWords]).
+func hit_word(word: String, world_pos: Vector3, col: Color, scale := 1.0) -> void:
+	if _hit_words != null:
+		_hit_words.pop(word, world_pos, col, scale)
+
+
+## Add a banner (the tutorial's) under the world shouts and callouts, so
+## those still read over it.
+func add_banner(c: Control) -> void:
+	add_child(c)
+	if _hit_words != null:
+		move_child(c, _hit_words.get_index())
+
+
+## A comic "!"/"?" over [param ship] (see [method HitWords.mark]).
+func mark_word(glyph: String, ship: Node3D, height: float, col: Color) -> void:
+	if _hit_words != null:
+		_hit_words.mark(glyph, ship, height, col)
+
+
+## A Persona-style callout from the player's ship (see [PlayerCallouts]).
+func callout(text: String, col := Color("ff2a4a")) -> void:
+	if _callouts != null:
+		_callouts.say(text, col)
+
+
 ## The movement profile ([enum FlightRoot.MoveProfile]) the HUD is laid out for.
 var _move_profile := 0
 
@@ -912,16 +993,18 @@ func set_mobile_layout(on: bool) -> void:
 			_mobile_hud = MobileHud.new()
 			_mobile_hud.setup(_root)
 			_mobile_hud.set_move_profile(_move_profile)
+			_mobile_hud.speed_meter_max = _speed_meter_max
 			_mobile_hud.exit_requested.connect(func() -> void: set_mobile_layout(false))
 			_mobile_hud.scenario_requested.connect(toggle_scenario_panel)
 			add_child(_mobile_hud)
 			# Under the hint and pop-ups, over the drawn instruments.
 			move_child(_mobile_hud, _overlay.get_index() + 1)
 		_desktop_visible.clear()
-		var keep := [_overlay, _hint_label, _event_container, _game_over_modal, _mobile_hud]
+		var keep := [_overlay, _hit_words, _callouts, _hint_label, _event_container, _game_over_modal, _mobile_hud]
 		for c in get_children():
-			# The graffiti targets are drawn instruments too (added by the root).
-			if c is CanvasItem and not c in keep and not c is InteractionMarkers:
+			# The graffiti targets are drawn instruments too (added by the root),
+			# and the tutorial banner belongs to both layouts.
+			if c is CanvasItem and not c in keep and not c is InteractionMarkers and not c is FlightTutorial:
 				_desktop_visible[c] = (c as CanvasItem).visible
 				(c as CanvasItem).visible = false
 		_mobile_hud.visible = true
@@ -1520,6 +1603,15 @@ func _build_controls() -> void:
 			_root.cycle_weapon()
 	)
 	add_child(_weapon_button)
+	_timer_label = Label.new()
+	_timer_label.name = "LevelTimer"
+	_timer_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_timer_label.add_theme_font_override("font", GraffitiStyle.head_font())
+	_timer_label.add_theme_font_size_override("font_size", 30)
+	_timer_label.add_theme_color_override("font_outline_color", GraffitiStyle.INK)
+	_timer_label.add_theme_constant_override("outline_size", 7)
+	_timer_label.visible = false
+	add_child(_timer_label)
 
 	_layout_controls()
 	resized.connect(_layout_controls)
@@ -1609,6 +1701,21 @@ func _layout_controls() -> void:
 
 
 ## Update active weapon badge on HUD with name and color indicator.
+func _update_timer_label() -> void:
+	if _timer_label == null:
+		return
+	var left := _root.scenarios.time_left() if _root.scenarios != null else -1.0
+	_timer_label.visible = left >= 0.0 and _weapon_button != null and _weapon_button.is_visible_in_tree()
+	if not _timer_label.visible:
+		return
+	_timer_label.text = FlightScenarios.clock_text(left)
+	var col := GraffitiStyle.SUN
+	if left <= 10.0:
+		col = col.lerp(GraffitiStyle.HOT, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012))
+	_timer_label.add_theme_color_override("font_color", col)
+	_timer_label.position = _weapon_button.position + Vector2(0, _weapon_button.size.y + 4)
+
+
 func update_weapon_badge(weapon: Dictionary) -> void:
 	if _weapon_button == null:
 		return
@@ -2098,6 +2205,7 @@ func _fill_trails_popup(popup: FlightMenu.DraggablePopup) -> void:
 func _process(delta: float) -> void:
 	if _root == null or _root.model == null:
 		return
+	_update_timer_label()
 
 	# Update floating damage numbers
 	var live_numbers: Array[Dictionary] = []
@@ -2434,8 +2542,9 @@ func _draw_power_bars() -> void:
 		_overlay.draw_rect(
 			Rect2(x - 2.0, y - 2.0, w + 4.0, h + 4.0), Color(1.0, 0.15, 0.15, pulse * 0.8), false, 2.0
 		)
-	# SHIELD with ghost lag
-	_draw_ghost_bar(Rect2(x, y + gap + h, w, h), shield_frac, _shield_ghost, Color("00d4ff"), "SHIELD")
+	# SHIELD with ghost lag — only while there is one (see the power-up bubble).
+	if _root != null and _root.player_max_shield > 0.0:
+		_draw_ghost_bar(Rect2(x, y + gap + h, w, h), shield_frac, _shield_ghost, Color("00d4ff"), "SHIELD")
 	# CAP
 	_draw_bar(Rect2(x, y + (gap + h) * 2.0, w, h), _energy, BuilderTheme.accent(), "CAP")
 	# HEAT

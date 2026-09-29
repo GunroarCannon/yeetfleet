@@ -249,6 +249,20 @@ var _base_xform := Transform3D()
 var _kc_weight := 0.0
 ## Degrees per real second the kill cam circles the wreck.
 const KILL_CAM_ORBIT := 14.0
+## A slower kill cam (a planet's): swoop in and hold × this.
+var _kc_slow := 1.0
+## Level intro (see [method start_intro]): real seconds left and in total,
+## and the view the camera mode computed this frame (restored next frame so
+## the modes' own smoothing never sees the intro's offset).
+var _intro_left := 0.0
+var _intro_total := 0.0
+var _intro_base := Transform3D.IDENTITY
+## Most the kill cam advances in one frame, seconds. The frames right after a
+## kill are the likeliest to hitch (explosions, debris, a first-use shader
+## compile on a phone), and an uncapped step let one or two long frames eat the
+## whole swoop in: the camera seemed to cut straight to the wreck instead of
+## travelling there from the player. Capped, a hitch only slows the swoop.
+const KILL_CAM_MAX_STEP := 1.0 / 30.0
 
 ## The follow point: the hull's origin minus [member _knock_lag]. At a steady
 ## speed the lag is exactly zero and the camera is rigidly locked to the hull.
@@ -561,6 +575,12 @@ var follow_dir_rate := 2.0
 ## slingshot looks along its aim and its flight, so what the ship is about to
 ## hit is on screen. Kept even when swung round (the ship slides off centre).
 var look_ahead := Vector3.ZERO
+## Optional window the follow views' whole distance stays inside, × the
+## normal chase distance (x: closest, y: furthest; ZERO = no limits). Pinch,
+## the profile's pull-out and the hit/dash zoom all multiply together, and the
+## swipe profile sets this so none of them can take the camera too far out or
+## right onto the hull.
+var distance_limits := Vector2.ZERO
 
 var _user_yaw := 0.0
 var _user_pitch := 0.0
@@ -582,6 +602,11 @@ func pinch_by(factor: float) -> void:
 	if factor <= 0.0:
 		return
 	user_distance = clampf(user_distance / factor, USER_DISTANCE_MIN, USER_DISTANCE_MAX)
+	if distance_limits != Vector2.ZERO:
+		# Pinching past the window would just bank up distance the limits then
+		# hide, and the way back would feel dead.
+		var pd := maxf(profile_distance, 0.05)
+		user_distance = clampf(user_distance, distance_limits.x / pd, distance_limits.y / pd)
 
 
 ## Back to the normal framing (eased).
@@ -592,6 +617,7 @@ func reset_user_view() -> void:
 	profile_distance = 1.0
 	follow_dir = Callable()
 	look_ahead = Vector3.ZERO
+	distance_limits = Vector2.ZERO
 
 
 func _update_user_view(dt: float) -> void:
@@ -620,6 +646,20 @@ func _user_swing() -> float:
 
 func _user_scale() -> float:
 	return _user_distance * _profile_distance
+
+
+## The factor that brings the view's whole distance (gesture × profile ×
+## [param zoom]) back inside [member distance_limits]; 1 with no limits. A
+## wider FOV (speed stretch, zoom) shrinks the ship on screen just like
+## distance does, so it counts too: the limit is on how small (or big) the
+## ship looks, not only on metres. The inputs are all eased, so the clamped
+## distance moves smoothly too.
+func _limit_factor(zoom: float) -> float:
+	if distance_limits == Vector2.ZERO:
+		return 1.0
+	var fov_k := tan(deg_to_rad(camera.fov) * 0.5) / maxf(tan(deg_to_rad(base_fov) * 0.5), 0.01)
+	var s := _user_scale() * (1.0 + zoom) * fov_k
+	return clampf(s, distance_limits.x, maxf(distance_limits.y, distance_limits.x)) / maxf(s, 1e-3)
 
 
 ## The rotation the follow views are built from: the hull's, or the
@@ -651,12 +691,13 @@ func _calm() -> float:
 ## it. [param target] may be freed at any point; the shot then holds on
 ## [param target_pos]. Returns false (and does nothing) in the views that
 ## are not following the player's ship, or while one is already running.
-func start_kill_cam(target: Node3D, target_pos: Vector3, target_radius: float) -> bool:
+func start_kill_cam(target: Node3D, target_pos: Vector3, target_radius: float, slow := 1.0) -> bool:
 	if _kc_active or ship == null:
 		return false
 	if not is_follow_mode():
 		return false
 	_kc_active = true
+	_kc_slow = maxf(slow, 0.1)
 	_kc_t = 0.0
 	_kc_weight = 0.0
 	_kc_node = target
@@ -693,18 +734,48 @@ func kill_cam_weight() -> float:
 	return _kc_weight
 
 
+## A level's opening shot: the camera starts far out and above, swings
+## round and eases in onto the normal view over [param seconds] of real time.
+## [FlightRoot] holds the controls while it runs ([method intro_active]).
+func start_intro(seconds := 2.6) -> void:
+	_intro_total = maxf(seconds, 0.1)
+	_intro_left = _intro_total
+
+
+func intro_active() -> bool:
+	return _intro_left > 0.0
+
+
+func _apply_intro() -> void:
+	_intro_left = maxf(_intro_left - _dt, 0.0)
+	var k := 1.0 - _intro_left / _intro_total
+	# 1 = all the way out, easing to 0 as the camera settles in behind the ship.
+	var w := 1.0 - smoothstep(0.0, 1.0, k)
+	var target := ship.global_position if ship != null else _intro_base.origin
+	var from := _intro_base.origin - target
+	if from.length_squared() < 0.01:
+		from = Vector3.BACK
+	var far_dist := maxf(from.length() * 14.0, 600.0)
+	var dir := (from.normalized() + Vector3.UP * 0.6).normalized().rotated(Vector3.UP, deg_to_rad(70.0) * w)
+	var pos := _intro_base.origin.lerp(target + dir * far_dist, w)
+	var look := _look_basis(pos, target, Vector3.UP)
+	var q := _intro_base.basis.get_rotation_quaternion().slerp(look.get_rotation_quaternion(), w)
+	global_transform = Transform3D(Basis(q), pos)
+
+
 func _apply_kill_cam() -> void:
-	_kc_t += _dt
+	_kc_t += minf(_dt, KILL_CAM_MAX_STEP)
 	var blend := maxf(JuiceSettings.kill_cam_blend, 0.05)
-	var hold := JuiceSettings.kill_cam_hold
-	if _kc_t >= blend * 2.0 + hold:
+	var blend_in := blend * maxf(JuiceSettings.kill_cam_ease_in, 0.1) * _kc_slow
+	var hold := JuiceSettings.kill_cam_hold * _kc_slow
+	if _kc_t >= blend_in + blend + hold:
 		cancel_kill_cam()
 		return
 	var w := 1.0
-	if _kc_t < blend:
-		w = smoothstep(0.0, 1.0, _kc_t / blend)
-	elif _kc_t > blend + hold:
-		w = 1.0 - smoothstep(0.0, 1.0, (_kc_t - blend - hold) / blend)
+	if _kc_t < blend_in:
+		w = smoothstep(0.0, 1.0, _kc_t / blend_in)
+	elif _kc_t > blend_in + hold:
+		w = 1.0 - smoothstep(0.0, 1.0, (_kc_t - blend_in - hold) / blend)
 	_kc_weight = w
 	if _kc_node != null:
 		if is_instance_valid(_kc_node) and _kc_node.is_inside_tree():
@@ -735,6 +806,8 @@ func _process(delta: float) -> void:
 	# Hand the mode back its own last transform; the overlay goes on after.
 	if _kc_active:
 		global_transform = _base_xform
+	elif _intro_left > 0.0:
+		global_transform = _intro_base
 	_update_zoom(_dt)
 	_update_user_view(_dt)
 	match mode:
@@ -758,6 +831,9 @@ func _process(delta: float) -> void:
 	if _kc_active:
 		_base_xform = global_transform
 		_apply_kill_cam()
+	elif _intro_left > 0.0:
+		_intro_base = global_transform
+		_apply_intro()
 	if space != null:
 		space.recentre(global_position)
 
@@ -882,7 +958,7 @@ func _update_chase(delta: float) -> void:
 	# Zoom scales the already-smoothed offset instead of feeding into it, so it
 	# moves the camera straight out along its own line to the ship and never
 	# fights the follow smoothing above.
-	global_position = _anchor + _chase_offset * (1.0 + zoom)
+	global_position = _anchor + _chase_offset * (1.0 + zoom) * _limit_factor(zoom)
 
 	var wanted_basis := _look_basis(global_position, focus, ref.y)
 	# Bank, pitch lag and idle drift ride on top of the aim solve rather than
@@ -985,7 +1061,7 @@ func _update_follow_view(delta: float) -> void:
 		_chase_offset = offset
 	else:
 		_chase_offset = _chase_offset.lerp(offset, 1.0 - exp(-rate * 1.2 * dt))
-	global_position = _anchor + _chase_offset * (1.0 + zoom_extra())
+	global_position = _anchor + _chase_offset * (1.0 + zoom_extra()) * _limit_factor(zoom_extra())
 	var speed_fraction := 0.0
 	if model != null and model.top_speed > 0.0:
 		speed_fraction = clampf(absf(model.forward_speed()) / model.top_speed, 0.0, 1.0)
@@ -1295,7 +1371,7 @@ func _update_rear(delta: float) -> void:
 		_chase_offset = _chase_offset.lerp(
 			wanted_pos - ship_x.origin, 1.0 - exp(-CHASE_POSITION_SMOOTH * _dt)
 		)
-	global_position = _anchor + _chase_offset * (1.0 + zoom_extra())
+	global_position = _anchor + _chase_offset * (1.0 + zoom_extra()) * _limit_factor(zoom_extra())
 	var focus := ship_x.origin + ship_x.basis.z * (hull_length * 3.0)
 	var wanted_basis := _look_basis(global_position, focus, ship_x.basis.y)
 	var aimed := wanted_basis

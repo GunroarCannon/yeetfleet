@@ -18,6 +18,12 @@ extends RefCounted
 ## unreachable, which is a feature.
 const MODULES: Array[Dictionary] = [
 	{
+		"id": "menu",
+		"name": "Yeetfleet",
+		"scene": "res://modules/menu/menu.tscn",
+		"tagline": "The game: home screen, campaign map, garage and shop.",
+	},
+	{
 		"id": "ship_builder",
 		"name": "Ship Builder",
 		"scene": "res://modules/ship_builder/ship_builder.tscn",
@@ -28,6 +34,12 @@ const MODULES: Array[Dictionary] = [
 		"name": "Test Flight",
 		"scene": "res://modules/flight/flight_test.tscn",
 		"tagline": "Fly your build — 6DOF flight, gravity, AI traffic, combat.",
+	},
+	{
+		"id": "runner",
+		"name": "Endless Run",
+		"scene": "res://modules/runner/runner.tscn",
+		"tagline": "The flight test as an endless runner — dodge, thread rings, ram, go faster.",
 	},
 	{
 		"id": "arena",

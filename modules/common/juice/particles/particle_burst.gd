@@ -39,6 +39,9 @@ var _cursor := 0
 ## slot genuinely invisible without that edge case.
 const DEAD_SCALE := 0.0005
 
+const GLOW_SHADER := preload("res://modules/common/juice/shaders/burst_glow.gdshader")
+const CHUNK_SHADER := preload("res://modules/common/juice/shaders/burst_chunk.gdshader")
+
 
 func _ready() -> void:
 	top_level = true
@@ -74,6 +77,9 @@ func _build_multimesh() -> void:
 	_multimesh = MultiMesh.new()
 	_multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	_multimesh.use_colors = true
+	# The velocity direction and stretch, for the shader to lay the streak
+	# along the flight as seen on screen (see burst_particle.gdshaderinc).
+	_multimesh.use_custom_data = true
 	_multimesh.mesh = quad
 	_multimesh.instance_count = _capacity
 
@@ -83,17 +89,13 @@ func _build_multimesh() -> void:
 	_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_mesh_instance.extra_cull_margin = 64.0
 
+	# Glowing presets add light; debris and vapour are solid, alpha-blended.
+	# Both shaders face the camera and streak along the flight themselves.
 	var mat := ShaderMaterial.new()
-	var shader := load("res://modules/common/juice/shaders/particle_circle.gdshader") as Shader
-	if shader != null:
-		mat.shader = shader
-	# Particle-billboarded so the per-instance basis only has to carry rotation
-	# and stretch; facing the camera is the material's job, not the state array's.
-	#mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	# Use additive blending if the preset says so.
 	var additive: bool = _config.get("additive", true)
-	if additive:
-		pass#mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.shader = GLOW_SHADER if additive else CHUNK_SHADER
+	if not additive:
+		mat.set_shader_parameter("softness", 1.0 if preset == BurstPresets.Preset.VAPOUR else 0.0)
 	_mesh_instance.material_override = mat
 	add_child(_mesh_instance)
 
@@ -147,8 +149,15 @@ func _process(delta: float) -> void:
 		var frac: float = 1.0 - (_life[i] / _life_total[i])
 		var speed := _velocity[i].length()
 		var size_now := _size[i] * (1.0 - frac * 0.6)
-		var basis := Basis(Vector3.FORWARD, _angle[i]).scaled(
-			Vector3(size_now, size_now * (1.0 + speed * stretch * 0.05), 1.0)
-		)
-		_multimesh.set_instance_transform(i, Transform3D(basis, _position[i]))
-		_multimesh.set_instance_color(i, color_from.lerp(color_to, frac))
+		# Uniform size; the shader turns the quad to the camera and stretches
+		# it along the velocity. A slow chunk tumbles instead (its spin angle
+		# leans the "velocity" it is drawn along).
+		var dir := _velocity[i] / speed if speed > 0.01 else Vector3(cos(_angle[i]), sin(_angle[i]), 0.0)
+		if speed < 2.0:
+			dir = dir.lerp(Vector3(cos(_angle[i]), sin(_angle[i]), 0.0), 1.0 - speed * 0.5).normalized()
+		_multimesh.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * size_now), _position[i]))
+		_multimesh.set_instance_custom_data(i, Color(dir.x, dir.y, dir.z, speed * (stretch - 1.0) * 0.08))
+		# Fade out over the last third, so nothing pops away.
+		var col := color_from.lerp(color_to, frac)
+		col.a *= clampf((1.0 - frac) * 3.0, 0.0, 1.0)
+		_multimesh.set_instance_color(i, col)

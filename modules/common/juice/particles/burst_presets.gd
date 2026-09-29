@@ -33,7 +33,8 @@ static func config(preset: Preset) -> Dictionary:
 			return {
 				"pool": 96, "count": 10, "life": Vector2(1.5, 3.0), "size": Vector2(0.08, 0.22),
 				"speed": Vector2(1.5, 5.0), "gravity": 0.4, "spin": 3.5,
-				"color_from": Color("6b7280"), "color_to": Color("2c313a"),
+				# Hot off the blast, cooling to dark hull scrap.
+				"color_from": Color("ffb46b"), "color_to": Color("3a3f4a"),
 				"additive": false, "stretch": 1.0,
 			}
 		Preset.EMBERS:

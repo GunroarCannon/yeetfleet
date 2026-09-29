@@ -53,7 +53,7 @@ static func maybe_cull_when_unseen(
 	# free `piece` first), and a lambda here logged "Lambda capture ... was
 	# freed" on every one of those (see the class doc's destruction-cost
 	# framing: this fires once per culled piece).
-	timer.timeout.connect(piece.queue_free)
+	timer.timeout.connect(retire.bind(piece))
 	# A piece that starts off-screen (spawned far out, or behind the camera)
 	# gets the same grace countdown rather than an instant free.
 	if not notifier.is_on_screen():
@@ -92,6 +92,11 @@ static func wrap_rigidbody(
 	rb.collision_layer = 4
 	rb.collision_mask = 1 | 2 | 4
 
+	# A physics body cannot carry scale (the server hands its transform back
+	# orthonormalized), so a scaled hull's part — a big AI ship is 3–6× —
+	# shrank to a speck the moment it became debris: the wreck the kill cam
+	# swooped onto looked empty. The scale goes on the part inside instead.
+	var part_scale := orig_xform.basis.get_scale()
 	var col_shape := CollisionShape3D.new()
 	var box_shape := BoxShape3D.new()
 	var b_size := Vector3(1.5, 0.8, 1.8)
@@ -100,16 +105,16 @@ static func wrap_rigidbody(
 			var maabb: AABB = (child as MeshInstance3D).mesh.get_aabb()
 			b_size = maabb.size.clamp(Vector3(0.5, 0.5, 0.5), Vector3(8.0, 8.0, 8.0))
 			break
-	box_shape.size = b_size
+	box_shape.size = b_size * part_scale
 	col_shape.shape = box_shape
 	rb.add_child(col_shape)
 
-	node.transform = Transform3D.IDENTITY
+	node.transform = Transform3D(Basis.from_scale(part_scale), Vector3.ZERO)
 	rb.add_child(node)
 
 	if parent != null:
 		parent.add_child(rb)
-		rb.global_transform = orig_xform
+		rb.global_transform = orig_xform.orthonormalized()
 		rb.reset_physics_interpolation()
 
 	rb.linear_velocity = velocity
@@ -119,7 +124,7 @@ static func wrap_rigidbody(
 	PerformanceSettings.ensure_loaded()
 	var tw := rb.create_tween()
 	tw.tween_interval(lifetime * PerformanceSettings.debris_lifetime)
-	tw.tween_callback(rb.queue_free)
+	tw.tween_callback(retire.bind(rb))
 	_track(rb)
 
 	return rb
@@ -142,7 +147,43 @@ static func _track(rb: RigidBody3D) -> void:
 	_live = alive
 	_live.append(rb)
 	while _live.size() > PerformanceSettings.max_debris:
-		(_live.pop_front() as Node).queue_free()
+		retire(_live.pop_front() as Node3D)
+
+
+## Seconds a retired piece takes to fade out.
+const FADE_TIME := 0.6
+
+
+## Take [param piece] out of the game gently: it fades out (every mesh's
+## [member GeometryInstance3D.transparency]) and shrinks away, then is freed.
+## Debris used to blink out of existence the moment its lifetime, the cap or
+## the off-screen cull said so. Safe to call twice.
+static func retire(piece: Node3D) -> void:
+	if piece == null or not is_instance_valid(piece) or piece.is_queued_for_deletion():
+		return
+	if piece.has_meta("retiring") or not piece.is_inside_tree():
+		if not piece.is_inside_tree():
+			piece.queue_free()
+		return
+	piece.set_meta("retiring", true)
+	var tw := piece.create_tween().set_parallel(true)
+	var visuals: Array[GeometryInstance3D] = []
+	_collect_geometry(piece, visuals)
+	for g in visuals:
+		tw.tween_property(g, "transparency", 1.0, FADE_TIME)
+	# Shrinking reads as a fade on renderers that skip per-instance
+	# transparency, and costs nothing extra.
+	for child in piece.get_children():
+		if child is Node3D and not child is CollisionShape3D:
+			tw.tween_property(child, "scale", (child as Node3D).scale * 0.05, FADE_TIME) 				.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(piece.queue_free)
+
+
+static func _collect_geometry(node: Node, out: Array[GeometryInstance3D]) -> void:
+	for child in node.get_children():
+		if child is GeometryInstance3D:
+			out.append(child as GeometryInstance3D)
+		_collect_geometry(child, out)
 
 
 ## A rough local-space AABB for [param piece], from the first

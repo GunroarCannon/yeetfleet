@@ -50,6 +50,23 @@ static var seed := 0
 static var seed_forced := false
 
 
+# --- Campaign handoff (menu → flight → menu) ------------------------------------
+# Plain dictionaries so neither side has to know the other's types: the menu
+# (through the campaign module) fills the first two before changing scene, the
+# flight scene reads them on build and writes the third when a level ends.
+# Never saved to disk — a level is only ever in flight within one run.
+
+## The level to fly: `{key, preset, overrides, title, number}`, or {} for
+## free flight (sandbox, or the flight test run directly).
+static var pending_level := {}
+## The ship to fly: `{id, name, preset, paint, mults: {hull, guns, speed, yeet}}`,
+## or {} for the flight test's own random pick.
+static var pending_ship := {}
+## How the level went: `{key, won, time, kills, hull}`, or {} when nothing is
+## waiting to be counted.
+static var level_result := {}
+
+
 # --- Display settings (moved here from FlightRoot's statics) ------------------
 # These are read during scene construction, so they have to survive scene
 # reloads; see the class doc for why they live here and not on a scene root.
@@ -343,6 +360,7 @@ static func save_to_disk() -> void:
 	var cfg := _build_cfg()
 	_last_saved_text = cfg.encode_to_text()
 	cfg.save(SETTINGS_PATH)
+	GameDefaults.note_saved(SETTINGS_PATH)
 
 
 static func _build_cfg() -> ConfigFile:

@@ -24,6 +24,11 @@ var base := "happy"
 ## Set once the owner is gone (a destroyed ship): holds the current face forever
 ## instead of drifting back to happy.
 var frozen := false
+## Resting faces to wander between (the sun's moods), or empty to keep
+## [member base]. A new one every [member shuffle_every] seconds (min, max).
+var shuffle: Array[String] = []
+var shuffle_every := Vector2(3.0, 6.0)
+var _next_shuffle := 4.0
 
 var _mat: ShaderMaterial = null
 var _showing := ""
@@ -71,6 +76,11 @@ func make_unlit(tint: Color) -> void:
 	_mat.set_shader_parameter("tint", tint)
 
 
+## Sort this face against other see-through things (the sun's glare).
+func set_render_priority(p: int) -> void:
+	_mat.render_priority = p
+
+
 ## Settle on [param expression] as the resting face.
 func set_base(expression: String) -> void:
 	if frozen or expression == base:
@@ -109,6 +119,14 @@ func _process(delta: float) -> void:
 		if _blink_left <= 0.0:
 			_show(base)
 		return
+	if not shuffle.is_empty():
+		_next_shuffle -= delta
+		if _next_shuffle <= 0.0:
+			_next_shuffle = randf_range(shuffle_every.x, shuffle_every.y)
+			var pick := shuffle[randi() % shuffle.size()]
+			if pick != base:
+				set_base(pick)
+				return
 	_next_blink -= delta
 	if _next_blink <= 0.0:
 		_next_blink = randf_range(BLINK_EVERY.x, BLINK_EVERY.y)

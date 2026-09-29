@@ -918,9 +918,13 @@ func _build_star() -> void:
 	disc.name = "Star"
 	disc.position = pos
 	_sky.add_child(disc)
-	# The star is a character too: a sleepy-happy face drawn in warm ink.
+	# The star is a character too: a soft spiky toy sun with a face on it.
 	var sun_face := Whimsy.make_sun_face(STAR_DISC_RADIUS)
 	if sun_face != null:
+		var blob := _make_toy_sun(STAR_DISC_RADIUS * 1.75)
+		blob.name = "ToySun"
+		blob.position = pos
+		_sky.add_child(blob)
 		sun_face.position = pos
 		_sky.add_child(sun_face)
 	var halo := _make_glow_sphere(STAR_DISC_RADIUS * 2.5, Color(1.0, 0.88, 0.58, 0.20), 1)
@@ -963,6 +967,64 @@ func _build_star() -> void:
 	# disc shader's own fresnel rim already supplies a properly-motivated bright
 	# core and corona, tied to the actual sphere instead of a second overlapping
 	# one guessed to roughly the same size.
+
+
+## The toy sun: a flat, camera-facing blob with soft spikes all round, pale
+## yellow at the middle to warm orange at the rim with a darker edge — the
+## plush-toy sun the face sits on. Unshaded and a touch over 1.0 in the
+## middle, so the bloom gives it a soft glow without washing it out.
+func _make_toy_sun(radius: float) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var spikes := 14
+	var seg := spikes * 8
+	# Under 1.0: the bloom softens it but cannot bleach it to cream.
+	var core := Color(1.0, 0.94, 0.42)
+	var rim := Color(1.0, 0.8, 0.12)
+	var edge := Color(0.93, 0.52, 0.08)
+	var pts: Array[Vector3] = []
+	for i in seg:
+		var a := TAU * i / seg
+		# Rounded spikes: a cosine bump per spike, sharpened a little.
+		var bump := pow(0.5 + 0.5 * cos(a * spikes), 1.6)
+		var r := radius * (0.8 + 0.2 * bump)
+		pts.append(Vector3(cos(a) * r, sin(a) * r, 0.0))
+	for i in seg:
+		var p := pts[i]
+		var q := pts[(i + 1) % seg]
+		st.set_color(core)
+		st.add_vertex(Vector3.ZERO)
+		st.set_color(rim)
+		st.add_vertex(p * 0.9)
+		st.add_vertex(q * 0.9)
+		# The outer tenth: the darker edge band.
+		st.set_color(rim)
+		st.add_vertex(p * 0.9)
+		st.set_color(edge)
+		st.add_vertex(p)
+		st.add_vertex(q)
+		st.set_color(rim)
+		st.add_vertex(p * 0.9)
+		st.set_color(edge)
+		st.add_vertex(q)
+		st.set_color(rim)
+		st.add_vertex(q * 0.9)
+	var inst := MeshInstance3D.new()
+	inst.mesh = st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.disable_receive_shadows = true
+	# Drawn after the additive halo, corona and rays (all transparent), so
+	# the glare sits behind the toy instead of washing over it.
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = 20
+	inst.material_override = mat
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	inst.extra_cull_margin = 16384.0
+	return inst
 
 
 func _make_sun_rays(max_radius: float, ray_count: int, core_color: Color, edge_color: Color) -> MeshInstance3D:

@@ -28,6 +28,8 @@ func _initialize() -> void:
 	await _frames(30)
 	_f.set_time_scale(1.0)
 	_f.get_node("Ui/Coach").visible = false
+	if _f.tutorial != null:
+		_f.tutorial.queue_free()
 	JuiceSettings.player_invulnerable = true
 	var hud: FlightHud = _f._hud
 	# Put back afterwards: a windowed run autosaves the session.

@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Yeetfleet"
 config/description="Modular, web/mobile-first Elite-like. Module 1: Ship Builder."
-run/main_scene="uid://cu4bpdiswlllv"
+run/main_scene="res://modules/menu/menu.tscn"
 config/quit_on_go_back=false
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"
@@ -34,10 +34,6 @@ window/handheld/orientation=6
 [dotnet]
 
 project/assembly_name="Project Nebula"
-
-[editor]
-
-run/main_run_args="--module=ship_builder"
 
 [editor_plugins]
 

@@ -50,6 +50,9 @@ code must do the same. Decision records live in `docs/decisions/`.
     launch magnet, ram/shot reach, lost wing, hostile markers, enemy telegraph): `... --fixed-fps 60
     --script modules/flight/tools/move_profile_check.gd` — run at 144 too. Its waits count
     physics ticks, not wall time (under `--fixed-fps` they differ per rate).
+  - power-ups / shield bubble & enemy veils / EMP freeze / callouts / "!" "?" marks /
+    sling tap auto-aim, auto-fire and aim camera / tutorial: `... --fixed-fps 60 --script
+    modules/flight/tools/powerup_check.gd` — run at 144 too.
   - shipped game defaults (layering, no headless bake, reset):
     `... --script modules/core/tools/game_defaults_check.gd`.
   - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd

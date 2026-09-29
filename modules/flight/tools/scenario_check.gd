@@ -12,6 +12,8 @@ var _failures: Array[String] = []
 func _initialize() -> void:
 	# In memory only (no setter), so the player's saved settings stay as-is.
 	JuiceSettings.player_invulnerable = true
+	# Enemy shield veils soak hits; these checks count kills against the clock.
+	JuiceSettings.enemy_shields = false
 	var packed := load("res://modules/flight/flight_test.tscn") as PackedScene
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)

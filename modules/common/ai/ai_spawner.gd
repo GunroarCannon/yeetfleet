@@ -13,6 +13,10 @@ extends Node3D
 ## Re-emits every roster ship's [signal AiShip.destroyed], so the flight scene
 ## can react to a kill (kill cam, stats) without wiring each ship itself.
 signal ship_destroyed(ship: AiShip)
+## A ship popped a comic mark ("!" / "?"), see [signal AiShip.marked].
+signal ship_marked(ship: AiShip, mark: String)
+## A ship launched a yeet dash ([YeetDash]) — for the "YEET!" shout.
+signal ship_yeeted(ship: AiShip)
 
 ## Phone ceiling on the live roster, whatever the Performance panel says.
 const MAX_SHIPS_MOBILE := 4
@@ -91,6 +95,32 @@ func _spawn_initial_fleet() -> void:
 	print("AiSpawner: spawned %d ships in %d groups" % [_ships.size(), _groups.size()])
 
 
+## One AI think over [param delta] of game time: every live ship's behaviour
+## with full group context. Ships the player is piloting (_ai_paused) are left
+## alone so their inputs are not overwritten. Everyone hunts whichever hull
+## the player is flying right now — their own, or a ship they have taken
+## control of. Far, unseen ships skip rounds and catch up on their delta.
+func _think(delta: float) -> void:
+	# Group member arrays follow the ships (positions change).
+	_rebuild_group_members()
+	_think_round += 1
+	var hunted := _find_player_node()
+	var player_pos := _find_player_position()
+	var i := 0
+	for ship in _ships:
+		i += 1
+		if not (is_instance_valid(ship) and ship._alive and not ship._ai_paused):
+			continue
+		if hunted != self and hunted != ship.model:
+			ship.player_ref = hunted
+		ship._think_lag += delta
+		var far := ship.global_position.distance_squared_to(player_pos) > FAR_THINK_RANGE * FAR_THINK_RANGE
+		if far and (i + _think_round) % FAR_THINK_EVERY != 0 and not ship.in_player_view():
+			continue
+		ship.tick_ai(ship._think_lag)
+		ship._think_lag = 0.0
+
+
 ## Re-skin every ship in flight for the new look and palette.
 ##
 ## Geometry goes through [PartMeshFactory], whose cache is keyed by the geometry
@@ -108,25 +138,35 @@ func _on_palette_changed(_palette: Palette) -> void:
 			ship.restyle()
 
 
-func _process(delta: float) -> void:
-	# Rebuild group member arrays each frame (positions change).
-	_rebuild_group_members()
+## Most AI thinks per real second. The ships only act on physics ticks
+## (60 Hz), so thinking every render frame on a 120/144 Hz phone was half
+## wasted — and the AI think was the biggest script cost in a fight.
+const THINK_HZ := 60.0
+## A ship this far from the player and off screen thinks only every
+## [constant FAR_THINK_EVERY]th time (on the delta it missed): it is flying
+## somewhere nobody is watching.
+const FAR_THINK_RANGE := 1200.0
+const FAR_THINK_EVERY := 3
+var _think_dt := 0.0
+var _think_real := 0.0
+var _think_round := 0
 
-	# Tick every alive ship's behaviour with full group context. Ships the player
-	# is piloting (_ai_paused) are left alone so their inputs are not overwritten.
-	# Everyone hunts whichever hull the player is flying right now — their own,
-	# or a ship they have taken control of.
-	var hunted := _find_player_node()
-	for ship in _ships:
-		if is_instance_valid(ship) and ship._alive and not ship._ai_paused:
-			if hunted != self and hunted != ship.model:
-				ship.player_ref = hunted
-			ship.tick_ai(delta)
+
+func _process(delta: float) -> void:
+	# Think at most [constant THINK_HZ] times a real second, on the game time
+	# that passed since the last think. (0.8: at 60 fps every frame still counts.)
+	_think_dt += delta
+	_think_real += delta / maxf(Engine.time_scale, 0.001)
+	if _think_real >= 0.8 / THINK_HZ:
+		_think(_think_dt)
+		_think_dt = 0.0
+		_think_real = 0.0
 
 	_respawn_timer -= delta
 	if _respawn_timer > 0.0:
 		return
 	_respawn_timer = RESPAWN_INTERVAL
+
 
 	# Prune dead or too-distant ships.
 	var still_alive: Array[AiShip] = []
@@ -342,7 +382,12 @@ func _spawn_group() -> void:
 		# Join the shared physics layer so ships can knock and be knocked (M1b).
 		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
+		ship.marked.connect(_on_ship_marked)
 		_ships.append(ship)
+
+
+func _on_ship_marked(ship: AiShip, mark: String) -> void:
+	ship_marked.emit(ship, mark)
 
 
 func _on_ship_destroyed(ship: AiShip) -> void:
@@ -482,6 +527,7 @@ func spawn_mother() -> AiShip:
 		ship.set_gravity(grav)
 	ship.set_phys_world(_find_world())
 	ship.destroyed.connect(_on_ship_destroyed)
+	ship.marked.connect(_on_ship_marked)
 	_ships.append(ship)
 	return ship
 
@@ -515,6 +561,7 @@ func spawn_pilot_vessel(near: Transform3D, size_mult: float) -> AiShip:
 		ship.set_gravity(grav)
 	ship.set_phys_world(_find_world())
 	ship.destroyed.connect(_on_ship_destroyed)
+	ship.marked.connect(_on_ship_marked)
 	_ships.append(ship)
 	return ship
 
@@ -552,6 +599,7 @@ func spawn_fighter_near(host: Node3D) -> AiShip:
 		ship.set_gravity(grav)
 	ship.set_phys_world(_find_world())
 	ship.destroyed.connect(_on_ship_destroyed)
+	ship.marked.connect(_on_ship_marked)
 	_ships.append(ship)
 	return ship
 
@@ -619,6 +667,7 @@ func spawn_hunters() -> void:
 		# Join the shared physics layer so ships can knock and be knocked (M1b).
 		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
+		ship.marked.connect(_on_ship_marked)
 		_ships.append(ship)
 
 
@@ -659,6 +708,7 @@ func spawn_group_with(arch: AiFactions.ArchetypeData, count: int, team: int = 0)
 		# Join the shared physics layer so ships can knock and be knocked (M1b).
 		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
+		ship.marked.connect(_on_ship_marked)
 		_ships.append(ship)
 
 
@@ -708,6 +758,7 @@ func spawn_near_player(count: int = 3) -> void:
 		# Join the shared physics layer so ships can knock and be knocked (M1b).
 		ship.set_phys_world(_find_world())
 		ship.destroyed.connect(_on_ship_destroyed)
+		ship.marked.connect(_on_ship_marked)
 		_ships.append(ship)
 
 

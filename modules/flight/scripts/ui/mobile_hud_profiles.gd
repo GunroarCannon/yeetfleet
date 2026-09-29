@@ -336,3 +336,4 @@ static func _changed() -> void:
 	for pid: String in _overrides:
 		cfg.set_value("fonts", pid, _overrides[pid])
 	cfg.save(SETTINGS_PATH)
+	GameDefaults.note_saved(SETTINGS_PATH)

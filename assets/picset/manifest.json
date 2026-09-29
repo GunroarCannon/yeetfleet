@@ -1,0 +1,13 @@
+{
+	"bg_belt": 2.0,
+	"bg_gas": 2.0,
+	"bg_ice": 2.0,
+	"bg_nebula": 2.0,
+	"bg_planet": 3.0,
+	"bg_sun": 2.0,
+	"fg_boom": 3.0,
+	"fg_carrier": 2.0,
+	"fg_pods": 2.0,
+	"fg_rings": 2.0,
+	"fg_ships": 3.0
+}

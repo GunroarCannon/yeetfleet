@@ -5,13 +5,24 @@ class_name ScenarioPanel
 extends PanelContainer
 
 var _scenarios: FlightScenarios
+## The flight scene, for the endless run ([EndlessRunner]); null leaves it out.
+var _flight: FlightRoot = null
 var _status: Label
 ## The custom scenario being edited (a [constant FlightScenarios.DEFAULTS] copy).
 var _custom: Dictionary = FlightScenarios.preset("")
 
 
-func setup(scenarios: FlightScenarios) -> void:
+func setup(scenarios: FlightScenarios, flight: FlightRoot = null) -> void:
 	_scenarios = scenarios
+	_flight = flight
+
+
+## The endless run, if this scene has one going: stopped before a scenario.
+func _stop_run() -> void:
+	if _flight != null:
+		var run := _flight.get_node_or_null("EndlessRunner") as EndlessRunner
+		if run != null:
+			run.stop()
 
 
 func _ready() -> void:
@@ -49,9 +60,12 @@ func _ready() -> void:
 	controls.add_theme_constant_override("separation", 8)
 	outer.add_child(controls)
 	_button(controls, "↺ Retry", func() -> void:
+		_stop_run()
 		_scenarios.restart()
 		visible = false)
-	_button(controls, "■ Stop — free roam", func() -> void: _scenarios.stop())
+	_button(controls, "■ Stop — free roam", func() -> void:
+		_stop_run()
+		_scenarios.stop())
 
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0.0, 360.0)
@@ -63,6 +77,19 @@ func _ready() -> void:
 	vbox.add_theme_constant_override("separation", 6)
 	scroll.add_child(vbox)
 
+	if _flight != null:
+		var run := Button.new()
+		run.text = "Endless run
+Fly down a never-ending track that keeps speeding up: dodge rocks, thread boost rings, ram the fighters."
+		run.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		run.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		run.custom_minimum_size = Vector2(0.0, 52.0)
+		run.focus_mode = Control.FOCUS_NONE
+		run.pressed.connect(func() -> void:
+			EndlessRunner.attach(_flight).start()
+			visible = false)
+		vbox.add_child(run)
+
 	for id: String in FlightScenarios.PRESET_ORDER:
 		var p := FlightScenarios.preset(id)
 		var b := Button.new()
@@ -72,6 +99,26 @@ func _ready() -> void:
 		b.custom_minimum_size = Vector2(0.0, 52.0)
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func() -> void:
+			_stop_run()
+			_scenarios.start(FlightScenarios.preset(id))
+			visible = false)
+		vbox.add_child(b)
+
+	vbox.add_child(HSeparator.new())
+	var mtitle := Label.new()
+	mtitle.text = "Missions — deliveries, races, escorts, big ships"
+	mtitle.add_theme_color_override("font_color", Color("ffcc1a"))
+	vbox.add_child(mtitle)
+	for id: String in FlightScenarios.OBJECTIVE_ORDER:
+		var p := FlightScenarios.preset(id)
+		var b := Button.new()
+		b.text = "%s\n%s" % [p["name"], p["desc"]]
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.custom_minimum_size = Vector2(0.0, 52.0)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func() -> void:
+			_stop_run()
 			_scenarios.start(FlightScenarios.preset(id))
 			visible = false)
 		vbox.add_child(b)
@@ -100,6 +147,7 @@ func _ready() -> void:
 	frozen.toggled.connect(func(on: bool) -> void: _custom["frozen_enemies"] = on)
 	vbox.add_child(frozen)
 	_button(vbox, "▶ Start custom scenario", func() -> void:
+		_stop_run()
 		_scenarios.start(_custom.duplicate())
 		visible = false)
 

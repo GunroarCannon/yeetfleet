@@ -80,9 +80,14 @@ static func make_sun_face(radius: float) -> Node3D:
 	# its own bloom, so a face the size of the disc is washed out entirely.
 	face.scale = Vector3.ONE * radius * 3.2
 	face.make_billboard(0.4)
-	# The ink is near-black; tinted toward burnt orange it reads as part of
-	# the star rather than a hole punched through it.
-	face.make_unlit(Color(1.5, 0.72, 0.36))
+	# Dark brown ink on the toy sun's yellow (see SpaceScene's toy sun blob),
+	# like a sticker face on a soft toy.
+	face.make_unlit(Color(0.32, 0.17, 0.06))
+	# Over the toy sun, which itself draws over the glare.
+	face.set_render_priority(21)
+	# The sun is moody: it drifts between faces every few seconds.
+	face.shuffle.assign(["happy", "grin", "wink", "sleepy", "focused", "dizzy"])
+	face.shuffle_every = Vector2(3.5, 7.0)
 	return face
 
 

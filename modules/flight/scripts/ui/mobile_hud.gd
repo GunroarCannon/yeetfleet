@@ -58,6 +58,10 @@ var _band_btn: Control
 var _band_quad := PackedVector2Array()
 var _band_text_prev := ""
 var _band_flash := 0.0
+## The charge bar's eased fill (-1 = not drawn yet) and the last frame's real
+## delta it eases on.
+var _charge_shown := -1.0
+var _dt_last := 0.016
 var _view: RoundButton
 var _roll_l: RoundButton
 var _roll_r: RoundButton
@@ -74,6 +78,9 @@ var _panel := Rect2()
 var _dial_c := Vector2.ZERO
 var _dial_r := 30.0
 var _speed_right := 0.0
+## Top of the speed readout: the screen's top edge in landscape, under the
+## health panel in portrait (where the panel takes the top-left).
+var _speed_top := 0.0
 ## Mirrored layout ([member MobileHudProfiles.swap_sides]): every x goes
 ## through [method _mx].
 var _flip := false
@@ -99,6 +106,15 @@ var _speed_pop := 0.0
 var _last_hundred := 0
 ## Live comic bursts: {pos, t, life, word, rot, size, col, seed}.
 var _bursts: Array[Dictionary] = []
+var _combo_prev := 0
+var _combo_pop := 0.0
+## Top of the speed meter, m/s; above 0 the speed shows as a meter instead of
+## the big number (the endless runner turns it on).
+var speed_meter_max := 0.0
+## The radar (swipe and slingshot: their bottom-left corner is free of the
+## stick), drawn into the live layer, and where it sits.
+var _radar: RadarDisplay
+var _radar_c := Vector2.ZERO
 
 
 func setup(root: FlightRoot) -> void:
@@ -152,6 +168,11 @@ func _ready() -> void:
 	_roll_r.up.connect(func() -> void: _root.set_roll(0.0))
 	_lock = _button("lock")
 	_lock.down.connect(func() -> void: _root.toggle_lock())
+
+	_radar = RadarDisplay.new()
+	_radar.name = "Radar"
+	_radar.visible = false
+	add_child(_radar)
 
 	_band_btn = Control.new()
 	_band_btn.name = "Band"
@@ -238,20 +259,33 @@ func _layout() -> void:
 	var cr := _u * 0.05
 	_place(_up, _dial_c - Vector2(0.0, _dial_r + cr * 1.2), cr)
 	_place(_down, _dial_c + Vector2(0.0, _dial_r + cr * 1.2), cr)
+	var one_thumb := FlightRoot.profile_is_one_thumb(_move_profile)
 	_speed_right = _dial_c.x - _dial_r * 1.1
+	_speed_top = _pad
+	if one_thumb or simple:
+		# No throttle dial to sit beside: the speed takes the corner.
+		_speed_right = w - _pad * 0.6
+	if h > w:
+		# Portrait: the health panel and band fill the top; the speed goes
+		# under the band, against the right edge.
+		_speed_right = w - _pad * 0.6
+		_speed_top = _panel.end.y + _pad * 0.5
 	# Portrait: the health panel already takes most of the width, so the band
-	# runs to the far edge and the menu/view buttons drop under it.
+	# runs to the far edge and the menu/view buttons drop under the speed.
+	# The menu (pause) is always the outer one.
 	var portrait := h > w
 	var bh := _u * 0.078
 	var top := _pad * 0.6 + _u * 0.04
 	if portrait:
-		# Under the health panel, clear of its big speed numerals.
-		var my := _panel.end.y + _pad + _u * 0.07
-		_place(_menu, Vector2(w - _pad - _u * 0.2, my), _u * 0.06)
-		_place(_view, Vector2(w - _pad - _u * 0.06, my), _u * 0.06)
+		var my := _speed_top + _u * 0.33
+		_place(_menu, Vector2(w - _pad - _u * 0.06, my), _u * 0.06)
+		_place(_view, Vector2(w - _pad - _u * 0.2, my), _u * 0.06)
+	elif one_thumb or simple:
+		_place(_menu, Vector2(w * 0.72 + _u * 0.1, top), _u * 0.04)
+		_place(_view, Vector2(w * 0.72, top), _u * 0.04)
 	else:
-		_place(_menu, Vector2(w * 0.66, top), _u * 0.04)
-		_place(_view, Vector2(w * 0.66 + _u * 0.1, top), _u * 0.04)
+		_place(_menu, Vector2(w * 0.66 + _u * 0.1, top), _u * 0.04)
+		_place(_view, Vector2(w * 0.66, top), _u * 0.04)
 
 	# The status band across the top: a slab from the health panel's corner.
 	var bx0 := _panel.end.x - _panel.size.y * float(MobileHudProfiles.profile()["skew"]) * 0.2
@@ -267,6 +301,11 @@ func _layout() -> void:
 		b.visible = not simple
 	for b: RoundButton in [_roll_l, _roll_r, _lock]:
 		b.visible = pro
+	# The radar takes the free bottom-left corner of the one-thumb profiles,
+	# sized off the short edge so a portrait phone gets the same proportion.
+	var rr := _u * 0.15
+	_radar.radar_radius = rr
+	_radar_c = Vector2(_pad + rr * 1.05, h - _pad - rr * 1.05)
 	# Swipe and slingshot fly off the bare screen: no stick, no flight buttons.
 	if FlightRoot.profile_is_one_thumb(_move_profile):
 		for c: Control in [_stick, _fire, _boost, _cycle, _up, _down, _roll_l, _roll_r, _lock]:
@@ -323,6 +362,7 @@ func _process(delta: float) -> void:
 	# the kill cam.
 	var dt := minf(delta / maxf(Engine.time_scale, 0.001), 0.1)
 	_t += dt
+	_dt_last = dt
 	var m := _root.active_model()
 	if _scheme == "simple" and _simple_goal >= 0.0:
 		# Hold to fly: a thumb going down ramps to the chosen cruise, lifting
@@ -387,21 +427,33 @@ func _update_juice(m: FlightModel, dt: float) -> void:
 
 	# The speed number rolls toward the real speed and punches on each hundred.
 	var kmh := absf(m.forward_speed()) * KMH
+	if speed_meter_max > 0.0:
+		# The meter shows the ship's whole speed, carry included (the runner
+		# pulls the ship along its track on [member FlightModel.frame_velocity]).
+		kmh = (m.velocity + m.frame_velocity).length() * KMH
 	_speed_shown = lerpf(_speed_shown, kmh, 1.0 - exp(-14.0 * dt))
 	var hundred := int(kmh / 100.0)
 	if hundred > _last_hundred:
 		_speed_pop = 1.0
 	_last_hundred = hundred
 	_speed_pop = move_toward(_speed_pop, 0.0, dt * 3.0)
+	_combo_pop = move_toward(_combo_pop, 0.0, dt * 3.5)
 
 	for b in _bursts:
 		b["t"] = float(b["t"]) + dt
 	_bursts = _bursts.filter(func(b: Dictionary) -> bool: return float(b["t"]) < float(b["life"]))
 
 
-## Pop a comic shout over the bar that just lost a chunk, near where the fill
-## now ends.
+## Pop a comic shout where the hit landed on the hull ([member
+## JuiceSettings.world_hit_words]), or over the bar that just lost a chunk,
+## near where the fill now ends.
 func _burst(word: String, col: Color, scale: float, frac_now: float) -> void:
+	if JuiceSettings.world_hit_words:
+		var at := _root.last_hit_point
+		if at == Vector3.ZERO and _root.model != null:
+			at = _root.model.global_position
+		_root.hit_word(word, at, col, scale)
+		return
 	var at := Vector2(
 		_panel.size.x * clampf(0.3 + frac_now * 0.5, 0.35, 0.8) + randf_range(-1.0, 1.0) * _u * 0.03,
 		_panel.end.y + _u * randf_range(0.02, 0.07)
@@ -423,14 +475,10 @@ func _draw_decor() -> void:
 	var c := _decor
 	var comic := bool(P.get("comic_fx", false))
 	if bool(P["bands"]):
-		# Comic-page framing: slabs cut on the diagonal, each with a white
-		# gutter and an ink line round it, like panels on a printed page.
+		# Comic-page framing: the top band is a slab cut on the diagonal, with
+		# a white gutter and an ink line round it, like a panel on a printed
+		# page. (The two slabs along the bottom edge went: they did nothing.)
 		_comic_slab(c, _band_quad, P["band"], P, Color(0, 0, 0, 0), false, false)
-		var ch := _u * 0.07
-		var left := _mpoly(_skew_quad(Rect2(-_u * 0.05, h - ch, w * 0.3, ch + _u * 0.05), -1.4))
-		_comic_slab(c, left, P["band"], P, Color(Color.WHITE, 0.18), false, _flip)
-		var right := _mpoly(_skew_quad(Rect2(w * 0.62, h - ch * 1.2, w * 0.38 + _u * 0.05, ch * 1.2 + _u * 0.05), 1.6))
-		_comic_slab(c, right, P["corner"], P, P["panel_dots"], true, not _flip)
 	var quad := _skew_quad(_panel, float(P["skew"]) * -1.0)
 	var edge: Color = P["panel_edge"]
 	if comic and edge.a > 0.0:
@@ -511,13 +559,17 @@ func _halftone(c: Control, poly: PackedVector2Array, col: Color, grow_right: boo
 	for p in poly:
 		box = box.expand(p)
 	var step := maxf(_u * 0.022, 4.0)
+	# Dots are placed by their centre: test against the shape pulled in by a
+	# dot's radius, or the edge dots poke out past the ink line.
+	var inner := Geometry2D.offset_polygon(poly, -step * 0.45, Geometry2D.JOIN_MITER)
+	var test := inner[0] if not inner.is_empty() else poly
 	var y := box.position.y + step * 0.5
 	var row := 0
 	while y < box.end.y:
 		var x := box.position.x + step * (0.5 + 0.5 * float(row % 2))
 		while x < box.end.x:
 			var p := Vector2(x, y)
-			if Geometry2D.is_point_in_polygon(p, poly):
+			if Geometry2D.is_point_in_polygon(p, test):
 				var t := (x - box.position.x) / maxf(box.size.x, 1.0)
 				if not grow_right:
 					t = 1.0 - t
@@ -553,8 +605,11 @@ func _draw_live() -> void:
 	var y2 := y1 + ib + gap
 	_icon_tab(c, Rect2(x, y1, ib, ib), "hull", P, _hp_flash)
 	_bar(c, Rect2(x + ib + gap, y1 + ib * 0.14, bar_w, ib * 0.72), hp, _hp_ghost, P["hull"], P, _hp_flash, comic)
-	_icon_tab(c, Rect2(x, y2, ib, ib), "shield", P, _sh_flash)
-	_bar(c, Rect2(x + ib + gap, y2 + ib * 0.14, bar_w, ib * 0.72), sh, _sh_ghost, P["shield"], P, _sh_flash, comic)
+	# The shield bar only while there is a shield (the power-up's bubble, or
+	# the design's own with [member JuiceSettings.design_shields]).
+	if _root.player_max_shield > 0.0:
+		_icon_tab(c, Rect2(x, y2, ib, ib), "shield", P, _sh_flash)
+		_bar(c, Rect2(x + ib + gap, y2 + ib * 0.14, bar_w, ib * 0.72), sh, _sh_ghost, P["shield"], P, _sh_flash, comic)
 	var low := hp < 0.25 and hp > 0.0
 	if low:
 		var pulse := 0.5 + 0.5 * sin(_t * 12.0)
@@ -587,52 +642,71 @@ func _draw_live() -> void:
 	for b in _bursts:
 		_draw_burst(c, b, P)
 
-	# Speed, top right: the big number and its shout.
+	if JuiceSettings.combo_counter:
+		_draw_combo(c, P)
+
+	if FlightRoot.profile_is_one_thumb(_move_profile):
+		var ship := _root.active_ship_node()
+		if ship != null:
+			_radar.draw_radar(c, ship, _root.live_enemies(), _root.landmarks(),
+				Vector2(_mx(_radar_c.x), _radar_c.y), _root.locked_target)
+
 	var kmh := roundi(_speed_shown)
-	var boosting := m.command.boost
-	var num_pos := Vector2(_speed_right, _pad + _u * 0.14)
-	if boosting and comic:
-		_speed_rays(c, Vector2(_speed_right - _u * 0.12, _pad + _u * 0.1), P)
-	var sp := 1.0 + 0.3 * _speed_pop * _speed_pop
-	var num_col: Color = P["speed"]
-	if boosting:
-		num_col = num_col.lerp(P["speed_unit"], 0.35 + 0.25 * sin(_t * 20.0))
-	_text(c, str(kmh), "number", num_pos, _u * 0.13 * sp, num_col, P["speed_outline"], P, true, 0.0)
-	var jig := Vector2.ZERO
-	if boosting:
-		jig = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _u * 0.004
-	_text(c, "KMH!", "title", Vector2(_speed_right, _pad + _u * 0.235) + jig, _u * 0.075, P["speed_unit"],
-		P["speed_outline"], P, true, -0.25)
-
-	if _scheme != "simple":
+	_draw_speed_meter(c, P, m, kmh)
+	# The throttle dial means nothing where swipe or slingshot fly the ship.
+	if _scheme != "simple" and not FlightRoot.profile_is_one_thumb(_move_profile):
 		_draw_dial(c, m, P, kmh)
-	else:
-		_draw_simple_hint(c, P)
 
 
-## The top band's live line: the scenario's progress when one is running,
-## else the weapon, the lock, and a nudge that the band opens scenarios.
-## Flashes when the line changes (a kill, a new wave) or it is tapped.
+## The top band is the guns' charge bar: it fills with the capacitor in the
+## active weapon's colour, from the health panel's side, and carries the
+## weapon's name. Too little charge for a shot and the fill pulses red. It
+## flashes when the weapon changes or it is tapped (a tap still opens the
+## scenario picker — no text says so; it's a test-bench shortcut).
 func _draw_band(c: Control, P: Dictionary) -> void:
 	if _band_quad.size() < 4:
 		return
+	var sys := _root.active_systems()
 	var line := ""
-	if _root.scenarios != null:
-		line = _root.scenarios.status_line()
-	if line == "":
-		var sys := _root.active_systems()
-		if sys != null:
-			line = String(sys.get_active_weapon().get("name", "")).to_upper()
-		if _root.locked_target != null and is_instance_valid(_root.locked_target):
-			var lt: Variant = _root.locked_target.get("preset_name")
-			line += "  ·  LOCKED ▸ %s" % (String(lt).to_upper() if lt != null else "TARGET")
-		line += "  ·  TAP FOR SCENARIOS ⚔"
+	var frac := 0.0
+	var wcol := Color(P["shield"])
+	var starved := false
+	if sys != null:
+		var w := sys.get_active_weapon()
+		line = String(w.get("short", w.get("name", ""))).to_upper()
+		frac = sys.charge_fraction()
+		wcol = w.get("color", wcol)
+		starved = not sys.has_energy_for_shot()
+	_charge_shown = frac if _charge_shown < 0.0 else lerpf(_charge_shown, frac, 1.0 - exp(-12.0 * _dt_last))
 	if line != _band_text_prev:
 		if _band_text_prev != "":
 			_band_flash = 1.0
 		_band_text_prev = line
+	# The empty trough, then the charge. The band quad runs [start, end, end
+	# bottom, start bottom] from the health panel's side, so lerping along its
+	# top and bottom edges fills sideways, keeping the slab's slant, and drains
+	# back toward the panel. Everything is clipped against the panel (and its
+	# ink), which overlaps the band's start: the fill used to paint over it.
+	var q := _band_quad
+	var panel := _mpoly(_skew_quad(_panel, float(P["skew"]) * -1.0))
+	var inked := Geometry2D.offset_polygon(panel, _u * 0.016, Geometry2D.JOIN_MITER)
+	if not inked.is_empty():
+		panel = inked[0]
+	_fill_clipped(c, q, panel, Color(P["bar_bg"], 0.85))
+	if _charge_shown > 0.002:
+		var f := clampf(_charge_shown, 0.0, 1.0)
+		var a := q[0].lerp(q[1], f)
+		var b := q[3].lerp(q[2], f)
+		var col := wcol
+		if starved:
+			col = col.lerp(Color("ff3b3b"), 0.5 + 0.5 * sin(_t * 14.0))
+		_fill_clipped(c, PackedVector2Array([q[0], a, b, q[3]]), panel, col)
+		# A lighter top edge, like the health bars.
+		_fill_clipped(c, PackedVector2Array([q[0], a, a.lerp(b, 0.28), q[0].lerp(q[3], 0.28)]), panel, Color(1, 1, 1, 0.25))
+		# The hot leading edge where the charge ends.
+		c.draw_line(a, b, Color(1, 1, 1, 0.7), maxf(2.0, _u * 0.006), true)
 	if _band_flash > 0.0:
-		c.draw_colored_polygon(_band_quad, Color(1, 1, 1, _band_flash * 0.6))
+		_fill_clipped(c, _band_quad, panel, Color(1, 1, 1, _band_flash * 0.6))
 	var bh := _band_quad[3].y - _band_quad[0].y
 	var left := minf(_band_quad[0].x, _band_quad[3].x)
 	var right := maxf(_band_quad[1].x, _band_quad[2].x)
@@ -648,11 +722,97 @@ func _draw_band(c: Control, P: Dictionary) -> void:
 	var cx := (left + right) * 0.5 - bh * 0.3 * (-1.0 if _flip else 1.0)
 	_text(c, line, "label", Vector2(cx, bh * 0.66), px, Color.WHITE, P["panel_edge"], P,
 		false, -0.15, true, 0.0, false, 3)
+	# A timed level's clock hangs right under the band, big; the last ten
+	# seconds pulse red.
+	var left_s := _root.scenarios.time_left() if _root.scenarios != null else -1.0
+	if left_s >= 0.0:
+		var urgent := left_s <= 10.0
+		var tcol := Color("ffc61a")
+		if urgent:
+			tcol = tcol.lerp(Color("ff3b3b"), 0.5 + 0.5 * sin(_t * 12.0))
+		_text(c, FlightScenarios.clock_text(left_s), "title", Vector2(cx, bh * 1.75), bh * (0.95 if urgent else 0.8),
+			tcol, P["panel_edge"], P, false, -0.08, true, 0.0, false, 4)
+
+
+## Draw [param poly] minus [param cut] (the health panel over the band's start).
+func _fill_clipped(c: Control, poly: PackedVector2Array, cut: PackedVector2Array, col: Color) -> void:
+	# Both shapes are convex, so the difference never has holes.
+	for piece in Geometry2D.clip_polygons(poly, cut):
+		if piece.size() >= 3:
+			c.draw_colored_polygon(piece, col)
+
+
+## The speed, top right: a round gauge in the throttle dial's style — its ring
+## fills (green through yellow to red) toward [member speed_meter_max] (the
+## runner's top) or boost speed, ticked every tenth, with the number in the
+## profile's number font inside and KMH under it. Punches on each hundred;
+## boost jiggles it and radiates rays behind it.
+func _draw_speed_meter(c: Control, P: Dictionary, m: FlightModel, kmh: int) -> void:
+	var top := speed_meter_max if speed_meter_max > 0.0 else maxf(m.top_speed, 1.0) * FlightModel.BOOST_SPEED
+	var frac := clampf(_speed_shown / KMH / top, 0.0, 1.0)
+	var col := Color("46ff9b").lerp(Color("ffe23d"), clampf(frac * 2.0, 0.0, 1.0)).lerp(
+		Color("ff3b3b"), clampf(frac * 2.0 - 1.0, 0.0, 1.0))
+	var boosting := m.command.boost
+	var comic := bool(P.get("comic_fx", false))
+	var sp := 1.0 + 0.12 * _speed_pop * _speed_pop
+	var r := _u * 0.12 * sp
+	# Right-handed centre (mirrored below for a swapped layout).
+	var ctr := Vector2(_speed_right - _u * 0.12, _speed_top + _u * 0.13)
+	if boosting:
+		ctr += Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _u * 0.004
+	if boosting and comic:
+		_speed_rays(c, ctr, P)
+	var dc := Vector2(_mx(ctr.x), ctr.y)
+	var rim: Color = P["dial_ring"]
+	c.draw_circle(dc, r, P["button"])
+	c.draw_arc(dc, r, 0.0, TAU, 56, Color(rim, 0.35), maxf(2.0, _u * 0.006), true)
+	var start := PI * 0.75
+	for i in 11:
+		var a := start + PI * 1.5 * float(i) / 10.0
+		var d := Vector2.from_angle(a)
+		c.draw_line(dc + d * r * 0.72, dc + d * r * (0.8 if i % 5 else 0.66), Color(rim, 0.5), maxf(1.0, _u * 0.004), true)
+	if frac > 0.005:
+		var sweep := PI * 1.5 * frac
+		c.draw_arc(dc, r * 0.9, start, start + sweep, 48, col, maxf(3.0, _u * 0.016), true)
+		c.draw_circle(dc + Vector2.from_angle(start + sweep) * r * 0.9, _u * 0.012, col.lightened(0.4))
+	var num_col: Color = P["speed"]
+	if boosting:
+		num_col = num_col.lerp(P["speed_unit"], 0.35 + 0.25 * sin(_t * 20.0))
+	_text(c, str(kmh), "number", Vector2(ctr.x, ctr.y + r * 0.14), r * 0.5, num_col, P["speed_outline"], P, false, 0.0, true)
+	_text(c, "KMH", "label", Vector2(ctr.x, ctr.y + r * 0.46), r * 0.26, Color(P["speed"], 0.8), Color(0, 0, 0, 0), P, false, 0.0, true)
+
+
+## The combo counter: "x3" and COMBO under the top band while a chain of
+## kills is live ([ComboChain]), popping on each new kill, with a bar under it
+## draining as the chain window runs out.
+func _draw_combo(c: Control, P: Dictionary) -> void:
+	var chain := _root.combo
+	var n := chain.count if chain.is_live() else 0
+	if n != _combo_prev:
+		if n > _combo_prev and n >= 2:
+			_combo_pop = 1.0
+		_combo_prev = n
+	if n < 2:
+		return
+	var portrait := size.y > size.x
+	var y := (_panel.end.y + _u * 0.2) if portrait else _u * 0.2
+	var at := Vector2(size.x * 0.5, y)
+	var pop := 1.0 + 0.45 * _combo_pop * _combo_pop
+	var hue := Color("ffe23d").lerp(Color("ff3fa4"), clampf(float(n - 2) / 6.0, 0.0, 1.0))
+	var wob := sin(_t * 10.0) * 0.05 * _combo_pop
+	_text(c, "x%d" % n, "number", at, _u * 0.11 * pop, hue, P["speed_outline"], P, false, -0.2, true, wob, false, 3)
+	_text(c, "COMBO!", "title", at + Vector2(0.0, _u * 0.06), _u * 0.05, Color.WHITE, P["speed_outline"], P,
+		false, -0.2, true, 0.0, false, 2)
+	var left := chain.fraction_left()
+	var bw := _u * 0.22
+	var r := Rect2(at.x - bw * 0.5, at.y + _u * 0.085, bw * left, _u * 0.012)
+	c.draw_rect(Rect2(at.x - bw * 0.5, r.position.y, bw, r.size.y), Color(0, 0, 0, 0.45), true)
+	c.draw_rect(r, hue, true)
 
 
 ## Throttle dial: the ring fills with the throttle (reverse runs the other
-## way in the unit colour), with ticks, a needle knob and the speed inside.
-func _draw_dial(c: Control, m: FlightModel, P: Dictionary, kmh: int) -> void:
+## way in the unit colour), with ticks, a needle knob and the throttle % inside.
+func _draw_dial(c: Control, m: FlightModel, P: Dictionary, _kmh: int) -> void:
 	var rim: Color = P["dial_ring"]
 	var dc := Vector2(_mx(_dial_c.x), _dial_c.y)
 	c.draw_circle(dc, _dial_r, P["button"])
@@ -669,20 +829,9 @@ func _draw_dial(c: Control, m: FlightModel, P: Dictionary, kmh: int) -> void:
 		c.draw_arc(dc, _dial_r * 0.9, start, start + sweep, 48, col, maxf(3.0, _u * 0.014), true)
 		var tip := dc + Vector2.from_angle(start + sweep) * _dial_r * 0.9
 		c.draw_circle(tip, _u * 0.011, col.lightened(0.4))
-	_text(c, str(kmh), "number", Vector2(_dial_c.x, _dial_c.y + _u * 0.012), _u * 0.042, P["speed"], Color(0, 0, 0, 0), P, false, 0.0, true)
-	_text(c, "KMH", "label", Vector2(_dial_c.x, _dial_c.y + _u * 0.045), _u * 0.024, Color(P["speed"], 0.75), Color(0, 0, 0, 0), P, false, 0.0, true)
-
-
-## Simple scheme: a pulsing "HOLD TO FLY" over the resting stick until the
-## thumb goes down.
-func _draw_simple_hint(c: Control, P: Dictionary) -> void:
-	if _stick.is_held():
-		return
-	var a := 0.55 + 0.45 * sin(_t * 4.0)
-	var at := _stick.position + _stick.rest_centre()
-	var y := at.y - _stick.radius() - _u * 0.03
-	_text(c, "HOLD TO FLY", "title", Vector2(at.x, y), _u * 0.05, Color(P["title"], a),
-		Color(P["title_outline"], a), P, false, -0.2, true, 0.0, false)
+	# The throttle it sets (the speed has its own gauge up top).
+	_text(c, "%d%%" % roundi(thr * 100.0), "number", Vector2(_dial_c.x, _dial_c.y + _u * 0.012), _u * 0.04, P["speed"], Color(0, 0, 0, 0), P, false, 0.0, true)
+	_text(c, "THR", "label", Vector2(_dial_c.x, _dial_c.y + _u * 0.045), _u * 0.024, Color(P["speed"], 0.75), Color(0, 0, 0, 0), P, false, 0.0, true)
 
 
 func _icon_tab(c: Control, r: Rect2, kind: String, P: Dictionary, flash: float) -> void:
@@ -721,7 +870,7 @@ func _para(x0: float, y: float, w: float, h: float, lean: float) -> PackedVector
 
 func _bar(
 	c: Control, r: Rect2, frac: float, ghost: float, col: Color, P: Dictionary,
-	flash: float, comic: bool
+	flash: float, comic: bool, label := ""
 ) -> void:
 	var lean := 0.45 if comic else 0.0
 	var x0 := r.position.x
@@ -776,7 +925,7 @@ func _bar(
 		outline.append(outline[0])
 		c.draw_polyline(outline, edge, ink, true)
 	# The number, tucked inside the bar's far end.
-	var pct := "%d%%" % roundi(frac * 100.0)
+	var pct := label if label != "" else "%d%%" % roundi(frac * 100.0)
 	_text(c, pct, "label", Vector2(x0 + w - h * 0.3, y + h * 0.78), h * 0.8, Color.WHITE,
 		Color(edge, 0.9) if edge.a > 0.0 else Color(0, 0, 0, 0.6), P, true, 0.0, false, 0.0, true, 3)
 

@@ -118,6 +118,9 @@ var rocket_roll_rate := 0.0
 ## Ramming: damage this ship deals when it rams, and takes when rammed. A
 ## movement profile built around ramming raises the first and lowers the other.
 var ram_dealt_mult := 1.0
+## The garage's YEET upgrade: ram damage this hull deals ×. Unlike [member
+## ram_dealt_mult] no movement profile resets it.
+var ram_upgrade := 1.0
 var ram_taken_mult := 1.0
 ## Scales [method _durability] (how hard this hull is to crush).
 var durability_mult := 1.0
@@ -1111,6 +1114,19 @@ func take_reach_ram(rammer: PhysBody, point: Vector3, push: Vector3, closing: fl
 	_trigger_squash(_active_profile(), -push, closing)
 
 
+## The velocity this hull carried into the current physics step, before any
+## collision in it changed it (what it wrote into its body; the plain velocity
+## without a physics world).
+func pre_impact_velocity() -> Vector3:
+	return _phys_velocity_written if _phys != null else velocity
+
+
+## How tough this hull is in a ram, 1 = an average ship (the durability the
+## ram damage uses, over a fighter's).
+func ram_toughness() -> float:
+	return _durability() / 500.0
+
+
 func is_player() -> bool:
 	var p := get_parent()
 	return p != null and not (p is AiShip)
@@ -1183,11 +1199,26 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 	# Movement-profile ramming dials: what the rammer deals, what this hull takes.
 	dmg *= ram_taken_mult
 	if other != null and other.node is FlightModel:
-		dmg *= (other.node as FlightModel).ram_dealt_mult
+		dmg *= (other.node as FlightModel).ram_dealt_mult * (other.node as FlightModel).ram_upgrade
 
 	var p := get_parent()
 	if p != null:
+		# Rammed a planet: fast and tough enough, the planet shatters and the
+		# hull is spared; a lesser ram knocks it about (see
+		# [method FlightRoot.planet_ram]).
+		if is_player() and other != null and other.layer == PhysBody.Layer.STATIC \
+				and p.has_method("planet_ram") and p.planet_ram(other, point, closing):
+			return
 		if is_player() and p.has_method("take_damage"):
+			# Yeet combat's clash rule: into an AI ship faster than it came
+			# into the player, the player takes nothing (their ram still
+			# lands on the other hull); slower, both hulls take it.
+			if JuiceSettings.yeet_combat and other != null and other.node is FlightModel 					and not (other.node as FlightModel).is_player():
+				var won := YeetDash.clash_player_wins(self, other.node as FlightModel)
+				if p.has_method("yeet_clash"):
+					p.yeet_clash(won, point)
+				if won:
+					return
 			p.take_damage(dmg, point)
 		elif p is AiShip:
 			var ai := p as AiShip

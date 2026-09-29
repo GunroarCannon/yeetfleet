@@ -50,7 +50,9 @@ func _build_rows(vbox: VBoxContainer) -> void:
 		+ "hold to boost (longer: warp). Slingshot: drag back from your ship and let go. "
 		+ "FPS: the stick moves you (push further = faster), drag the screen to look.")
 
-	_section(vbox, "Camera gestures (swipe & slingshot)", Color("9ad0ff"))
+	_section(vbox, "Camera gestures & dynamic camera (swipe & slingshot)", Color("9ad0ff"))
+	_float_row(vbox, "Dynamic camera: closest it comes in (× normal distance)", "swipe_cam_min", 0.05, "×%.2f")
+	_float_row(vbox, "Dynamic camera: furthest it pulls out (× normal distance)", "swipe_cam_max", 0.1, "×%.1f")
 	_check(vbox, "Two fingers pinch to zoom (mouse wheel on PC)", "cam_pinch_zoom", JuiceSettings.cam_pinch_zoom)
 	_check(vbox, "Drag off the ship / twist two fingers to swing the camera round it (right-drag on PC)", "cam_twist_rotate", JuiceSettings.cam_twist_rotate)
 	_float_row(vbox, "Swing speed", "cam_gesture_speed", 0.05, "×%.2f")
@@ -62,10 +64,12 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_float_row(vbox, "  looks this far off the line", "magnet_cone_deg", 1.0, "%.0f°")
 	_float_row(vbox, "  the ship drifts into your path", "magnet_pull", 5.0, "%.0f m/s²")
 	_check(vbox, "Friendly and harmless ships too (enemies first)", "magnet_friendlies", JuiceSettings.magnet_friendlies)
+	_float_row(vbox, "Chain pull toward the next enemy after a kill", "chain_magnet", 0.05, "%.0f%%", 100.0)
 
 	_section(vbox, "Swipe profile", Color("5ee0ff"))
 	_check(vbox, "Only a swipe from the ship moves it (elsewhere swings the camera)", "swipe_from_ship", JuiceSettings.swipe_from_ship)
 	_float_row(vbox, "Camera further out", "swipe_cam_zoom", 0.05, "+%.0f%%", 100.0)
+	_float_row(vbox, "  looks ahead while moving / dashing", "swipe_look_ahead", 0.05, "×%.2f")
 	_float_row(vbox, "Profile speed", "swipe_speed_mult", 0.05, "×%.2f")
 	_float_row(vbox, "Cruise after a dash", "swipe_cruise", 0.05, "×%.2f top speed")
 	_float_row(vbox, "Longest dash", "swipe_dash", 0.1, "×%.1f top speed")
@@ -79,6 +83,7 @@ func _build_rows(vbox: VBoxContainer) -> void:
 
 	_section(vbox, "Slingshot profile", Color("ffcf5e"))
 	_check(vbox, "Camera follows the flight smoothly (not the hull's spin)", "sling_steady_cam", JuiceSettings.sling_steady_cam)
+	_check(vbox, "Camera holds still while aiming (the aim never drifts)", "sling_aim_cam_hold", JuiceSettings.sling_aim_cam_hold)
 	_float_row(vbox, "Launch speed at a full pull", "sling_power", 0.1, "×%.1f top speed")
 	_float_row(vbox, "Pull down throws into the screen", "sling_aim_depth", 0.05, "%.0f%%", 100.0)
 	_float_row(vbox, "Camera looks ahead", "sling_look_ahead", 0.05, "×%.2f")
@@ -110,6 +115,16 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_section(vbox, "AI", Color("ff6f60"))
 	_check(vbox, "AI ships fight by slingshot too (any profile)", "ai_slingshot", JuiceSettings.ai_slingshot)
 	_float_row(vbox, "  share of AI ships", "ai_sling_share", 0.05, "%.0f%%", 100.0)
+	_check(vbox, "Yeet combat: ships you can see dash at you (faster one in the clash wins)", "yeet_combat", JuiceSettings.yeet_combat)
+	_float_row(vbox, "  seconds between a ship's dashes", "yeet_interval", 0.25, "%.2f s")
+	_float_row(vbox, "  dash speed", "yeet_speed", 0.1, "×%.1f top speed")
+	_float_row(vbox, "  ships dashing at once", "yeet_max_ships", 1.0, "%.0f")
+	_float_row(vbox, "  wind-up before a dash", "yeet_windup", 0.05, "%.2f s")
+
+	_section(vbox, "Planet pinball (ram a planet)", Color("ffb03a"))
+	_float_row(vbox, "Ram speed that shatters a planet (1 km planet, average hull)", "planet_smash_speed", 10.0, "%.0f m/s")
+	_float_row(vbox, "Ram speed that knocks a planet off its spot", "planet_knock_speed", 5.0, "%.0f m/s")
+	_float_row(vbox, "  how far the knock sends it", "planet_knock", 0.05, "×%.2f")
 
 
 func _sync_profile() -> void:

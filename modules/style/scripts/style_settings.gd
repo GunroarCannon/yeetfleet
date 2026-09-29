@@ -59,3 +59,4 @@ static func _save() -> void:
 	cfg.set_value(SECTION, "toon_shading", toon_shading)
 	cfg.set_value(SECTION, "wireframe_mode", wireframe_mode)
 	cfg.save(SETTINGS_PATH)
+	GameDefaults.note_saved(SETTINGS_PATH)

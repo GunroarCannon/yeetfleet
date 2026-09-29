@@ -191,6 +191,9 @@ static var kill_cam_hold := 1.0
 static var kill_cam_blend := 0.35
 ## Game speed during the kill cam (0 = fully paused, 1 = no slow-down).
 static var kill_cam_time_scale := 0.04
+## Kill cam: the swoop *in* takes this × the swoop time — a little slower
+## than the swoop out, so the eye can follow onto the wreck.
+static var kill_cam_ease_in := 1.4
 ## Camera distance from the wreck, in the wreck's hull radii.
 static var kill_cam_distance := 3.0
 ## Real seconds after one kill cam before another may start.
@@ -308,6 +311,9 @@ static var cam_pinch_zoom := true
 static var cam_twist_rotate := true
 ## Slingshot: the camera follows the flight smoothly instead of turning with the hull's spin.
 static var sling_steady_cam := true
+## Slingshot: the camera holds still while aiming (no swing behind the ship,
+## no look-ahead), so the view never moves the aim under the thumb.
+static var sling_aim_cam_hold := true
 ## Swipe/slingshot: glowing 3D chevron arrows show the heading and the launch.
 static var move_arrows := true
 ## Swipe: only a swipe that starts on the ship moves it; a drag from anywhere else swings the camera round the ship.
@@ -362,6 +368,80 @@ static var player_shot_hit_scale := 1.8
 static var enemy_shot_hit_scale := 0.6
 ## Seconds an enemy glows and draws its aim line before it opens fire on the player (0 = no warning).
 static var enemy_telegraph := 0.45
+## Swipe: the closest the camera may come in, × the normal chase distance (pinch, hits and dashes all stay inside).
+static var swipe_cam_min := 0.7
+## Swipe: the furthest the camera may pull out, × the normal chase distance.
+static var swipe_cam_max := 2.6
+## Swipe: how far the camera looks ahead of a moving/dashing ship, × its distance (more of what's ahead to tap at).
+static var swipe_look_ahead := 0.55
+
+# --- Chains, combos and yeet combat ---
+## Kills chained inside [member chain_window] seconds count up a combo (x2, x3 …) on the HUD.
+static var combo_counter := true
+## Seconds after a kill in which the next kill keeps the chain going.
+static var chain_window := 2.5
+## Swipe/slingshot: while a chain is live the ship is pulled toward the next enemy (0 = off, 1 = hard).
+static var chain_magnet := 0.7
+## Yeet combat: hostile ships the player can see dash (yeet) at them. The faster one along the clash wins: the player unhurt, or both hurt.
+static var yeet_combat := true
+## Yeet combat: seconds between one ship's dashes.
+static var yeet_interval := 3.0
+## Yeet combat: dash speed, × the ship's top speed.
+static var yeet_speed := 2.2
+## Yeet combat: how many ships may be mid-dash at the player at once.
+static var yeet_max_ships := 2.0
+## Yeet combat: seconds a ship winds up (glows, aims) before it dashes.
+static var yeet_windup := 0.45
+## Comic shouts (POW!, BAM! …) pop where the hit happened in the world, not over the HUD.
+static var world_hit_words := true
+## Planet pinball: a ram at least this fast (m/s, for a 1 km planet and an average hull; tougher hulls need less, bigger planets more) shatters the planet.
+static var planet_smash_speed := 260.0
+## Planet pinball: a slower ram at least this fast knocks the planet off its spot; it drifts back.
+static var planet_knock_speed := 70.0
+## Planet pinball: how far a knock sends the planet, ×.
+static var planet_knock := 1.0
+
+# --- Tap aim, auto fire, power-ups, shields, callouts ---
+## Slingshot: a tap anywhere (not on the ship) auto-aims — at the ship near the tap, else the best target on screen — while resting or flying.
+static var sling_tap_auto_aim := true
+## Slingshot: while a launch is flying, the guns fire on their own at the target it is heading for.
+static var sling_auto_fire := true
+## Kills drop floating power-ups (EMP, boost, shield) that act when flown into.
+static var power_ups := true
+## Share of the player's kills that drop a power-up.
+static var powerup_drop_chance := 0.35
+## Seconds a dropped power-up floats before it fades away.
+static var powerup_life := 25.0
+## EMP: seconds the ripple freezes every ship it reaches.
+static var powerup_emp_time := 4.0
+## EMP: how far the ripple travels, m.
+static var powerup_emp_radius := 900.0
+## Boost: seconds it lasts.
+static var powerup_boost_time := 8.0
+## Boost: attack power ×.
+static var powerup_boost_power := 1.8
+## Boost: speed ×.
+static var powerup_boost_speed := 1.35
+## Shield: seconds the bubble lasts (picking another refills it, it never stacks).
+static var powerup_shield_time := 15.0
+## Shield: the bubble soaks this × the hull's max HP before it pops.
+static var powerup_shield_hp := 0.6
+## The old always-on shield from the ship design (off: shields come only from the power-up).
+static var design_shields := false
+## Some enemies spawn with a shield veil (a blue bubble that soaks hits first).
+static var enemy_shields := true
+## Share of armed enemies that spawn shielded.
+static var enemy_shield_chance := 0.25
+## An enemy veil soaks this × the ship's max HP.
+static var enemy_shield_hp := 0.5
+## Persona-style callouts from the player's ship (part lost, power-up, shield down …).
+static var player_callouts := true
+## Enemies pop comic "!" (noticed an enemy, going down) and "?" (hit by someone they didn't consider an enemy).
+static var enemy_marks := true
+## Seconds before one ship may pop another mark.
+static var enemy_mark_cooldown := 8.0
+## The short interactive tutorial runs on the first flight.
+static var tutorial_on := true
 
 # --- Interaction markers ---
 ## A spray-painted target over every ship the player has tangled with, in the
@@ -474,12 +554,24 @@ const BOOL_FIELDS := [
 	"cam_pinch_zoom",
 	"cam_twist_rotate",
 	"sling_steady_cam",
+	"sling_aim_cam_hold",
 	"move_arrows",
 	"swipe_from_ship",
 	"fps_invert_y",
 	"markers_show_hostile",
 	"magnet_friendlies",
 	"player_wing_spiral",
+	"combo_counter",
+	"yeet_combat",
+	"world_hit_words",
+	"sling_tap_auto_aim",
+	"sling_auto_fire",
+	"power_ups",
+	"design_shields",
+	"enemy_shields",
+	"player_callouts",
+	"enemy_marks",
+	"tutorial_on",
 ]
 
 
@@ -527,12 +619,24 @@ static func get_effect(field: String) -> bool:
 		"cam_pinch_zoom": return cam_pinch_zoom
 		"cam_twist_rotate": return cam_twist_rotate
 		"sling_steady_cam": return sling_steady_cam
+		"sling_aim_cam_hold": return sling_aim_cam_hold
 		"move_arrows": return move_arrows
 		"swipe_from_ship": return swipe_from_ship
 		"fps_invert_y": return fps_invert_y
 		"markers_show_hostile": return markers_show_hostile
 		"magnet_friendlies": return magnet_friendlies
 		"player_wing_spiral": return player_wing_spiral
+		"combo_counter": return combo_counter
+		"yeet_combat": return yeet_combat
+		"world_hit_words": return world_hit_words
+		"sling_tap_auto_aim": return sling_tap_auto_aim
+		"sling_auto_fire": return sling_auto_fire
+		"power_ups": return power_ups
+		"design_shields": return design_shields
+		"enemy_shields": return enemy_shields
+		"player_callouts": return player_callouts
+		"enemy_marks": return enemy_marks
+		"tutorial_on": return tutorial_on
 	return false
 
 
@@ -587,12 +691,24 @@ static func _set_bool(field: String, value: bool) -> void:
 		"cam_pinch_zoom": cam_pinch_zoom = value
 		"cam_twist_rotate": cam_twist_rotate = value
 		"sling_steady_cam": sling_steady_cam = value
+		"sling_aim_cam_hold": sling_aim_cam_hold = value
 		"move_arrows": move_arrows = value
 		"swipe_from_ship": swipe_from_ship = value
 		"fps_invert_y": fps_invert_y = value
 		"markers_show_hostile": markers_show_hostile = value
 		"magnet_friendlies": magnet_friendlies = value
 		"player_wing_spiral": player_wing_spiral = value
+		"combo_counter": combo_counter = value
+		"yeet_combat": yeet_combat = value
+		"world_hit_words": world_hit_words = value
+		"sling_tap_auto_aim": sling_tap_auto_aim = value
+		"sling_auto_fire": sling_auto_fire = value
+		"power_ups": power_ups = value
+		"design_shields": design_shields = value
+		"enemy_shields": enemy_shields = value
+		"player_callouts": player_callouts = value
+		"enemy_marks": enemy_marks = value
+		"tutorial_on": tutorial_on = value
 		_: push_warning("JuiceSettings.set_effect: unknown field %s" % field)
 
 
@@ -635,6 +751,7 @@ const FLOAT_RANGES := {
 	"kill_cam_chance": Vector2(0.0, 1.0),
 	"kill_cam_hold": Vector2(0.2, 4.0),
 	"kill_cam_blend": Vector2(0.1, 1.5),
+	"kill_cam_ease_in": Vector2(0.5, 3.0),
 	"kill_cam_time_scale": Vector2(0.0, 1.0),
 	"kill_cam_distance": Vector2(1.0, 8.0),
 	"kill_cam_cooldown": Vector2(0.0, 30.0),
@@ -708,6 +825,30 @@ const FLOAT_RANGES := {
 	"player_shot_hit_scale": Vector2(0.0, 5.0),
 	"enemy_shot_hit_scale": Vector2(0.2, 1.5),
 	"enemy_telegraph": Vector2(0.0, 1.5),
+	"swipe_cam_min": Vector2(0.3, 2.0),
+	"swipe_cam_max": Vector2(1.0, 6.0),
+	"swipe_look_ahead": Vector2(0.0, 2.0),
+	"chain_window": Vector2(0.5, 8.0),
+	"chain_magnet": Vector2(0.0, 1.0),
+	"yeet_interval": Vector2(0.5, 12.0),
+	"yeet_speed": Vector2(0.5, 5.0),
+	"yeet_max_ships": Vector2(1.0, 8.0),
+	"yeet_windup": Vector2(0.0, 1.5),
+	"planet_smash_speed": Vector2(40.0, 2000.0),
+	"planet_knock_speed": Vector2(10.0, 1000.0),
+	"planet_knock": Vector2(0.0, 5.0),
+	"powerup_drop_chance": Vector2(0.0, 1.0),
+	"powerup_life": Vector2(5.0, 90.0),
+	"powerup_emp_time": Vector2(0.5, 15.0),
+	"powerup_emp_radius": Vector2(100.0, 4000.0),
+	"powerup_boost_time": Vector2(1.0, 30.0),
+	"powerup_boost_power": Vector2(1.0, 5.0),
+	"powerup_boost_speed": Vector2(1.0, 3.0),
+	"powerup_shield_time": Vector2(2.0, 60.0),
+	"powerup_shield_hp": Vector2(0.1, 3.0),
+	"enemy_shield_chance": Vector2(0.0, 1.0),
+	"enemy_shield_hp": Vector2(0.1, 3.0),
+	"enemy_mark_cooldown": Vector2(1.0, 30.0),
 }
 
 
@@ -763,6 +904,7 @@ static func get_float(field: String) -> float:
 		"kill_cam_chance": return kill_cam_chance
 		"kill_cam_hold": return kill_cam_hold
 		"kill_cam_blend": return kill_cam_blend
+		"kill_cam_ease_in": return kill_cam_ease_in
 		"kill_cam_time_scale": return kill_cam_time_scale
 		"kill_cam_distance": return kill_cam_distance
 		"kill_cam_cooldown": return kill_cam_cooldown
@@ -836,6 +978,30 @@ static func get_float(field: String) -> float:
 		"player_shot_hit_scale": return player_shot_hit_scale
 		"enemy_shot_hit_scale": return enemy_shot_hit_scale
 		"enemy_telegraph": return enemy_telegraph
+		"swipe_cam_min": return swipe_cam_min
+		"swipe_cam_max": return swipe_cam_max
+		"swipe_look_ahead": return swipe_look_ahead
+		"chain_window": return chain_window
+		"chain_magnet": return chain_magnet
+		"yeet_interval": return yeet_interval
+		"yeet_speed": return yeet_speed
+		"yeet_max_ships": return yeet_max_ships
+		"yeet_windup": return yeet_windup
+		"planet_smash_speed": return planet_smash_speed
+		"planet_knock_speed": return planet_knock_speed
+		"planet_knock": return planet_knock
+		"powerup_drop_chance": return powerup_drop_chance
+		"powerup_life": return powerup_life
+		"powerup_emp_time": return powerup_emp_time
+		"powerup_emp_radius": return powerup_emp_radius
+		"powerup_boost_time": return powerup_boost_time
+		"powerup_boost_power": return powerup_boost_power
+		"powerup_boost_speed": return powerup_boost_speed
+		"powerup_shield_time": return powerup_shield_time
+		"powerup_shield_hp": return powerup_shield_hp
+		"enemy_shield_chance": return enemy_shield_chance
+		"enemy_shield_hp": return enemy_shield_hp
+		"enemy_mark_cooldown": return enemy_mark_cooldown
 	return 0.0
 
 
@@ -961,6 +1127,7 @@ static func _load_float(field: String, value: float) -> void:
 		"kill_cam_chance": kill_cam_chance = v
 		"kill_cam_hold": kill_cam_hold = v
 		"kill_cam_blend": kill_cam_blend = v
+		"kill_cam_ease_in": kill_cam_ease_in = v
 		"kill_cam_time_scale": kill_cam_time_scale = v
 		"kill_cam_distance": kill_cam_distance = v
 		"kill_cam_cooldown": kill_cam_cooldown = v
@@ -1034,6 +1201,30 @@ static func _load_float(field: String, value: float) -> void:
 		"player_shot_hit_scale": player_shot_hit_scale = v
 		"enemy_shot_hit_scale": enemy_shot_hit_scale = v
 		"enemy_telegraph": enemy_telegraph = v
+		"swipe_cam_min": swipe_cam_min = v
+		"swipe_cam_max": swipe_cam_max = v
+		"swipe_look_ahead": swipe_look_ahead = v
+		"chain_window": chain_window = v
+		"chain_magnet": chain_magnet = v
+		"yeet_interval": yeet_interval = v
+		"yeet_speed": yeet_speed = v
+		"yeet_max_ships": yeet_max_ships = v
+		"yeet_windup": yeet_windup = v
+		"planet_smash_speed": planet_smash_speed = v
+		"planet_knock_speed": planet_knock_speed = v
+		"planet_knock": planet_knock = v
+		"powerup_drop_chance": powerup_drop_chance = v
+		"powerup_life": powerup_life = v
+		"powerup_emp_time": powerup_emp_time = v
+		"powerup_emp_radius": powerup_emp_radius = v
+		"powerup_boost_time": powerup_boost_time = v
+		"powerup_boost_power": powerup_boost_power = v
+		"powerup_boost_speed": powerup_boost_speed = v
+		"powerup_shield_time": powerup_shield_time = v
+		"powerup_shield_hp": powerup_shield_hp = v
+		"enemy_shield_chance": enemy_shield_chance = v
+		"enemy_shield_hp": enemy_shield_hp = v
+		"enemy_mark_cooldown": enemy_mark_cooldown = v
 
 
 static func _save() -> void:
@@ -1063,3 +1254,4 @@ static func _save() -> void:
 	for field: String in FLOAT_RANGES:
 		cfg.set_value(SECTION, field, get_float(field))
 	cfg.save(SETTINGS_PATH)
+	GameDefaults.note_saved(SETTINGS_PATH)

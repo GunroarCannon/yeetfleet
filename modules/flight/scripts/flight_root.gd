@@ -179,6 +179,13 @@ var _keyboard_steering := false
 var _ai_spawner: AiSpawner = null
 ## Set-piece fights: duel, skirmish, waves... (see [FlightScenarios]).
 var scenarios: FlightScenarios = null
+## Garage upgrades of the ship the menu handed over ([member
+## Session.pending_ship]): stat → multiplier. Empty in a plain test flight.
+var upgrade_mults := {}
+var _big_notice: BigNotice = null
+## The campaign level being flown, its map button and end card; null in free
+## flight. See [CampaignLevelOverlay].
+var campaign_overlay: CampaignLevelOverlay = null
 ## The flight test's bug hunt — see [BugHunt] and the 🐞 panel.
 var bug_hunt: BugHunt = null
 ## The player's team for AI targeting (0 = everyone's target).
@@ -303,6 +310,10 @@ func _enter_tree() -> void:
 
 	# A scene restart reloads this node; land back in the location we were in.
 	location = Session.flight_location
+	# Campaign levels are always flown in the space scene: the scenarios need
+	# its AI spawner, whatever the flight test was last left on.
+	if not Session.pending_level.is_empty():
+		location = Location.SPACE
 	_build_location()
 	_build_gravity()
 	_build_drift_field()
@@ -427,6 +438,14 @@ func _ready() -> void:
 	_coach.steps = FLIGHT_STEPS
 	_coach.walkthrough_id = "flight_walkthrough"
 	_coach.start()
+	power_ups = PowerUps.new()
+	power_ups.setup(self)
+	power_ups.picked.connect(func(_k: int) -> void: tutorial_note("powerup"))
+	add_child(power_ups)
+	GameDefaults.auto_bake = bool(Session.pref("auto_bake", true))
+	# The interactive tutorial runs once, on a real (windowed) first flight.
+	if JuiceSettings.tutorial_on and not bool(Session.pref("tutorial_done", false)) 			and Session.pending_level.is_empty()			and DisplayServer.get_name() != "headless":
+		start_tutorial.call_deferred()
 
 	systems.state_changed.connect(_on_systems_state)
 	systems.fire_blocked.connect(_on_systems_fire_blocked)
@@ -450,6 +469,13 @@ func _ready() -> void:
 	# rebuilt space scene) obey the shadow/glow dials too.
 	if not get_tree().node_added.is_connected(PerformanceSettings.apply_to_node):
 		get_tree().node_added.connect(PerformanceSettings.apply_to_node)
+	# Reached from the game's menu (a campaign level or sandbox): the way home,
+	# and for a level its start, status and end card.
+	if not Session.pending_level.is_empty() or not Session.pending_ship.is_empty():
+		campaign_overlay = CampaignLevelOverlay.new()
+		campaign_overlay.name = "CampaignOverlay"
+		campaign_overlay.setup(self)
+		add_child(campaign_overlay)
 
 
 ## Push the ⚡ Performance panel's settings onto the engine and this scene.
@@ -470,6 +496,19 @@ func apply_performance() -> void:
 # --- Construction -----------------------------------------------------------
 
 func _load_design() -> void:
+	# The menu handed over a ship (campaign or sandbox): fly exactly that hull
+	# in exactly that paint, with its garage upgrades.
+	upgrade_mults = (Session.pending_ship.get("mults", {}) as Dictionary).duplicate()
+	AiShip.player_upgrade_power = upgrade("guns")
+	var preset_id := String(Session.pending_ship.get("preset", ""))
+	if preset_id != "":
+		design = library.build_preset_design(preset_id)
+		if design != null:
+			var paint := String(Session.pending_ship.get("paint", ""))
+			if paint != "":
+				library.apply_faction(design, paint)
+			design.design_name = String(Session.pending_ship.get("name", design.design_name))
+			return
 	# Randomly pick a preset ship from the library so every test flight starts
 	# with a different vessel, letting the player see how various builds handle.
 	var presets: Array[Dictionary] = library.presets
@@ -500,6 +539,8 @@ func _build_location() -> void:
 		_ai_spawner = AiSpawner.new()
 		_ai_spawner.name = "AiSpawner"
 		_ai_spawner.ship_destroyed.connect(_on_ai_ship_destroyed)
+		_ai_spawner.ship_marked.connect(_on_ai_ship_marked)
+		_ai_spawner.ship_yeeted.connect(_on_ai_ship_yeeted)
 		add_child(_ai_spawner)
 	elif location == Location.GENERATED_SYSTEM:
 		_build_generated_system()
@@ -1132,6 +1173,12 @@ func _build_drift_field() -> void:
 	var mesh := SphereMesh.new()
 	mesh.radius = MOTE_SIZE * 0.5
 	mesh.height = MOTE_SIZE
+	# A speck half a metre across: a handful of faces reads just as round.
+	# SphereMesh's default 64 × 32 made every mote 4,224 triangles — 3 million
+	# a frame for the field, 96% of everything the flight scene drew, and the
+	# single biggest drain on a phone's battery.
+	mesh.radial_segments = 8
+	mesh.rings = 4
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 41973
@@ -1243,7 +1290,8 @@ func _build_ship() -> void:
 	# The player's own speed dial, set before [method _assemble] configures the
 	# model: see [member FlightModel.speed_scale] for why the model does not read
 	# it from Session itself.
-	model.speed_scale = Session.player_speed_scale
+	model.speed_scale = player_speed_base()
+	model.ram_upgrade = upgrade("yeet")
 	# Restore the last control and assist modes. Both used to live only on this
 	# instance, so every launch came back in Arcade with default assist.
 	if Session.control_mode >= 0 and Session.control_mode < FlightModel.ControlMode.size():
@@ -1298,7 +1346,7 @@ func _assemble() -> void:
 	var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
 	player_max_hp = base_hp * JuiceSettings.player_durability_mult
 	player_hp = player_max_hp
-	player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
+	player_max_shield = _design_shield()
 	player_shield = player_max_shield
 
 
@@ -1518,6 +1566,8 @@ func _on_back(from_phone: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	_update_blast_outline(delta)
+	_update_knocked_planets(delta)
 	if _pilot != null:
 		_pilot.frame_tick(delta)
 	if Time.get_ticks_msec() >= _next_session_sync_ms:
@@ -1794,7 +1844,7 @@ func _move_profile_hint(p: int) -> String:
 ## Run the profile's pilot, re-seating it when the flown ship changed (fly as,
 ## respawn) and parking it while the pilot is dead.
 func _tick_pilot(delta: float) -> void:
-	if _pilot == null:
+	if _pilot == null or controls_locked():
 		return
 	var flown := active_model()
 	if _player_dead or flown == null:
@@ -1914,7 +1964,15 @@ func _apply_aim_assist() -> void:
 ## All axes are written every frame — including when the key is released —
 ## so the command snaps to zero on release. The old code only wrote when
 ## non-zero, which left yaw/pitch/roll stuck at their last value.
+## True while a level's opening shot is playing: every control is ignored
+## until the camera has landed behind the ship.
+func controls_locked() -> bool:
+	return camera_rig != null and camera_rig.intro_active()
+
+
 func _read_keyboard(delta: float) -> void:
+	if controls_locked():
+		return
 	var flight := active_model()
 	var stick := Vector2(
 		Input.get_action_strength("flight_yaw_right") - Input.get_action_strength("flight_yaw_left"),
@@ -2009,6 +2067,8 @@ func set_roll(value: float) -> void:
 
 
 func set_firing(value: bool) -> void:
+	if value and not _button_firing:
+		tutorial_note("fire")
 	_button_firing = value
 
 
@@ -2161,7 +2221,9 @@ func respawn() -> void:
 		var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
 		player_max_hp = base_hp * JuiceSettings.player_durability_mult
 		player_hp = player_max_hp
-		player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
+		if power_ups != null:
+			power_ups.clear_effects()
+		player_max_shield = _design_shield()
 		player_shield = player_max_shield
 	_after_respawn()
 	_hud.show_hint("Back at the start point")
@@ -2200,6 +2262,69 @@ func _update_grace_blink() -> void:
 	view.root.visible = (left / 120) % 2 == 0
 
 
+# --- Blast outline ------------------------------------------------------------------
+
+const HULL_OUTLINE := preload("res://modules/flight/shaders/hull_outline.gdshader")
+var _outline_mat: ShaderMaterial = null
+var _outline := 0.0
+var _outline_on := false
+
+
+## A big white blast behind the player's ship washes its silhouette out: while
+## one is (on screen) round the ship and further from the camera, the hull
+## gets a thin black outline ([code]hull_outline.gdshader[/code]), easing in and
+## out. Attached as a per-instance overlay only while needed.
+func _update_blast_outline(delta: float) -> void:
+	var cam := camera_node()
+	var want := 0.0
+	if cam != null and view != null and model != null and not AddonVfx.recent_blasts.is_empty():
+		var ship := model.get_global_transform_interpolated().origin
+		if not cam.is_position_behind(ship):
+			var ship_s := cam.unproject_position(ship)
+			var ship_d := cam.global_position.distance_to(ship)
+			var now := Time.get_ticks_msec()
+			for b in AddonVfx.recent_blasts:
+				var age := float(now - int(b["ms"])) / float(AddonVfx.BLAST_MEMORY_MS)
+				var p: Vector3 = b["pos"]
+				if age >= 1.0 or cam.is_position_behind(p):
+					continue
+				var d := cam.global_position.distance_to(p)
+				if d < ship_d - 2.0:
+					continue
+				# The blast's radius in pixels at its distance.
+				var px := float(b["radius"]) / maxf(d * tan(deg_to_rad(cam.fov) * 0.5), 0.01) 					* get_viewport().get_visible_rect().size.y * 0.5
+				if cam.unproject_position(p).distance_to(ship_s) < px * 1.3 + 40.0:
+					want = maxf(want, 1.0 - age * age)
+	var dt := delta / maxf(Engine.time_scale, 0.001)
+	_outline = move_toward(_outline, want, dt * (6.0 if want > _outline else 2.5))
+	var on := _outline > 0.01
+	if on:
+		if _outline_mat == null:
+			_outline_mat = ShaderMaterial.new()
+			_outline_mat.shader = HULL_OUTLINE
+		_outline_mat.set_shader_parameter("strength", _outline)
+		_outline_mat.set_shader_parameter("width_px", 4.5 * maxf(get_viewport().get_visible_rect().size.y / 720.0, 1.0))
+		_outline_mat.set_shader_parameter("push_m", (camera_rig.hull_radius if camera_rig != null else 3.0) * 0.6)
+	if on != _outline_on:
+		_outline_on = on
+		_set_hull_overlay(_outline_mat if on else null)
+
+
+func _set_hull_overlay(mat: Material) -> void:
+	if view == null:
+		return
+	for inst in view.part_meshes.values():
+		if is_instance_valid(inst):
+			(inst as GeometryInstance3D).material_overlay = mat
+	if view.baked_mesh_instance != null and is_instance_valid(view.baked_mesh_instance):
+		view.baked_mesh_instance.material_overlay = mat
+
+
+## Where the player's hull was last hit, on the hull (world). The comic
+## shouts ([method hit_word]) pop there.
+var last_hit_point := Vector3.ZERO
+
+
 ## Accept damage to the player ship (called by AI weapons and collision model).
 ## Applies shield absorption first, then hull. Triggers game over at 0 HP.
 func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
@@ -2208,6 +2333,7 @@ func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 	# The debugger's god mode and damage-taken dial (see CombatStatsPanel), over
 	# the player's own toughness (the hero's hull is sturdier than the AI's).
 	amount *= JuiceSettings.player_damage_taken_mult / maxf(JuiceSettings.player_toughness, 0.05)
+	amount /= maxf(upgrade("hull"), 0.05)
 	if JuiceSettings.player_invulnerable or amount <= 0.0 or in_respawn_grace():
 		return
 	_last_hit_ms = Time.get_ticks_msec()
@@ -2223,13 +2349,18 @@ func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 		var off := where - model.global_position
 		if off.length() > hull_r * 0.8:
 			where = model.global_position + off.normalized() * hull_r * 0.8
+	last_hit_point = where
 	var now_ms := Time.get_ticks_msec()
 	# Shield absorbs 65% of incoming damage while it holds.
 	var prev_shield := player_shield
 	if player_shield > 0.0:
-		var absorbed := minf(player_shield, amount * 0.65)
+		# The power-up's bubble soaks everything; the design's shield 65%.
+		var bubble := power_ups != null and power_ups.shield_active()
+		var absorbed := minf(player_shield, amount * (1.0 if bubble else 0.65))
 		player_shield -= absorbed
 		amount -= absorbed
+		if bubble:
+			power_ups.shield_hit()
 		if audio != null:
 			audio.play_shield_hit_sound(model.global_position if model != null else Vector3.ZERO, true)
 		# A lighter flash than a hull hit: this is the shield blooming, not the
@@ -2237,11 +2368,13 @@ func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 		# per hit, under sustained fire, was both too much on screen and a new
 		# sprite node every few frames.
 		var shield_fx := JuiceSettings.shield_fx_intensity
-		if shield_fx > 0.0 and now_ms >= _next_shield_fx_ms:
+		if shield_fx > 0.0 and PerformanceSettings.shield_ripples and now_ms >= _next_shield_fx_ms:
 			AddonVfx.spawn_sprite_hit(self, where, Vector3.UP, 1.4 * shield_fx)
 			_next_shield_fx_ms = now_ms + int(lerpf(600.0, 120.0, shield_fx))
 	var vfx_scale := JuiceSettings.hit_vfx_scale
 	if prev_shield > 0.0 and player_shield <= 0.0:
+		if power_ups != null:
+			power_ups.shield_broken()
 		# The shield failing outright is a moment worth its own explosion, not
 		# just the sprite bloom above — explosions used to be reserved
 		# entirely for ship death.
@@ -2442,12 +2575,203 @@ func set_planet_spacing(value: float) -> void:
 
 # --- Kill cam ---------------------------------------------------------------------
 
+## Kills the player chains close together (x2, x3 …); see [ComboChain].
+var combo := ComboChain.new()
+## The floating pick-ups kills drop and their timed effects ([PowerUps]).
+var power_ups: PowerUps = null
+## The short interactive tutorial ([FlightTutorial]), while it runs.
+var tutorial: FlightTutorial = null
+
+## Show the speed as a meter up to [param max_mps] on the mobile HUD (0 =
+## the normal number). The endless runner uses it.
+func set_speed_meter(max_mps: float) -> void:
+	if _hud != null:
+		_hud.set_speed_meter(max_mps)
+
+
+var _next_clash_word_ms := 0
+
+
+## A yeet-combat ram between the player and an AI ship at [param point]
+## ([method YeetDash.clash_player_wins]): [param won] means the player came in
+## faster and took nothing. A win gets its own shout where it happened (a
+## loss is a hull hit, which already pops one).
+func yeet_clash(won: bool, point: Vector3) -> void:
+	var now := Time.get_ticks_msec()
+	if not won or now < _next_clash_word_ms or not JuiceSettings.world_hit_words:
+		return
+	# One shout per clash: the contact can report on a few ticks running.
+	_next_clash_word_ms = now + 250
+	hit_word(["BAM!", "WHAM!", "KAPOW!", "YEET!"].pick_random(), point, Color("46ff9b"), 1.25)
+
+
+# --- Planet pinball ------------------------------------------------------------------
+
+## Planets knocked off their spot: collider node → {home, vel, grav}.
+var _knocked := {}
+## How fast a knocked planet eases home (spring, per s²) and loses speed (per s).
+const KNOCK_SPRING := 0.35
+const KNOCK_DAMP := 1.1
+
+
+## The player's ship rammed a static body at [param closing] m/s. A planet
+## ([PhysBody] on one of its collider nodes): hard enough for its size and the
+## hull's toughness ([member JuiceSettings.planet_smash_speed]) and it shatters
+## — returns true, the hull is spared the crash; fast enough to matter
+## ([member JuiceSettings.planet_knock_speed]) and it is knocked off its spot
+## like a pinball bumper, drifting home again (the hull still takes the crash).
+func planet_ram(other: PhysBody, point: Vector3, closing: float) -> bool:
+	var holder := other.node as Node3D
+	var planet := _planet_in(holder)
+	if planet == null or planet.has_meta("shattered") or model == null:
+		return false
+	var scale_k := sqrt(maxf(other.radius, 1.0) / 1000.0)
+	if closing >= planet_smash_need(other.radius):
+		_knocked.erase(holder)
+		hit_word("KABOOM!", point, Color("ffe23d"), 1.8)
+		if systems != null:
+			systems._destroy_planet(planet, point)
+		else:
+			on_planet_destroyed(planet)
+		return true
+	if closing >= JuiceSettings.planet_knock_speed and JuiceSettings.planet_knock > 0.0:
+		var e: Dictionary = _knocked.get(holder, {})
+		if e.is_empty():
+			var grav: GravitySystem.GravityBody = null
+			if gravity != null:
+				var near := gravity.nearest_body(holder.global_position)
+				if near != null and near.position.distance_to(holder.global_position) < other.radius * 0.5:
+					grav = near
+			e = {"home": holder.global_position, "vel": Vector3.ZERO, "grav": grav, "radius": other.radius}
+			_knocked[holder] = e
+		var push := (holder.global_position - model.global_position).normalized()
+		# Speed over what knocks it, against the planet's size: a moon flies, a
+		# giant budges.
+		var kick := (closing - JuiceSettings.planet_knock_speed * 0.5) * 6.0 * JuiceSettings.planet_knock / scale_k
+		e["vel"] = (e["vel"] as Vector3) + push * kick
+		hit_word(["BOING!", "BONK!", "YEET!"].pick_random(), point, Color("33d6ff"), 1.4)
+	return false
+
+
+## The ram speed (m/s) that shatters a planet of [param radius] with the
+## player's hull: [member JuiceSettings.planet_smash_speed] for a 1 km planet
+## and an average hull, more for a bigger planet, less for a tougher hull —
+## within reason (a hull with a hundred thousand hit points still has to be
+## going some; toughness counts ×0.5–2.5).
+func planet_smash_need(radius: float) -> float:
+	var tough := clampf(sqrt(model.ram_toughness()), 0.5, 2.5) if model != null else 1.0
+	return JuiceSettings.planet_smash_speed * sqrt(maxf(radius, 1.0) / 1000.0) / tough
+
+
+## The [Planet] a collider node stands for: itself, or one it holds (Tarn IV
+## is a pivot carrying the planet and its moon).
+func _planet_in(node: Node3D) -> Planet:
+	if node == null or not is_instance_valid(node):
+		return null
+	if node is Planet:
+		return node as Planet
+	for c in node.get_children():
+		if c is Planet:
+			return c as Planet
+	return null
+
+
+## Knocked planets fly off, slow, and ease back home (their collider moves with
+## the node; their gravity well is carried along).
+func _update_knocked_planets(delta: float) -> void:
+	if _knocked.is_empty():
+		return
+	for holder: Node3D in _knocked.keys():
+		if not is_instance_valid(holder):
+			_knocked.erase(holder)
+			continue
+		var e: Dictionary = _knocked[holder]
+		var home: Vector3 = e["home"]
+		var vel: Vector3 = e["vel"]
+		var pos := holder.global_position
+		vel += (home - pos) * KNOCK_SPRING * delta
+		vel *= exp(-KNOCK_DAMP * delta)
+		pos += vel * delta
+		holder.global_position = pos
+		var grav: GravitySystem.GravityBody = e["grav"]
+		if grav != null:
+			grav.position = pos
+		e["vel"] = vel
+		if pos.distance_to(home) < float(e["radius"]) * 0.002 and vel.length() < 1.0:
+			holder.global_position = home
+			if grav != null:
+				grav.position = home
+			_knocked.erase(holder)
+
+
+## A ship in view just launched a yeet dash: shout it where it starts.
+func _on_ai_ship_yeeted(ship: AiShip) -> void:
+	if JuiceSettings.world_hit_words and is_instance_valid(ship):
+		hit_word("YEET!", ship.global_position, Color("ff3fa4"), 1.1)
+
+
+## (Re)start the interactive tutorial ([FlightTutorial]) for the current
+## movement profile.
+func start_tutorial() -> void:
+	if tutorial != null and is_instance_valid(tutorial):
+		tutorial.queue_free()
+	if _hud == null:
+		return
+	tutorial = FlightTutorial.new()
+	tutorial.setup(self)
+	_hud.add_banner(tutorial)
+
+
+## Tell the tutorial the player just did [param event] (see [method FlightTutorial.note]).
+func tutorial_note(event: String) -> void:
+	if tutorial != null and is_instance_valid(tutorial):
+		tutorial.note(event)
+
+
+## A ship popped "!" or "?" ([signal AiShip.marked]): a comic speech bubble
+## rides over it.
+func _on_ai_ship_marked(ship: AiShip, mark: String) -> void:
+	if _hud == null or not is_instance_valid(ship):
+		return
+	var col := Color("ff3b3b") if mark == "!" else Color("2f8dff")
+	_hud.mark_word(mark, ship, ship.marker_height(1.0), col)
+
+
+## A Persona-style callout from the player's own ship ([PlayerCallouts]):
+## part lost, power-up taken, shield down, hull critical …
+## The moment-stopping headline (see [BigNotice]): a power-up, a planet.
+func big_notice(word: String, sub: String, col: Color, hold := 1.2) -> void:
+	if _big_notice == null:
+		_big_notice = BigNotice.new()
+		_big_notice.name = "BigNotice"
+		add_child(_big_notice)
+	_big_notice.show_notice(word, sub, col, hold)
+
+
+func player_callout(text: String, col := Color("ff2a4a")) -> void:
+	if _hud != null and JuiceSettings.player_callouts:
+		_hud.callout(text, col)
+
+
+## A comic shout (POW!, x3! …) popped at [param world_pos] by whichever HUD
+## is up (see [method FlightHud.hit_word]).
+func hit_word(word: String, world_pos: Vector3, col: Color, scale := 1.0) -> void:
+	if _hud != null:
+		_hud.hit_word(word, world_pos, col, scale)
+
+
 ## Any roster ship died. A player kill may get the kill cam: the game pauses
 ## under the camera while it swoops onto the wreck, then comes back. See
 ## [method FlightCamera.start_kill_cam] and [member JuiceSettings.kill_cam].
 func _on_ai_ship_destroyed(ship: AiShip) -> void:
 	if ship == null or not is_instance_valid(ship) or not ship.killed_by_player:
 		return
+	if power_ups != null:
+		power_ups.maybe_drop(ship.global_position)
+	tutorial_note("kill")
+	var chain := combo.note_kill(ship.global_position)
+	if chain >= 2 and JuiceSettings.combo_counter:
+		hit_word("x%d!" % chain, ship.global_position, Color("ffe23d"), 1.0 + minf(float(chain) * 0.12, 0.8))
 	if not JuiceSettings.kill_cam or JuiceSettings.reduce_motion or _player_dead:
 		return
 	if camera_rig == null or controlled_ai == ship:
@@ -2458,8 +2782,11 @@ func _on_ai_ship_destroyed(ship: AiShip) -> void:
 	var radius := 4.0
 	if ship._view != null:
 		radius = maxf(ship._view.aabb.size.length() * 0.5, 1.0)
-	if camera_rig.start_kill_cam(ship, ship.global_position, radius):
-		var total := JuiceSettings.kill_cam_blend * 2.0 + JuiceSettings.kill_cam_hold
+	# Held on the spot it blew up (no node to follow): the dead ship's node
+	# drifts on after its parts scatter, and following it swooped onto loose
+	# wreckage instead of the blast.
+	if camera_rig.start_kill_cam(null, ship.global_position, radius):
+		var total := JuiceSettings.kill_cam_blend * (1.0 + JuiceSettings.kill_cam_ease_in) + JuiceSettings.kill_cam_hold
 		_next_kill_cam_ms = now + int((total + JuiceSettings.kill_cam_cooldown) * 1000.0)
 
 
@@ -2501,10 +2828,29 @@ func refresh_player_max_stats() -> void:
 	var sh_frac := player_shield / maxf(player_max_shield, 1.0) if player_max_shield > 0.0 else 1.0
 	player_max_hp = maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult \
 		* JuiceSettings.player_durability_mult
-	player_max_shield = maxf(stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
+	if power_ups != null and power_ups.shield_active():
+		# The power-up's bubble owns the shield while it lasts.
+		if not _player_dead:
+			player_hp = player_max_hp * hp_frac
+		return
+	player_max_shield = _design_shield()
 	if not _player_dead:
 		player_hp = player_max_hp * hp_frac
 	player_shield = player_max_shield * sh_frac
+
+
+## The ship design's own shield, if [member JuiceSettings.design_shields] is
+## on; otherwise none — shields come from the power-up only.
+func _design_shield() -> float:
+	if not JuiceSettings.design_shields or view == null:
+		return 0.0
+	return maxf(view.resolution.stats.get_stat("shield_hp"), 0.0) * JuiceSettings.player_shield_mult
+
+
+## The shield bubble ended: back to the design's shield (usually none).
+func restore_design_shield() -> void:
+	player_max_shield = _design_shield()
+	player_shield = player_max_shield
 
 
 ## Set the player's hull to [param fraction] of max (0 kills the ship).
@@ -2588,6 +2934,7 @@ func take_control(ship: AiShip) -> void:
 	controlled_ai = ship
 	ship._ai_paused = true
 	ship.pilot_host = self
+	ship.stop_yeet()
 	ship.model.frame_velocity = Vector3.ZERO
 	if ship.systems != null:
 		ship.systems.player_flown = true
@@ -2743,7 +3090,7 @@ func pilot_damage(ship: AiShip, amount: float, source: Object) -> float:
 			s_ship.note_hit_player()
 		amount *= JuiceSettings.enemy_shot_damage_scale
 	_last_hit_ms = Time.get_ticks_msec()
-	return amount * JuiceSettings.enemy_damage_mult * JuiceSettings.player_damage_taken_mult 		/ maxf(JuiceSettings.player_toughness, 0.05)
+	return amount * JuiceSettings.enemy_damage_mult * JuiceSettings.player_damage_taken_mult 		/ maxf(JuiceSettings.player_toughness, 0.05) / maxf(upgrade("hull"), 0.05)
 
 
 # --- Interaction markers ---------------------------------------------------------
@@ -3382,8 +3729,20 @@ func set_player_speed_scale(scale: float) -> void:
 	Session.player_speed_scale = maxf(scale, 0.05)
 	Session.save_to_disk()
 	if model != null:
-		model.speed_scale = Session.player_speed_scale
-		model.rescale_speed(Session.player_speed_scale)
+		model.speed_scale = player_speed_base()
+		model.rescale_speed(player_speed_base())
+
+
+## The garage upgrade multiplier for [param stat] (`hull`, `guns`, `speed`,
+## `yeet`) on the ship the menu handed over; 1.0 in a plain test flight.
+func upgrade(stat: String) -> float:
+	return float(upgrade_mults.get(stat, 1.0))
+
+
+## The player's speed dial times the ship's speed upgrade — what every speed
+## rescale of the player's own model starts from.
+func player_speed_base() -> float:
+	return Session.player_speed_scale * upgrade("speed")
 
 
 ## Set how fast every *other* ship flies — the AI population — and push it onto
@@ -3497,9 +3856,8 @@ func _on_part_broken(broken: DamageSystem.BrokenPart, _effects: Array) -> void:
 
 	# Show loss hint (suppressed during total break-up to avoid 10 simultaneous hints)
 	if not _player_dead:
-		_hud.show_hint("⚠ %s lost!" % broken.part_name)
-		if _hud.has_method("spawn_damage_number"):
-			_hud.spawn_damage_number(0, true, false, broken.world_pos, "DETACHED!")
+		# A shout, not a sentence: the part's first word ("WING LOST!").
+		player_callout("%s LOST!" % String(broken.part_name).get_slice(" ", 0))
 
 
 func toggle_help() -> void:
@@ -4089,6 +4447,9 @@ func go_arena() -> void:
 ## buttons all stop their own events, so by the time input reaches here the
 ## player is touching bare screen and means to look around.
 func _unhandled_input(event: InputEvent) -> void:
+	if controls_locked():
+		get_viewport().set_input_as_handled()
+		return
 	# A one-thumb movement profile reads the bare screen first.
 	if _pilot != null and not _player_dead and _pilot.handle_input(event):
 		get_viewport().set_input_as_handled()
@@ -4294,6 +4655,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				if now - _last_spawn_time >= spawn_cooldown:
 					respawn_player_ship()
 					_last_spawn_time = now
+		KEY_F2:
+			# Portrait preview on PC: flip the window between landscape and a
+			# phone-shaped portrait one; the HUD lays itself out for either.
+			if not OS.has_feature("mobile"):
+				var sz := DisplayServer.window_get_size()
+				var portrait := sz.y <= sz.x
+				var want := Vector2i(540, 960) if portrait else Vector2i(1280, 720)
+				DisplayServer.window_set_size(want)
+				var screen := DisplayServer.screen_get_usable_rect()
+				DisplayServer.window_set_position(screen.position + (screen.size - want) / 2)
+				_hud.show_hint("Window: %s (F2 flips)" % ("portrait 540×960" if portrait else "landscape 1280×720"))
 		KEY_F5:
 			restart_scene()
 		KEY_F6:
@@ -4357,6 +4729,8 @@ func ensure_ai_spawner() -> AiSpawner:
 		_ai_spawner.name = "AiSpawner"
 		_ai_spawner.auto_fleet = false
 		_ai_spawner.ship_destroyed.connect(_on_ai_ship_destroyed)
+		_ai_spawner.ship_marked.connect(_on_ai_ship_marked)
+		_ai_spawner.ship_yeeted.connect(_on_ai_ship_yeeted)
 		add_child(_ai_spawner)
 	return _ai_spawner
 
@@ -4378,6 +4752,11 @@ func revive_player() -> void:
 
 
 ## A headline for the player: the hint line on both HUDs.
+## Whether the player's ship is down (between death and respawn).
+func is_player_dead() -> bool:
+	return _player_dead
+
+
 func announce(text: String) -> void:
 	if _hud != null:
 		_hud.show_hint(text)
@@ -4528,8 +4907,22 @@ func on_planet_destroyed(planet: Planet) -> void:
 		camera_rig.set_mode(FlightCamera.Mode.CHASE)
 	if locked_target == planet:
 		locked_target = null
-	if _hud != null:
-		_hud.show_hint("CRITICAL: %s ANNIHILATED!" % p_name)
+	_planet_kill_moment(p_pos, p_radius, p_name)
+
+
+## A planet wrecked by the player is the biggest thing that can happen: a
+## nuke's mushroom cloud stands up where it was (upright on screen), the
+## camera pushes slowly in on it while the game holds, and the headline says
+## what just happened.
+func _planet_kill_moment(p_pos: Vector3, p_radius: float, p_name: String) -> void:
+	var up := camera_rig.camera.global_basis.y if camera_rig != null and camera_rig.camera != null else Vector3.UP
+	CartoonBlast.mushroom(self, p_pos, p_radius * 0.9, up)
+	Juice.flash(Color("ffb347"), 0.7, 0.6)
+	Juice.shake(0.6)
+	big_notice("PLANET WRECKED", p_name, Color("ff3a6e"), 2.2)
+	if camera_rig != null and not _player_dead and not JuiceSettings.reduce_motion:
+		camera_rig.cancel_kill_cam()
+		camera_rig.start_kill_cam(null, p_pos, p_radius * 0.9, 2.5)
 
 
 ## Immediately shatters the nearest or locked planet with 3D fragments and asteroids.

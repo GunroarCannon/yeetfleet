@@ -17,6 +17,8 @@ func _initialize() -> void:
 	# The shipped defaults, not the player's saved dials: this measures the
 	# feel the game ships with, whatever someone has tuned on this machine.
 	JuiceSettings._loaded = true
+	# Enemy shield veils soak hits; these checks measure hull damage.
+	JuiceSettings.enemy_shields = false
 	var packed := load("res://modules/flight/flight_test.tscn") as PackedScene
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)
@@ -179,9 +181,13 @@ func _check_respawn() -> void:
 	cam.set_mode(FlightCamera.Mode.CHASE)
 	var view_before := cam.mode
 	_root.take_damage(_root.player_max_hp * 10.0)
-	# The death beat: 1.4 s of game time at quarter speed.
-	await _seconds(6.0)
+	# The death beat: 1.4 s of game time at quarter speed (5.6 s) plus the
+	# freeze. A fixed 6 s wait left 0.4 s of margin, which a loaded machine
+	# ran out of now and then; wait for it, up to 10 s.
 	var hud: FlightHud = _root._hud
+	var until := Time.get_ticks_msec() + 10000
+	while Time.get_ticks_msec() < until and not hud._game_over_modal.visible:
+		await physics_frame
 	_report("death shows the popup", hud._game_over_modal.visible and _root._player_dead)
 	hud._on_respawn_pressed()
 	await _frames(3)

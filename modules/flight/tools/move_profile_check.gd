@@ -23,11 +23,17 @@ var _cam_at_release := Basis()
 
 func _initialize() -> void:
 	JuiceSettings._loaded = true
+	# Enemy shield veils soak hits; these checks measure hull damage.
+	JuiceSettings.enemy_shields = false
 	var packed := load("res://modules/flight/flight_test.tscn") as PackedScene
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)
 	for i in 10:
 		await process_frame
+	# The HUD checks below are about the desktop widgets: take the desktop
+	# layout whatever the saved pref says (it is put back in _finish).
+	_was_mobile = bool(Session.prefs.get("mobile_layout", false))
+	_root._hud.set_mobile_layout(false)
 	_root.set_time_scale(1.0)
 	_root.get_node("Ui/Coach").visible = false
 	print("── movement profile check ────────────────────────────────")
@@ -257,6 +263,9 @@ func _check_sling_bounce_seek(sp: AiSpawner) -> void:
 	await _frames(3)
 	var seek_was := JuiceSettings.sling_bounce_seek
 	JuiceSettings.sling_bounce_seek = 0.9
+	# Auto-fire would shoot the wall down before the ship reaches it.
+	var auto_was := JuiceSettings.sling_auto_fire
+	JuiceSettings.sling_auto_fire = false
 	run.launch(up, 0.8)
 	var bounced := false
 	var v_after := Vector3.ZERO
@@ -273,6 +282,7 @@ func _check_sling_bounce_seek(sp: AiSpawner) -> void:
 	print("  bounce: %s, then %.1f° from the next ship (pure reflection would be ~%.0f°)" % [
 		bounced, ang, rad_to_deg((-up).angle_to(to_next))])
 	_report("sling: the ship bounces off what it hits", bounced)
+	JuiceSettings.sling_auto_fire = auto_was
 	_report("sling: the bounce heads for the next body", bounced and ang < 40.0)
 	JuiceSettings.sling_bounce_seek = seek_was
 	run.catch_ship()
@@ -819,8 +829,12 @@ func _report(label: String, ok: bool) -> void:
 		_failures.append(label)
 
 
+var _was_mobile := false
+
+
 func _finish() -> void:
 	JuiceSettings.ai_slingshot = false
+	Session.prefs["mobile_layout"] = _was_mobile
 	print("")
 	if _failures.is_empty():
 		print("── PASS ──────────────────────────────────────────────────")

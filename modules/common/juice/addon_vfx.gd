@@ -100,6 +100,12 @@ const DESKTOP_MAX_CONCURRENT := 32
 const MOBILE_MAX_CONCURRENT := 16
 
 static var _live_count := 0
+## Big blasts that went off recently: {pos, radius, ms}. The flight scene reads
+## it to outline the player's ship against one behind it
+## ([method FlightRoot._update_blast_outline]).
+static var recent_blasts: Array[Dictionary] = []
+## How long a blast stays in [member recent_blasts], ms.
+const BLAST_MEMORY_MS := 1400
 ## Explosions alive right now — they skip the budget above, so they get their
 ## own ceiling ([member JuiceSettings.max_live_explosions]).
 static var _live_explosions := 0
@@ -138,6 +144,24 @@ static func worth_spawning(pos: Vector3, max_dist := 3000.0) -> bool:
 	if d2 > max_dist * max_dist:
 		return false
 	return d2 < CULL_NEAR * CULL_NEAR or cam.is_position_in_frustum(pos)
+
+
+## Remember a blast of [param scale] at [param pos] in [member recent_blasts]
+## (whether or not the addon layer draws it — the Juice flash still does).
+static func note_blast(pos: Vector3, scale: float) -> void:
+	var now := Time.get_ticks_msec()
+	recent_blasts = recent_blasts.filter(func(b: Dictionary) -> bool: return now - int(b["ms"]) < BLAST_MEMORY_MS)
+	recent_blasts.append({"pos": pos, "radius": 6.0 * scale, "ms": now})
+
+
+## Whether [param pos] is within [param reach] metres of the camera (true with
+## no camera).
+static func _near_camera(pos: Vector3, reach: float) -> bool:
+	var loop := Engine.get_main_loop() as SceneTree
+	var cam: Camera3D = loop.root.get_camera_3d() if loop != null and loop.root != null else null
+	if cam == null or not cam.is_inside_tree():
+		return true
+	return cam.global_position.distance_squared_to(pos) < reach * reach
 
 
 ## The Performance panel's effects budget ([member
@@ -221,7 +245,13 @@ static func spawn(
 	# sparks have filled the budget. They are rare enough not to need a cap.
 	if not priority and _over_budget():
 		return null
-	if not worth_spawning(pos):
+	# A ship's death blast is never culled for being off screen at the moment
+	# it goes: the kill cam then swoops onto the wreck, which showed only the
+	# dizzy emote with no explosion. Only distance can skip it.
+	var big := priority and scale >= 1.5
+	if big and not worth_spawning(pos, 1500.0) and not _near_camera(pos, 1500.0):
+		return null
+	if not big and not worth_spawning(pos):
 		return null
 	# Explosions have their own ceiling; past it only a big one (a death, a
 	# heavy blast) still goes off, so a hail of hit pops cannot bury the frame.
@@ -308,11 +338,33 @@ static func explosion(
 	color := Color.TRANSPARENT,
 	sound := &""
 ) -> void:
+	note_blast(pos, scale)
+	# The sculpted blast goes off whatever the addon toggle says: under
+	# Compatibility the addon's GPU particles can draw nothing at all.
+	if heavy or scale >= 1.2:
+		cartoon(parent, pos, scale)
 	if not enabled():
 		return
 	spawn(parent, Kind.BIG_IMPACT if heavy else Kind.EXPLOSION_AIR, pos, Vector3.UP, scale, color, true)
 	if sound != &"":
 		play(sound, pos)
+
+
+## Whether blasts also get a [CartoonBlast]: on the Compatibility renderer,
+## where the addon's particle explosions can be invisible.
+static var cartoon_blasts := RenderingServer.get_current_rendering_method() == "gl_compatibility"
+
+
+## A [CartoonBlast] sized for an addon explosion of [param scale], when
+## [member cartoon_blasts] is on and the spot is worth drawing.
+static func cartoon(parent: Node, pos: Vector3, scale: float) -> void:
+	if not cartoon_blasts or not worth_spawning(pos, 2500.0):
+		return
+	CartoonBlast.spawn(parent, pos, scale * CARTOON_SIZE, Vector3.UP, 0.55 if OS.has_feature("mobile") else 0.8)
+
+
+## Metres of cartoon blast radius per unit of addon explosion scale.
+const CARTOON_SIZE := 1.5
 
 
 ## A catastrophic planetary or capital-grade nuke detonation.
@@ -323,6 +375,8 @@ static func nuke(
 	color := Color.TRANSPARENT,
 	sound := &""
 ) -> void:
+	note_blast(pos, scale * 1.5)
+	cartoon(parent, pos, scale * 1.5)
 	if not enabled():
 		return
 	spawn(parent, Kind.NUKE, pos, Vector3.UP, scale, color, true)

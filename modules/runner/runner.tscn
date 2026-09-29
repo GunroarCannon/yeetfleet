@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" uid="uid://cu4bpdiswlllv" path="res://modules/flight/flight_test.tscn" id="1_flight"]
+[ext_resource type="Script" path="res://modules/runner/scripts/runner_boot.gd" id="2_boot"]
+
+[node name="Runner" instance=ExtResource("1_flight")]
+
+[node name="RunnerBoot" type="Node" parent="."]
+script = ExtResource("2_boot")

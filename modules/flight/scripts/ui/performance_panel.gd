@@ -74,7 +74,9 @@ func _build_rows() -> void:
 		presets.add_child(b)
 
 	_section("Smooth motion")
+	_check("Battery saver on phones (60 fps cap, 80% 3D resolution)", "battery_saver")
 	_check("Physics interpolation (no 60 Hz judder)", "physics_interpolation")
+	_check("Shield hit ripples (a flash per hit on a shield)", "shield_ripples")
 	_options("Frame cap", "max_fps", [["Uncapped", 0], ["30", 30], ["60", 60], ["120", 120], ["144", 144], ["240", 240]])
 	_options("V-Sync", "vsync", [["Off", 0], ["On", 1], ["Adaptive", 2]])
 	_options("Physics rate", "physics_tps", [["30 Hz", 30], ["60 Hz", 60], ["120 Hz", 120], ["240 Hz", 240]])

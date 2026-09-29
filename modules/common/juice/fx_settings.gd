@@ -68,3 +68,4 @@ static func _save() -> void:
 	cfg.set_value(SECTION, "addon_vfx", addon_vfx)
 	cfg.set_value(SECTION, "sprite_hits", sprite_hits)
 	cfg.save(SETTINGS_PATH)
+	GameDefaults.note_saved(SETTINGS_PATH)

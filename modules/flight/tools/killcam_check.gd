@@ -46,6 +46,8 @@ class LateSampler extends Node:
 func _initialize() -> void:
 	# The shipped defaults, not the player's saved dials.
 	JuiceSettings._loaded = true
+	# Enemy shield veils soak hits; these checks measure hull damage.
+	JuiceSettings.enemy_shields = false
 	var packed := load(SCENE_PATH) as PackedScene
 	_root = packed.instantiate() as FlightRoot
 	root.add_child(_root)
@@ -206,6 +208,13 @@ func _kill_victim() -> void:
 	_check(victim.killed_by_player, "a kill by the player's hit counts as the player's")
 	_check(_root.camera_rig.kill_cam_active(), "the player's kill starts the kill cam")
 	_cam_goal_d = _root.camera_rig._kc_dist
+	# A phone hitches on the frames after a kill (explosions, debris, shader
+	# compiles). One long frame must not carry the camera most of the way to
+	# the wreck — the swoop has to be seen leaving the player.
+	_root.camera_rig._process(0.25)
+	var w := _root.camera_rig.kill_cam_weight()
+	print("  kill cam after one 250 ms hitch frame: %.0f%% of the way in" % (w * 100.0))
+	_check(w < 0.1, "a hitch frame doesn't skip the swoop from the player to the wreck")
 	_next("killcam")
 
 

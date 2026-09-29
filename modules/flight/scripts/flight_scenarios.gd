@@ -18,7 +18,17 @@ extends Node
 ## Emitted when a scenario starts, ends, or its status line changes.
 signal changed
 
-enum Objective { FREE, DESTROY, SURVIVE }
+enum Objective { FREE, DESTROY, SURVIVE, DELIVER, GATES, SALVAGE, ESCORT, ASSAULT, DOCK }
+
+## The objectives [ScenarioObjectives] runs, → its [enum ScenarioObjectives.Kind].
+const OBJECTIVE_KINDS := {
+	Objective.DELIVER: ScenarioObjectives.Kind.DELIVER,
+	Objective.GATES: ScenarioObjectives.Kind.GATES,
+	Objective.SALVAGE: ScenarioObjectives.Kind.SALVAGE,
+	Objective.ESCORT: ScenarioObjectives.Kind.ESCORT,
+	Objective.ASSAULT: ScenarioObjectives.Kind.ASSAULT,
+	Objective.DOCK: ScenarioObjectives.Kind.DOCK,
+}
 enum State { IDLE, RUNNING, WON, LOST }
 
 const PLAYER_TEAM := 1
@@ -55,6 +65,18 @@ const DEFAULTS := {
 	"enemy_damage": 1.0,
 	"frozen_enemies": false,
 	"player_full_heal": true,
+	# The objective scenarios (see [ScenarioObjectives]).
+	"points": 3,
+	"gates": 8,
+	"pods": 6,
+	"spacing": 1600.0,
+	"time_limit": 0.0,
+	"route": 3500.0,
+	"escort_size": 4.0,
+	"escort_speed": 50.0,
+	"escort_hp": 1.0,
+	# Seconds between enemy waves on an escort (0 = none).
+	"wave_every": 0.0,
 }
 
 const PRESETS := {
@@ -89,7 +111,41 @@ const PRESETS := {
 		"enemies": 7, "enemy_arch": "Pirates", "enemy_distance": 350.0, "enemy_damage": 1.2,
 	},
 }
+const OBJECTIVE_PRESETS := {
+	"courier": {
+		"name": "Courier run", "desc": "Deliver the cargo to three drop points in order — follow the blue arrow. No shooting needed.",
+		"objective": Objective.DELIVER, "enemies": 0, "points": 3, "spacing": 1600.0, "time_limit": 180.0,
+	},
+	"race": {
+		"name": "Ring race", "desc": "Thread eight rings in order before the clock runs out.",
+		"objective": Objective.GATES, "enemies": 0, "gates": 8, "time_limit": 90.0,
+	},
+	"salvage": {
+		"name": "Salvage sweep", "desc": "Six cargo pods are drifting nearby. Touch them all to collect them.",
+		"objective": Objective.SALVAGE, "enemies": 0, "pods": 6, "spacing": 1100.0, "time_limit": 150.0,
+	},
+	"dock": {
+		"name": "Dock with the carrier", "desc": "A giant friendly carrier waits ahead. Fly into its glowing bay and slow right down.",
+		"objective": Objective.DOCK, "enemies": 0, "escort_size": 10.0, "route": 2500.0,
+	},
+	"escort": {
+		"name": "Escort the hauler", "desc": "Guard a big freighter to its destination. Pirates will go for it, not you.",
+		"objective": Objective.ESCORT, "enemies": 3, "enemy_arch": "Pirates", "wave_every": 22.0,
+		"escort_size": 4.0, "escort_speed": 55.0, "route": 3500.0, "enemy_distance": 700.0,
+	},
+	"capital": {
+		"name": "Escort the capital ship", "desc": "A huge capital ship crawls to the jump point under heavy attack. Keep it alive.",
+		"objective": Objective.ESCORT, "enemies": 4, "enemy_arch": "Military squad", "wave_every": 26.0, "allies": 2,
+		"escort_size": 9.0, "escort_speed": 32.0, "escort_hp": 2.5, "route": 4000.0, "enemy_distance": 900.0,
+	},
+	"assault": {
+		"name": "Carrier assault", "desc": "Bring down an enemy mothership. It keeps launching fighters while it lives.",
+		"objective": Objective.ASSAULT, "enemies": 2, "enemy_arch": "Pirates", "enemy_distance": 1400.0, "allies": 2,
+	},
+}
 const PRESET_ORDER := ["duel", "skirmish", "waves", "battle", "survive", "practice", "ambush"]
+## The objective scenarios, in picker order (after the fights).
+const OBJECTIVE_ORDER := ["courier", "race", "salvage", "dock", "escort", "capital", "assault"]
 
 var state: int = State.IDLE
 ## The running scenario's full settings ([constant DEFAULTS] + overrides).
@@ -105,6 +161,9 @@ var _allies: Array[AiShip] = []
 var _last_status := ""
 ## Seconds before the next wave drops in (the pause between waves).
 var _wave_delay := -1.0
+## The objective scenarios' goals and markers, or null.
+var _objectives: ScenarioObjectives = null
+var _wave_clock := 0.0
 
 
 func setup(root: FlightRoot) -> void:
@@ -114,12 +173,30 @@ func setup(root: FlightRoot) -> void:
 ## A preset's full settings, ready to hand to [method start] (or to edit).
 static func preset(id: String) -> Dictionary:
 	var c := DEFAULTS.duplicate()
-	c.merge(PRESETS.get(id, {}), true)
+	c.merge(PRESETS.get(id, OBJECTIVE_PRESETS.get(id, {})), true)
 	return c
 
 
 func is_running() -> bool:
 	return state == State.RUNNING
+
+
+## Seconds left on a running scenario's clock — an objective's time limit or
+## a hold-out's countdown — or -1 when nothing is timed.
+func time_left() -> float:
+	if state != State.RUNNING:
+		return -1.0
+	if _objectives != null:
+		return _objectives.time_left()
+	if int(config.get("objective", Objective.DESTROY)) == Objective.SURVIVE:
+		return maxf(float(config["survive_time"]) - elapsed, 0.0)
+	return -1.0
+
+
+## [param sec] as "1:05", for the HUD timers.
+static func clock_text(sec: float) -> String:
+	var s := ceili(sec)
+	return "%d:%02d" % [int(s / 60.0), s % 60]
 
 
 func start(settings: Dictionary) -> void:
@@ -142,8 +219,20 @@ func start(settings: Dictionary) -> void:
 	kills = 0
 	elapsed = 0.0
 	state = State.RUNNING
+	var objective := int(config["objective"])
+	if OBJECTIVE_KINDS.has(objective):
+		_objectives = ScenarioObjectives.new()
+		_objectives.name = "Objectives"
+		add_child(_objectives)
+		_objectives.begin(OBJECTIVE_KINDS[objective], config, _root, _spawner)
+		_wave_clock = 0.0
+		if int(config["enemies"]) > 0:
+			_next_wave()
+	else:
+		_next_wave()
+	# Wingmen after the enemy: under the ship cap the enemy must get its
+	# slots first, or a fight could start with nobody to fight.
 	_spawn_allies()
-	_next_wave()
 	_root.announce("%s — %s" % [config["name"], config["desc"]])
 	changed.emit()
 
@@ -154,6 +243,9 @@ func stop(restore_fleet := true) -> void:
 		return
 	state = State.IDLE
 	config = {}
+	if _objectives != null and is_instance_valid(_objectives):
+		_objectives.clear()
+	_objectives = null
 	_enemies.clear()
 	_allies.clear()
 	_wave_delay = -1.0
@@ -182,6 +274,8 @@ func status_line() -> String:
 			return "%s — VICTORY! %d kills" % [config.get("name", ""), kills]
 		State.LOST:
 			return "%s — SHOT DOWN. Tap to retry" % config.get("name", "")
+	if _objectives != null:
+		return _objectives.status()
 	var foes := _alive(_enemies).size()
 	var friends := _alive(_allies).size()
 	var line := String(config["name"]).to_upper()
@@ -206,6 +300,23 @@ func _process(delta: float) -> void:
 		return
 	var foes := _alive(_enemies)
 	var objective := int(config["objective"])
+	if _objectives != null:
+		var result := _objectives.tick(delta)
+		if result != 0:
+			_finish(result > 0)
+			return
+		# Escorts: fresh attackers every so often, dropping in near the convoy.
+		var every := float(config["wave_every"])
+		if every > 0.0:
+			_wave_clock += delta
+			if _wave_clock >= every:
+				_wave_clock = 0.0
+				_next_wave()
+		var line0 := status_line()
+		if line0 != _last_status:
+			_last_status = line0
+			changed.emit()
+		return
 	if objective == Objective.SURVIVE:
 		if elapsed >= float(config["survive_time"]):
 			_finish(true)
@@ -214,6 +325,13 @@ func _process(delta: float) -> void:
 		if foes.size() < int(config["enemies"]) and _wave_delay < 0.0:
 			_wave_delay = 3.0
 	elif foes.is_empty() and _wave_delay < 0.0:
+		# Nobody has gone down yet, so this wave never arrived (the spawner was
+		# full): call it again. Finishing here handed out a free win — three
+		# stars and the pay — the moment a level started.
+		if kills == 0 and int(config["enemies"]) > 0:
+			wave = maxi(wave - 1, 0)
+			_wave_delay = 1.0
+			return
 		if wave >= int(config["waves"]):
 			_finish(true)
 			return

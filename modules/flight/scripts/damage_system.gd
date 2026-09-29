@@ -241,6 +241,13 @@ func _break_off(placement: Placement, speed_fraction: float) -> void:
 		_view.part_nodes.erase(path)
 		_view.part_meshes.erase(path)
 		_view.part_materials.erase(path)
+		# A baked hull hides every part's own mesh and still carries this
+		# part in its one combined mesh: show the flying piece, rebake without it.
+		if _view.baked_mesh_instance != null and is_instance_valid(_view.baked_mesh_instance):
+			_show_meshes(node)
+			_view.baked_mesh_instance.queue_free()
+			_view.baked_mesh_instance = null
+			_view.enable_baked_mesh(true)
 
 		# Prune muzzles belonging to this detached part so broken guns cannot fire:
 		var filtered_muzzles: Array[Dictionary] = []
@@ -377,12 +384,25 @@ func reset() -> void:
 		_model._out_of_control_timer = 0.0
 
 
+static func _show_meshes(node: Node) -> void:
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			(child as MeshInstance3D).visible = true
+		_show_meshes(child)
+
+
 ## Break off ALL remaining parts (used on total destruction / game over).
 ## Returns the list of all BrokenPart objects created.
 func break_all_parts() -> Array[BrokenPart]:
 	var out: Array[BrokenPart] = []
 	if _view == null or _model == null:
 		return out
+	# Back from a baked hull to the parts, so the parts are what flies apart
+	# (the baked mesh would otherwise hang on, whole, over invisible debris).
+	if _view.baked_mesh_instance != null and is_instance_valid(_view.baked_mesh_instance):
+		_view.enable_baked_mesh(false)
+		_view.baked_mesh_instance.queue_free()
+		_view.baked_mesh_instance = null
 	var placements := _view.resolution.placements
 	for placement in placements:
 		var path := placement.path

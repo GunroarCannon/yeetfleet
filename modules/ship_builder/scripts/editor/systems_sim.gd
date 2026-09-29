@@ -24,12 +24,14 @@ signal weapon_switched(weapon: Dictionary)
 const PhysicalShockwave = preload("res://modules/physics/scripts/physical_shockwave.gd")
 const PlanetDebrisBuilder = preload("res://modules/common/planets/planet_debris_builder.gd")
 
-## The comprehensive weapon arsenal available on any ship.
+## The comprehensive weapon arsenal available on any ship. [code]short[/code]
+## is the one-word name the mobile HUD's charge band shows.
 const WEAPONS: Array[Dictionary] = [
 	{
 		"id": "pulse_laser",
 		"size_class": "fighter",
 		"name": "Pulse Laser",
+		"short": "PULSE",
 		"desc": "High-velocity coherent energy bolts. Fast, reliable, versatile.",
 		"type": "bolt",
 		"damage": 28.0,
@@ -55,6 +57,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "sustained_laser",
 		"size_class": "corvette",
 		"name": "Sustained Blaster Laser",
+		"short": "BLASTER",
 		"desc": "Luminous incandescent laser beam — hold to carve through hulls and melt rock. Blasts intense emerald light along its whole length.",
 		"type": "beam",
 		"damage": 60.0,
@@ -79,6 +82,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "heavy_pulse_blaster",
 		"size_class": "fighter",
 		"name": "Blaster Laser (Extended Light)",
+		"short": "X-BLASTER",
 		"desc": "High-velocity light bolts that blast in bright rapid streams and persist across long distances, illuminating deep space.",
 		"type": "bolt",
 		"damage": 48.0,
@@ -104,6 +108,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "hyper_beam",
 		"size_class": "capital",
 		"name": "Hyperion Death Beam",
+		"short": "DEATH BEAM",
 		"desc": "Massive continuous solar-gold beam blast that lasts for extended duration, tearing through anything in its line of sight.",
 		"type": "beam",
 		"damage": 180.0,
@@ -128,6 +133,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "twin_autocannon",
 		"size_class": "fighter",
 		"name": "Twin Autocannon",
+		"short": "AUTOCANNON",
 		"desc": "Heavy kinetic tungsten rounds. High fire rate, aggressive recoil chatter.",
 		"type": "kinetic",
 		"damage": 20.0,
@@ -152,6 +158,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "gauss_slugger",
 		"size_class": "hauler",
 		"name": "Mass Driver Gauss Cannon",
+		"short": "GAUSS",
 		"desc": "Magnetically accelerated 12-tonne tungsten flechette. Punches clean through multiple hulls; brutal kinetic knockback.",
 		"type": "kinetic",
 		"damage": 320.0,
@@ -176,6 +183,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "plasma_annihilator",
 		"size_class": "corvette",
 		"name": "Plasma Annihilator",
+		"short": "PLASMA",
 		"desc": "Magnetically bottled plasma spheres. Heavy splash blast that knocks targets.",
 		"type": "plasma",
 		"damage": 95.0,
@@ -200,6 +208,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "gamma_burst",
 		"size_class": "hauler",
 		"name": "Gamma-Ray Burst Cannon",
+		"short": "GAMMA",
 		"desc": "Wide-angle short-range gamma detonation. Vaporises everything in a cone — point blank devastation.",
 		"type": "plasma",
 		"damage": 220.0,
@@ -224,6 +233,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "seeker_missiles",
 		"size_class": "corvette",
 		"name": "Seeker Swarm Missiles",
+		"short": "SWARM",
 		"desc": "Guided micro-missiles that lock and home aggressively on hostile craft.",
 		"type": "missile",
 		"damage": 150.0,
@@ -248,6 +258,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "hellfire_missiles",
 		"size_class": "hauler",
 		"name": "Hellfire Heavy Missiles",
+		"short": "HELLFIRE",
 		"desc": "Large dual-stage heavy missiles with smoke and fire trails. Heavy armor-penetrating warhead.",
 		"type": "missile",
 		"damage": 340.0,
@@ -273,6 +284,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "nova_torpedo",
 		"size_class": "capital",
 		"name": "Titan Nova Torpedo",
+		"short": "TORPEDO",
 		"desc": "Enormous capital warhead with 6 stabilizing fins. Slow but devastating — cracks planetary crust and obliterates fleets.",
 		"type": "missile",
 		"damage": 800.0,
@@ -298,6 +310,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "antimatter_railgun",
 		"size_class": "capital",
 		"name": "Antimatter Spinal Railgun",
+		"short": "RAILGUN",
 		"desc": "Relativistic antimatter slug. Heavy whole-ship kickback; punches through mega ships and shatters planetary crust.",
 		"type": "railgun",
 		"damage": 850.0,
@@ -322,6 +335,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "planet_buster_beam",
 		"size_class": "capital",
 		"name": "Planet-Buster Tachyon Lance",
+		"short": "TACHYON",
 		"desc": "Continuous focused death ray. Melts mega ships and annihilates entire planets if held on target.",
 		"type": "beam",
 		"damage": 50.0,
@@ -346,6 +360,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "singularity_vortex",
 		"size_class": "hauler",
 		"name": "Event Horizon Singularity Cannon",
+		"short": "SINGULARITY",
 		"desc": "Launches a micro-singularity with an accretion disk. Exerts intense gravitational suction on nearby debris and crafts, then collapses in a violet implosion.",
 		"type": "singularity",
 		"damage": 650.0,
@@ -371,6 +386,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "flak_scatter",
 		"size_class": "fighter",
 		"name": "Shredder Flak Array",
+		"short": "FLAK",
 		"desc": "Multi-barrel kinetic flak battery. Discharges a dense 10-pellet tungsten flechette spread that shreds debris fields, incoming torpedoes, and fighter formations.",
 		"type": "flak",
 		"damage": 42.0,
@@ -396,6 +412,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "cryo_lance",
 		"size_class": "corvette",
 		"name": "Zero-Kelvin Cryo Lance",
+		"short": "CRYO",
 		"desc": "Sustained sub-zero beam of coherent cryo-photons. Drains target thermal energy, freezing angular tumble and locking thrusters while shattering brittle asteroid crusts.",
 		"type": "beam",
 		"damage": 95.0,
@@ -421,6 +438,7 @@ const WEAPONS: Array[Dictionary] = [
 		"id": "solar_flamer",
 		"size_class": "fighter",
 		"name": "Helios Solar Flamer",
+		"short": "FLAMER",
 		"desc": "Projects an ultra-dense torrent of incandescent solar coronal plasma. Engulfs targets in churning solar fire, melting through armor plates and vaporizing rocky fragments.",
 		"type": "plasma",
 		"damage": 52.0,
@@ -645,7 +663,10 @@ func _exit_tree() -> void:
 ## JuiceSettings.max_enemy_shots]. Counted once per frame and kept up to date
 ## by [method _launch] in between.
 static func enemy_shots_live() -> int:
-	var f := Engine.get_process_frames()
+	# Recounted every physics step as well as every frame: a slow frame runs
+	# several catch-up steps, and a per-frame count let every gun fire against
+	# the same stale number through all of them — the cap of 20 let 200 by.
+	var f := Engine.get_process_frames() * 64 + Engine.get_physics_frames() % 64
 	if f != _enemy_live_frame:
 		_enemy_live_frame = f
 		var n := 0
@@ -1603,6 +1624,11 @@ func reload_progress() -> float:
 	return clampf(1.0 - soonest * rate, 0.0, 1.0)
 
 
+## How full the capacitor is, 0..1 — the charge the guns fire from.
+func charge_fraction() -> float:
+	return clampf(energy / _capacity(), 0.0, 1.0)
+
+
 ## Whether the capacitor holds enough for one more shot of the active weapon.
 func has_energy_for_shot() -> bool:
 	return energy >= float(get_active_weapon().get("cost", 1.0))
@@ -1899,8 +1925,12 @@ func _launch(muzzle: Transform3D, dir: Vector3, weapon_data: Dictionary, muzzle_
 		return
 	# The whole-game enemy cap is per shot too: a 60-gun volley checked once
 	# at the trigger went 60 past it.
-	if not _shooting_for_player and _enemy_live_count >= int(JuiceSettings.max_enemy_shots):
-		return
+	if not _shooting_for_player:
+		if enemy_shots_live() >= int(JuiceSettings.max_enemy_shots):
+			return
+		# Counted now, not at the next recount: every gun firing in the same
+		# step used to see the same stale total and all got through.
+		_enemy_live_count += 1
 	var is_beam: bool = bool(weapon_data.get("beam", false))
 	# Spawn projectile directly at muzzle tip so lasers emerge directly from gun barrels
 	var world := muzzle

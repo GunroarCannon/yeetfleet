@@ -10,6 +10,11 @@
 ##
 ## Load order, per key: code default < shipped default < player's file.
 ##
+## With [member auto_bake] on (the default), a desktop run from the project
+## also mirrors every settings save straight into the shipped copy
+## ([method note_saved]), so tuning done in the flight test becomes the
+## game's defaults without a separate "save as game defaults" step.
+##
 ## Only a PC run from the project can bake (`res://` is read-only in an
 ## exported build and on a phone); [method can_bake] says so. Headless runs
 ## never write, so smoke tests cannot change what ships.
@@ -20,11 +25,15 @@ const DEFAULTS_DIR := "res://data/game_defaults/"
 
 ## Session [member Session.prefs] keys that are debug/testing state, not
 ## tuning: never baked into what ships.
-const SKIP_PREFS: Array[String] = ["time_scale", "warp", "mobile_layout"]
+const SKIP_PREFS: Array[String] = ["time_scale", "warp", "mobile_layout", "tutorial_done"]
 
 ## user:// path → the Callable that reloads that class from disk. Filled as each
 ## class loads through [method load_layered].
 static var _registered: Dictionary = {}
+
+## Mirror each save into [constant DEFAULTS_DIR] as it happens (only where
+## [method can_bake]). Kept in [Session] prefs so it can be switched off.
+static var auto_bake := true
 
 
 ## Load [param user_path] into [param cfg] on top of its shipped default.
@@ -83,6 +92,23 @@ static func bake() -> int:
 			push_error("[GameDefaults] could not write " + shipped_path(user_path))
 	print("[GameDefaults] baked %d settings files into %s" % [written, DEFAULTS_DIR])
 	return written
+
+
+## A settings class just wrote [param user_path]: with [member auto_bake] on,
+## copy it into the shipped defaults too (debug-only prefs stripped). Cheap —
+## one small file — and a no-op on phones, exports, headless runs and tool scripts.
+static func note_saved(user_path: String) -> void:
+	# Tool scripts (checks, screenshot shots) run with --script and tweak
+	# settings for their own ends: never let those ship.
+	if not auto_bake or not can_bake() or OS.get_cmdline_args().has("--script"):
+		return
+	var cfg := ConfigFile.new()
+	if cfg.load(user_path) != OK:
+		return
+	_strip_debug(cfg)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DEFAULTS_DIR))
+	if cfg.save(ProjectSettings.globalize_path(shipped_path(user_path))) != OK:
+		push_error("[GameDefaults] could not write " + shipped_path(user_path))
 
 
 ## Delete the player's own settings files and re-load every class, so each

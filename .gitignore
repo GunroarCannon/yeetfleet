@@ -3,3 +3,8 @@
 /android/
 out/
 *.txt
+
+# Android build outputs
+*.apk
+*.aab
+*.idsig

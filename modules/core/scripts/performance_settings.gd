@@ -47,6 +47,18 @@ static var max_debris := 120
 static var debris_lifetime := 1.0
 ## Mesh LOD aggressiveness: pixels of error allowed before a lower LOD is used.
 static var mesh_lod := 1.0
+## Phones only: cap the frame rate at [constant BATTERY_FPS] (a 90/120 Hz
+## screen otherwise renders the whole scene twice as often for the same game)
+## and the 3D render scale at [constant BATTERY_RENDER_SCALE] (invisible at a
+## phone's pixel density). A new field rather than new defaults, so it reaches
+## players with saved settings too.
+static var battery_saver := true
+const BATTERY_FPS := 60
+const BATTERY_RENDER_SCALE := 0.8
+## The flash/ripple a shield (the player's bubble, an enemy's veil) throws
+## on every hit. Off by default: under sustained fire it was a new sprite
+## effect every few frames for a cosmetic shimmer.
+static var shield_ripples := false
 
 static var _loaded := false
 
@@ -103,6 +115,8 @@ static func get_value(field: String) -> Variant:
 		"max_debris": return max_debris
 		"debris_lifetime": return debris_lifetime
 		"mesh_lod": return mesh_lod
+		"battery_saver": return battery_saver
+		"shield_ripples": return shield_ripples
 	return null
 
 
@@ -129,13 +143,15 @@ static func _assign(field: String, value: Variant) -> void:
 		"max_debris": max_debris = clampi(int(value), 10, 500)
 		"debris_lifetime": debris_lifetime = clampf(float(value), 0.1, 3.0)
 		"mesh_lod": mesh_lod = clampf(float(value), 0.25, 8.0)
+		"battery_saver": battery_saver = bool(value)
+		"shield_ripples": shield_ripples = bool(value)
 		_: push_warning("PerformanceSettings: unknown field %s" % field)
 
 
 const FIELDS := [
 	"physics_interpolation", "max_fps", "vsync", "render_scale", "msaa", "fxaa",
 	"shadows", "glow", "physics_tps", "max_ai_ships", "vfx_budget", "max_debris",
-	"debris_lifetime", "mesh_lod",
+	"debris_lifetime", "mesh_lod", "battery_saver", "shield_ripples",
 ]
 
 
@@ -144,6 +160,7 @@ static func save_to_disk() -> void:
 	for field: String in FIELDS:
 		cfg.set_value(SECTION, field, get_value(field))
 	cfg.save(SETTINGS_PATH)
+	GameDefaults.note_saved(SETTINGS_PATH)
 
 
 static func load_from_disk() -> void:
@@ -162,7 +179,8 @@ static func load_from_disk() -> void:
 static func apply(tree: SceneTree, supersample := 1.0) -> void:
 	ensure_loaded()
 	tree.physics_interpolation = physics_interpolation
-	Engine.max_fps = max_fps
+	var saving := battery_saver and OS.has_feature("mobile")
+	Engine.max_fps = (BATTERY_FPS if max_fps == 0 else mini(max_fps, BATTERY_FPS)) if saving else max_fps
 	Engine.physics_ticks_per_second = physics_tps
 	# Enough catch-up steps that a slow frame at a high tick rate doesn't make
 	# the simulation fall behind real time.
@@ -173,7 +191,7 @@ static func apply(tree: SceneTree, supersample := 1.0) -> void:
 		]
 		DisplayServer.window_set_vsync_mode(modes[vsync])
 	var vp := tree.root
-	vp.scaling_3d_scale = render_scale * supersample
+	vp.scaling_3d_scale = (minf(render_scale, BATTERY_RENDER_SCALE) if saving else render_scale) * supersample
 	vp.msaa_3d = [
 		Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_8X,
 	][msaa]

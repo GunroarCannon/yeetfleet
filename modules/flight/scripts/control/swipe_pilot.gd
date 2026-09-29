@@ -109,6 +109,7 @@ func _on_swipe(start: Vector2, end: Vector2, seconds: float) -> void:
 	var dash := lerpf(_cruise(), base_speed() * JuiceSettings.swipe_dash, strength)
 	_speed = maxf(dash, _cruise())
 	_heading_glow = 1.0
+	root.tutorial_note("swipe")
 
 
 func _on_tap(_pos: Vector2) -> void:
@@ -123,6 +124,7 @@ func _on_tap(_pos: Vector2) -> void:
 	if target != null:
 		root.locked_target = target
 	_fire_time = VOLLEY_TIME
+	root.tutorial_note("tap_fire")
 
 
 func _set_boost(on: bool) -> void:
@@ -138,6 +140,9 @@ func physics_tick(delta: float) -> void:
 	var pos := model.global_position
 	model.command.throttle = 0.0
 	model.command.roll = 0.0
+
+	# A live kill chain pulls the heading itself on to the next enemy.
+	heading = chain_bend(heading, _speed, delta)
 
 	# Course correction: bend the heading onto the best target near it.
 	steer_dir = heading
@@ -189,7 +194,14 @@ func physics_tick(delta: float) -> void:
 func frame_tick(delta: float) -> void:
 	super(delta)
 	if root.camera_rig != null:
-		root.camera_rig.profile_distance = 1.0 + JuiceSettings.swipe_cam_zoom
+		var rig := root.camera_rig
+		rig.profile_distance = 1.0 + JuiceSettings.swipe_cam_zoom
+		# However pinch, hits and dashes stack up, the camera stays inside
+		# this window: never lost in the distance, never on top of the hull.
+		rig.distance_limits = Vector2(
+			JuiceSettings.swipe_cam_min, maxf(JuiceSettings.swipe_cam_max, JuiceSettings.swipe_cam_min)
+		)
+		_update_look_ahead(rig)
 	_heading_glow = move_toward(_heading_glow, 0.0, delta / 1.4)
 	if model == null:
 		return
@@ -205,6 +217,49 @@ func frame_tick(delta: float) -> void:
 		lay_arrow(0, steer_dir, reach, ARROW_BLUE, _heading_glow * 0.8)
 	else:
 		hide_arrows()
+
+
+## Moving, the camera looks ahead along the flight — further the faster the
+## ship goes, so a dash opens up what it is flying into and there is more of
+## it on screen to tap at. Leans toward the ship the path is bending onto.
+## Measured against the camera's distance, like the slingshot's, so it frames
+## the same at any zoom; the rig eases it.
+func _update_look_ahead(rig: FlightCamera) -> void:
+	var cam := root.camera_node()
+	if model == null or cam == null:
+		rig.look_ahead = Vector3.ZERO
+		return
+	var pos := model.global_position
+	var reach := minf(cam.global_position.distance_to(pos), rig.hull_length * 40.0) * JuiceSettings.swipe_look_ahead
+	# Lining up a swipe from the ship: look where it is about to be flung —
+	# the longer the pull, the further — so the player sees what they aim at
+	# before letting go. The rig eases into it.
+	var a := gestures.start_position()
+	var b := gestures.current_position()
+	if gestures.is_down() and not camera_drag and a.distance_to(b) > gestures.move_threshold:
+		var pull := clampf(a.distance_to(b) / (short_edge() * 0.5), 0.0, 1.0)
+		var aim := view_dir(b - a)
+		if aim != Vector3.ZERO:
+			rig.look_ahead = aim * reach * lerpf(0.5, 1.2, pull)
+			return
+	var v := model.velocity
+	var sp := v.length()
+	if sp < 5.0:
+		rig.look_ahead = Vector3.ZERO
+		return
+	var frac := clampf(sp / maxf(base_speed() * JuiceSettings.swipe_dash, 1.0), 0.0, 1.0)
+	var look := v / sp
+	var t: AiShip = null
+	if is_instance_valid(assist_target):
+		t = assist_target
+	elif is_instance_valid(chain_target):
+		t = chain_target
+	if t != null:
+		var to := t.global_position - pos
+		if to.length() > 1.0:
+			look = (look + to.normalized()).normalized()
+			reach = minf(reach, to.length() * 0.6)
+	rig.look_ahead = look * reach * lerpf(0.3, 1.0, frac)
 
 
 func draw(canvas: Control) -> void:

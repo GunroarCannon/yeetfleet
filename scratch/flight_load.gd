@@ -1,0 +1,6 @@
+extends SceneTree
+func _initialize() -> void:
+	for p in ["res://modules/flight/scripts/flight_root.gd", "res://modules/flight/scripts/flight_camera.gd", "res://modules/flight/scripts/ui/mobile_hud.gd", "res://modules/flight/scripts/ui/flight_hud.gd", "res://modules/flight/scripts/ui/player_callouts.gd", "res://modules/flight/scripts/ui/big_notice.gd", "res://modules/flight/scripts/power_ups.gd", "res://modules/flight/scripts/flight_scenarios.gd", "res://modules/flight/scripts/scenario_objectives.gd", "res://modules/common/juice/cartoon_blast.gd", "res://modules/common/juice/addon_vfx.gd", "res://modules/common/ui/star_pop_row.gd", "res://modules/menu/scripts/ui/loading_screen.gd", "res://modules/flight/scripts/ui/campaign_level_overlay.gd", "res://modules/campaign/scripts/level_gen.gd", "res://modules/common/juice/juice_settings.gd", "res://modules/flight/scripts/control/slingshot_pilot.gd", "res://modules/flight/scripts/ui/controls_panel.gd", "res://modules/menu/scripts/ui/debug_jump.gd", "res://modules/menu/scripts/ui/home_screen.gd", "res://modules/menu/scripts/menu_stage.gd", "res://modules/whimsy/scripts/face_sticker.gd", "res://modules/flight/scripts/space_scene.gd"]:
+		var s := load(p)
+		print(p.get_file(), " ", "ok" if s != null and (s as GDScript).can_instantiate() else "FAIL")
+	quit()

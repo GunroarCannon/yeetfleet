@@ -10,13 +10,18 @@
 ## body ([SlingRun]). It can be caught by a planet's orbit. When it slows down
 ## or runs out of time it brakes and it is ready again.
 ##
-## The camera: while aiming it pulls out and looks along the aim; in flight it
+## The camera: while aiming it swings round behind the ship to look along the
+## aim (where the launch will throw it) and pulls out; in flight it
 ## follows the flight path (not the spin), looks ahead of the ship (at the
 ## magnet's pick when there is one) and pulls out with speed; as the ship slows
 ## or nears another ship it eases back in ([member JuiceSettings.sling_close_zoom]).
 ##
-## While it flies: a tap shoots toward the tapped point (pulled onto a ship near
-## it), and a thumb on the ship catches it for the next launch — both toggles.
+## A tap off the ship shoots: at a ship near the tap, else (auto-aim, [member
+## JuiceSettings.sling_tap_auto_aim]) at the best target on screen — in flight
+## and, with auto-aim, while resting between launches. In flight the guns can
+## also fire on their own at whatever the launch is heading for ([member
+## JuiceSettings.sling_auto_fire]), and a thumb on the ship catches it for the
+## next launch. All toggles.
 class_name SlingshotPilot
 extends MovePilot
 
@@ -26,6 +31,13 @@ const VOLLEY_TIME := 0.35
 const TAP_MAGNET_PX := 90.0
 ## The aim snaps onto a ship within this many degrees of the aim line.
 const AIM_SNAP_DEG := 12.0
+## Auto-aim taps pick from on-screen ships within this range, m.
+const TAP_AIM_RANGE := 1500.0
+## Auto-fire in flight: targets within this range and cone (dot) of the flight.
+const AUTO_FIRE_RANGE := 900.0
+const AUTO_FIRE_CONE_COS := 0.5
+## Once the pull is past this, the camera swings behind the ship along the aim.
+const AIM_CAM_POWER := 0.12
 
 var run: SlingRun = null
 ## Finger → ship screen offset while aiming (pixels), and the launch it gives.
@@ -39,6 +51,11 @@ var _fire_time := 0.0
 ## The camera's frame when the aim began: the pull is read in it, so the view
 ## easing out and looking ahead doesn't move the aim under the thumb.
 var _aim_frame := Basis()
+## The ship's screen position when the aim began. The pull is measured from
+## here, not from where the ship is drawn now: a camera that moved (or a ship
+## still drifting) shifted the ship under a still thumb, changed the aim, which
+## moved the camera again — the "aim goes wild" feedback loop.
+var _aim_anchor := Vector2.INF
 ## The ship the aim has snapped onto, or null.
 var aim_target: AiShip = null
 ## The flight direction the camera follows (see [member FlightCamera.follow_dir]).
@@ -107,10 +124,11 @@ func _begin_aim() -> void:
 	run.set_aiming(true)
 	var cam := root.camera_node()
 	_aim_frame = cam.global_transform.basis.orthonormalized() if cam != null else Basis()
+	_aim_anchor = ship_screen_pos()
 
 
 func _update_aim(finger: Vector2) -> void:
-	var s := ship_screen_pos()
+	var s := _aim_anchor if _aim_anchor != Vector2.INF else ship_screen_pos()
 	if s == Vector2.INF:
 		return
 	pull = finger - s
@@ -130,6 +148,7 @@ func _on_released(_pos: Vector2) -> void:
 		return
 	if aim_power > 0.08 and aim_dir != Vector3.ZERO:
 		run.launch(aim_dir, aim_power)
+		root.tutorial_note("launch")
 	else:
 		run.set_aiming(false)
 	pull = Vector2.ZERO
@@ -138,23 +157,34 @@ func _on_released(_pos: Vector2) -> void:
 
 
 func _on_tap(pos: Vector2) -> void:
-	if run == null or run.state != SlingRun.State.FLYING or not JuiceSettings.sling_tap_fire:
+	if run == null or not JuiceSettings.sling_tap_fire:
 		return
-	if near_ship(pos) and JuiceSettings.sling_catch:
+	var flying := run.state == SlingRun.State.FLYING
+	# Resting between launches, only an auto-aim tap shoots.
+	if not flying and not (JuiceSettings.sling_tap_auto_aim and run.state == SlingRun.State.READY):
+		return
+	if near_ship(pos) and (JuiceSettings.sling_catch or not flying):
 		return
 	var cam := root.camera_node()
 	if cam == null:
 		return
-	# Pulled onto a ship near the tap, else at the tapped point at the ship's depth.
+	# Pulled onto a ship near the tap; else, with auto-aim, the best target on
+	# screen; else at the tapped point at the ship's depth.
 	var best: AiShip = null
 	var best_px := TAP_MAGNET_PX
+	var on_screen: Array = []
 	for ship in root.live_enemies():
-		if cam.is_position_behind(ship.global_position):
+		if ship == root.controlled_ai or cam.is_position_behind(ship.global_position):
 			continue
+		if cam.is_position_in_frustum(ship.global_position):
+			on_screen.append(ship)
 		var px := cam.unproject_position(ship.global_position).distance_to(pos)
 		if px < best_px:
 			best_px = px
 			best = ship
+	if best == null and JuiceSettings.sling_tap_auto_aim:
+		best = TargetPriority.best(on_screen, model.global_position, Vector3.ZERO, -1.0, TAP_AIM_RANGE)
+	root.tutorial_note("tap_fire")
 	var sys := root.active_systems()
 	if best != null:
 		root.locked_target = best
@@ -202,9 +232,18 @@ func physics_tick(delta: float) -> void:
 		SlingRun.State.READY, SlingRun.State.RECALLING:
 			model.command.yaw = 0.0
 			model.command.pitch = 0.0
-	var firing := _fire_time > 0.0 and run.state == SlingRun.State.FLYING
+	var firing := _fire_time > 0.0 and run.state in [SlingRun.State.FLYING, SlingRun.State.READY]
 	if _fire_time > 0.0:
 		_fire_time -= delta
+	if run.state == SlingRun.State.FLYING and JuiceSettings.sling_auto_fire:
+		var auto := _auto_fire_target()
+		if auto != null:
+			root.locked_target = auto
+			firing = true
+	# Resting, an auto-aimed volley turns the nose onto its target.
+	if firing and run.state == SlingRun.State.READY and root.locked_target != null \
+			and is_instance_valid(root.locked_target):
+		root.steer_nose_toward(root.locked_target.global_position - model.global_position)
 	var sys := root.active_systems()
 	if not firing and sys != null:
 		sys.aim_override = Vector3.INF
@@ -213,11 +252,31 @@ func physics_tick(delta: float) -> void:
 	root.set_firing(firing)
 
 
+## Launched: what the guns fire at on their own — the magnet's pick, else
+## the best enemy ahead of the flight. Null when there is nothing.
+func _auto_fire_target() -> AiShip:
+	if magnet_target != null and is_instance_valid(magnet_target) and magnet_target._alive 			and TargetPriority.score(magnet_target, model.global_position, Vector3.ZERO, -1.0, AUTO_FIRE_RANGE) > 0.0:
+		return magnet_target
+	var v := model.velocity
+	if v.length() < 5.0:
+		return null
+	var ships: Array = []
+	for s in root.live_enemies():
+		if s != root.controlled_ai:
+			ships.append(s)
+	return TargetPriority.best(ships, model.global_position, v.normalized(), AUTO_FIRE_CONE_COS, AUTO_FIRE_RANGE)
+
+
 ## Where the steady camera looks: along the flight while the ship moves;
-## held still (ZERO) while it sits or is being aimed.
+## along the aim once the pull is under way (the view swings round behind
+## the ship to look where it will fly); held still (ZERO) while it sits.
 func _flight_dir() -> Vector3:
-	if model == null or run == null or run.state == SlingRun.State.AIMING:
+	if model == null or run == null:
 		return Vector3.ZERO
+	if run.state == SlingRun.State.AIMING:
+		if JuiceSettings.sling_aim_cam_hold:
+			return Vector3.ZERO
+		return aim_dir if aim_power > AIM_CAM_POWER else Vector3.ZERO
 	var v := model.velocity
 	return v if v.length() > 8.0 else Vector3.ZERO
 
@@ -228,7 +287,9 @@ func frame_tick(delta: float) -> void:
 		return
 	# The camera rides the flight, not the tumbling hull.
 	root.camera_rig.follow_dir = _dir_cb if JuiceSettings.sling_steady_cam else Callable()
-	root.camera_rig.follow_dir_rate = 1.6
+	# Aiming, the swing round behind the ship is gentle, so the view never
+	# whips about under the thumb.
+	root.camera_rig.follow_dir_rate = 1.3 if run.state == SlingRun.State.AIMING else 1.6
 	if run.state == SlingRun.State.AIMING and aim_power > 0.02:
 		var tint := ARROW_BLUE.lerp(Color(0.75, 0.35, 1.0), aim_power * 0.7)
 		lay_arrow(0, aim_dir, aim_power, tint, 0.6 + 0.4 * aim_power)
@@ -256,7 +317,18 @@ func _update_camera() -> void:
 	match run.state:
 		SlingRun.State.AIMING:
 			zoom = aim_power * JuiceSettings.sling_zoom * 0.5
-			ahead = aim_dir * reach * aim_power
+			# Look where the pull will throw the ship (toward the ship the
+			# launch magnet will bend onto, if any), from the first tug.
+			var aim_look := aim_dir
+			var pick := find_magnet(aim_dir)
+			if pick != null:
+				var to_pick := pick.global_position - pos
+				if to_pick.length() > 1.0:
+					aim_look = (aim_dir + to_pick.normalized()).normalized()
+					reach = minf(reach, to_pick.length() * 0.7)
+			ahead = aim_look * reach * lerpf(0.35, 1.2, aim_power)
+			if JuiceSettings.sling_aim_cam_hold:
+				ahead = Vector3.ZERO
 		SlingRun.State.FLYING:
 			var sf := run.speed_fraction()
 			zoom = maxf(sf, 0.35) * JuiceSettings.sling_zoom * (1.0 - near * 0.8)
@@ -272,6 +344,11 @@ func _update_camera() -> void:
 		_:
 			close_in = maxf(near, 0.7)
 	rig.hold_zoom(zoom)
+	# The same window as the swipe camera: however far the launch pulls it
+	# out, the ship never shrinks to a speck (nor fills the screen).
+	rig.distance_limits = Vector2(
+		JuiceSettings.swipe_cam_min, maxf(JuiceSettings.swipe_cam_max, JuiceSettings.swipe_cam_min)
+	)
 	rig.look_ahead = ahead
 	rig.profile_distance = 1.0 - close_in * JuiceSettings.sling_close_zoom
 
@@ -293,18 +370,61 @@ func draw(canvas: Control) -> void:
 	var s := ship_screen_pos()
 	if s == Vector2.INF:
 		return
+	var t := Time.get_ticks_msec() * 0.001
+	var gr := grab_radius()
 	if run.state == SlingRun.State.READY:
-		# A soft ring: "grab me".
-		canvas.draw_arc(s, grab_radius() * 0.8, 0.0, TAU, 40, Color(1.0, 0.85, 0.35, 0.35), 2.0, true)
+		# "Grab me": a dashed ring slowly turning, breathing a little.
+		var r := gr * (0.8 + 0.04 * sin(t * 3.0))
+		for i in 12:
+			var a0 := t * 0.8 + TAU * float(i) / 12.0
+			canvas.draw_arc(s, r, a0, a0 + TAU / 12.0 * 0.55, 6, Color(1.0, 0.85, 0.35, 0.45), 2.5, true)
 	elif run.state == SlingRun.State.AIMING and pull.length() > 1.0:
-		var col := Color(1.0, 0.8, 0.3).lerp(Color(1.0, 0.3, 0.2), aim_power)
-		# The band back to the finger, and the launch arrow the other way.
-		canvas.draw_line(s, s + pull, Color(col, 0.6), 3.0, true)
-		canvas.draw_circle(s + pull, 8.0, Color(col, 0.8))
+		_draw_pull_band(canvas, s, gr, t)
 		if JuiceSettings.move_arrows:
 			return
+		var col := Color(1.0, 0.8, 0.3).lerp(Color(1.0, 0.3, 0.2), aim_power)
 		var tip := s - pull.normalized() * (40.0 + 160.0 * aim_power)
 		canvas.draw_line(s, tip, col, 5.0, true)
 		var side := (tip - s).normalized().orthogonal() * 10.0
 		var back := tip - (tip - s).normalized() * 16.0
 		canvas.draw_colored_polygon(PackedVector2Array([tip, back + side, back - side]), col)
+
+
+## The pull-back while aiming: an elastic band in two strands from either
+## side of the ship to a pouch under the finger, thinning as it stretches,
+## and a power arc round the ship that fills (gold → red) with the pull,
+## ticked every 10%, pulsing when it's maxed.
+func _draw_pull_band(canvas: Control, s: Vector2, gr: float, t: float) -> void:
+	var power := clampf(aim_power, 0.0, 1.0)
+	var col := Color("ffd23f").lerp(Color("ff3b3b"), power)
+	var ink := Color(0.05, 0.02, 0.08, 0.85)
+	var finger := s + pull
+	var along := pull.normalized()
+	var across := along.orthogonal()
+	# Two strands from the ship's "prongs" to the pouch; thinner the harder
+	# it's pulled, like real elastic.
+	var prong := gr * 0.55
+	var thick := lerpf(7.0, 3.0, power)
+	for side: float in [-1.0, 1.0]:
+		var from := s + across * prong * side - along * gr * 0.15
+		var to := finger + across * 7.0 * side
+		canvas.draw_line(from, to, ink, thick + 3.0, true)
+		canvas.draw_line(from, to, col, thick, true)
+		canvas.draw_circle(from, thick * 0.9, col.lightened(0.3))
+	# The pouch under the finger.
+	canvas.draw_circle(finger, 13.0, ink)
+	canvas.draw_circle(finger, 10.0, col)
+	canvas.draw_circle(finger - Vector2(3.0, 3.0), 3.5, Color(1, 1, 1, 0.55))
+	# The power arc: a 270° gauge round the ship, opening toward the launch.
+	var r := gr * 1.25
+	var start := (-along).angle() + PI * 0.75
+	var sweep := PI * 1.5
+	canvas.draw_arc(s, r, start, start + sweep, 48, ink, 12.0, true)
+	canvas.draw_arc(s, r, start, start + sweep, 48, Color(1, 1, 1, 0.22), 8.0, true)
+	var pulse := 1.0 + (0.25 * sin(t * 18.0) if power >= 0.99 else 0.0)
+	if power > 0.005:
+		canvas.draw_arc(s, r, start, start + sweep * power, 48, Color(col, 0.95), 8.0 * pulse, true)
+	for i in range(1, 10):
+		var a := start + sweep * float(i) / 10.0
+		var d := Vector2.from_angle(a)
+		canvas.draw_line(s + d * (r - 5.0), s + d * (r + 5.0), Color(1, 1, 1, 0.35 if float(i) / 10.0 > power else 0.8), 1.5, true)

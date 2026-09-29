@@ -131,6 +131,15 @@ func feed(event: InputEvent) -> bool:
 		return false
 	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
+		# A button let go over a HUD control is eaten by the GUI and never
+		# reaches this reader, which then thought it was still held: every
+		# move of the mouse or trackpad swung the camera and pulled the ship
+		# off centre. The motion's own button mask is the truth.
+		if _alt_drag and mm.button_mask & MOUSE_BUTTON_MASK_RIGHT == 0:
+			_alt_drag = false
+		if _pointer == 100 and mm.button_mask & MOUSE_BUTTON_MASK_LEFT == 0:
+			_up(100, mm.position)
+			return true
 		if _alt_drag:
 			alt_dragged.emit(mm.relative)
 			return true
