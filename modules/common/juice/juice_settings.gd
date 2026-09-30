@@ -185,6 +185,16 @@ static var freeze_depth := 0.97
 ## the camera swoops in on the wreck, holds, then returns and play resumes.
 static var kill_cam := true
 static var kill_cam_chance := 1.0
+## The kill cam's odds on a player kill with a blast in view (replaces the
+## chance above, whose saved 1.0 fired it on every kill).
+static var kill_cam_odds := 0.7
+## The kill cam's whole shot (swoop, hold, swoop back, and the slow-mo under
+## it), × its dials.
+static var kill_cam_length := 0.6
+## The fastest a profile-steered follow view (slingshot, swipe) may swing
+## round the ship, degrees/s: a sharp change of course turns it steadily
+## instead of whipping it round (the "ship vanishes, then comes back" spin).
+static var cam_max_turn_deg := 75.0
 ## Real seconds held on the wreck, after the swoop in.
 static var kill_cam_hold := 1.0
 ## Real seconds for the swoop in, and again for the swoop back.
@@ -311,9 +321,20 @@ static var cam_pinch_zoom := true
 static var cam_twist_rotate := true
 ## Slingshot: the camera follows the flight smoothly instead of turning with the hull's spin.
 static var sling_steady_cam := true
-## Slingshot: the camera holds still while aiming (no swing behind the ship,
-## no look-ahead), so the view never moves the aim under the thumb.
+## Slingshot: no look-ahead offset while aiming (it slid the ship across the
+## screen under a still thumb and moved the aim).
 static var sling_aim_cam_hold := true
+## Slingshot: while pulling, the camera swings round behind the ship to look
+## along the aim (the pull is read in the view from touch-down, so it can't
+## drift). Off: the view holds still.
+static var sling_aim_cam_look := true
+## Slingshot: once launched, the camera keeps looking along the launch — it
+## doesn't re-frame onto magnet picks or after bounces.
+static var sling_cam_hold_launch := true
+## Slingshot: in flight the camera sits behind where the ship is actually
+## going (through bounces), overriding the launch hold above — which let the
+## ship fly off screen after a bounce and whipped the view back after.
+static var sling_cam_follow_flight := true
 ## Swipe/slingshot: glowing 3D chevron arrows show the heading and the launch.
 static var move_arrows := true
 ## Swipe: only a swipe that starts on the ship moves it; a drag from anywhere else swings the camera round the ship.
@@ -344,10 +365,22 @@ static var magnet_friendlies := true
 static var player_wing_spiral := false
 ## Slingshot: how far into the screen a pull back launches (0 = flat on the screen, 1 = straight in; pull sideways to aim left/right).
 static var sling_aim_depth := 0.75
+## Slingshot: how a pull becomes a launch. 0 = classic (straight opposite the pull on the screen), 1 = dome (the pull wraps round the half-sphere facing you: pulling back throws the ship forward into the screen, not up), 2 = smart (the dome, and it locks onto the ship or goal you pull toward, leads it and adds the power to reach it).
+static var sling_aim_style := 1.0
 ## Slingshot: how far the camera looks ahead along the aim and the flight, × its distance.
 static var sling_look_ahead := 0.6
 ## Slingshot: how far the camera eases back in as the ship slows or nears another ship (fraction of its distance).
 static var sling_close_zoom := 0.35
+## Slingshot: while pulling, how far the view turns to look along the aim, × its distance (the camera stays put; it only looks).
+static var sling_aim_look := 0.7
+## Slingshot: how far the camera eases out while pulling, × the chase distance.
+static var sling_aim_zoom := 0.3
+## Slingshot: how far out the camera sits while the ship rests (at the start and after a fling), × the chase distance.
+static var sling_rest_distance := 1.35
+## Slingshot: the closest the camera may come in, × the chase distance (easing in near ships stops here).
+static var sling_cam_min := 1.0
+## Slingshot: seconds the look-ahead takes to settle on a new direction (lower = snappier).
+static var sling_look_ahead_time := 0.45
 ## Swipe/slingshot: size of the "on the ship" area a move drag must start in, × (smaller = more room to look around).
 static var grab_radius_scale := 1.0
 ## Swipe/slingshot: how hard a launch bends onto a ship ahead of it (0 = none, 1 = homes in).
@@ -360,6 +393,9 @@ static var magnet_pull := 60.0
 static var player_toughness := 1.6
 ## The player's guns and rams: damage dealt ×.
 static var player_power := 1.35
+## The player's guns only (not rams): damage dealt ×, on top of [member
+## player_power]. Below 1 so a fight lasts past the first volley.
+static var player_gun_damage := 0.6
 ## The player's ram "hitbox": ships within this × the hull's radius take a ram without touching (attack only — the player takes nothing).
 static var player_ram_reach := 1.8
 ## The player's shots hit a ship they pass within this × its radius (0 = only a direct hit).
@@ -404,8 +440,10 @@ static var planet_knock := 1.0
 # --- Tap aim, auto fire, power-ups, shields, callouts ---
 ## Slingshot: a tap anywhere (not on the ship) auto-aims — at the ship near the tap, else the best target on screen — while resting or flying.
 static var sling_tap_auto_aim := true
-## Slingshot: while a launch is flying, the guns fire on their own at the target it is heading for.
-static var sling_auto_fire := true
+## Slingshot: a launch at an enemy shoots on its own — 0 never, 1 one volley
+## per launch (default), 2 the whole flight. Replaced the old on/off
+## sling_auto_fire (always firing), so saves that had it on don't carry it.
+static var sling_auto_shoot := 1.0
 ## Kills drop floating power-ups (EMP, boost, shield) that act when flown into.
 static var power_ups := true
 ## Share of the player's kills that drop a power-up.
@@ -555,6 +593,9 @@ const BOOL_FIELDS := [
 	"cam_twist_rotate",
 	"sling_steady_cam",
 	"sling_aim_cam_hold",
+	"sling_aim_cam_look",
+	"sling_cam_hold_launch",
+	"sling_cam_follow_flight",
 	"move_arrows",
 	"swipe_from_ship",
 	"fps_invert_y",
@@ -565,7 +606,6 @@ const BOOL_FIELDS := [
 	"yeet_combat",
 	"world_hit_words",
 	"sling_tap_auto_aim",
-	"sling_auto_fire",
 	"power_ups",
 	"design_shields",
 	"enemy_shields",
@@ -620,6 +660,9 @@ static func get_effect(field: String) -> bool:
 		"cam_twist_rotate": return cam_twist_rotate
 		"sling_steady_cam": return sling_steady_cam
 		"sling_aim_cam_hold": return sling_aim_cam_hold
+		"sling_aim_cam_look": return sling_aim_cam_look
+		"sling_cam_hold_launch": return sling_cam_hold_launch
+		"sling_cam_follow_flight": return sling_cam_follow_flight
 		"move_arrows": return move_arrows
 		"swipe_from_ship": return swipe_from_ship
 		"fps_invert_y": return fps_invert_y
@@ -630,7 +673,6 @@ static func get_effect(field: String) -> bool:
 		"yeet_combat": return yeet_combat
 		"world_hit_words": return world_hit_words
 		"sling_tap_auto_aim": return sling_tap_auto_aim
-		"sling_auto_fire": return sling_auto_fire
 		"power_ups": return power_ups
 		"design_shields": return design_shields
 		"enemy_shields": return enemy_shields
@@ -692,6 +734,9 @@ static func _set_bool(field: String, value: bool) -> void:
 		"cam_twist_rotate": cam_twist_rotate = value
 		"sling_steady_cam": sling_steady_cam = value
 		"sling_aim_cam_hold": sling_aim_cam_hold = value
+		"sling_aim_cam_look": sling_aim_cam_look = value
+		"sling_cam_hold_launch": sling_cam_hold_launch = value
+		"sling_cam_follow_flight": sling_cam_follow_flight = value
 		"move_arrows": move_arrows = value
 		"swipe_from_ship": swipe_from_ship = value
 		"fps_invert_y": fps_invert_y = value
@@ -702,7 +747,6 @@ static func _set_bool(field: String, value: bool) -> void:
 		"yeet_combat": yeet_combat = value
 		"world_hit_words": world_hit_words = value
 		"sling_tap_auto_aim": sling_tap_auto_aim = value
-		"sling_auto_fire": sling_auto_fire = value
 		"power_ups": power_ups = value
 		"design_shields": design_shields = value
 		"enemy_shields": enemy_shields = value
@@ -813,6 +857,8 @@ const FLOAT_RANGES := {
 	"fps_cam_zoom": Vector2(0.0, 3.0),
 	"player_min_shot_speed": Vector2(0.0, 3000.0),
 	"sling_aim_depth": Vector2(0.0, 1.0),
+	"sling_aim_style": Vector2(0.0, 2.0),
+	"sling_auto_shoot": Vector2(0.0, 2.0),
 	"sling_look_ahead": Vector2(0.0, 2.0),
 	"sling_close_zoom": Vector2(0.0, 0.8),
 	"grab_radius_scale": Vector2(0.4, 3.0),
@@ -821,6 +867,15 @@ const FLOAT_RANGES := {
 	"magnet_pull": Vector2(0.0, 300.0),
 	"player_toughness": Vector2(0.2, 10.0),
 	"player_power": Vector2(0.2, 10.0),
+	"player_gun_damage": Vector2(0.1, 5.0),
+	"sling_aim_look": Vector2(0.0, 2.0),
+	"sling_aim_zoom": Vector2(0.0, 1.5),
+	"sling_rest_distance": Vector2(0.6, 3.0),
+	"sling_cam_min": Vector2(0.3, 3.0),
+	"sling_look_ahead_time": Vector2(0.05, 3.0),
+	"kill_cam_odds": Vector2(0.0, 1.0),
+	"cam_max_turn_deg": Vector2(20.0, 360.0),
+	"kill_cam_length": Vector2(0.2, 2.0),
 	"player_ram_reach": Vector2(1.0, 5.0),
 	"player_shot_hit_scale": Vector2(0.0, 5.0),
 	"enemy_shot_hit_scale": Vector2(0.2, 1.5),
@@ -966,6 +1021,8 @@ static func get_float(field: String) -> float:
 		"fps_cam_zoom": return fps_cam_zoom
 		"player_min_shot_speed": return player_min_shot_speed
 		"sling_aim_depth": return sling_aim_depth
+		"sling_aim_style": return sling_aim_style
+		"sling_auto_shoot": return sling_auto_shoot
 		"sling_look_ahead": return sling_look_ahead
 		"sling_close_zoom": return sling_close_zoom
 		"grab_radius_scale": return grab_radius_scale
@@ -974,6 +1031,15 @@ static func get_float(field: String) -> float:
 		"magnet_pull": return magnet_pull
 		"player_toughness": return player_toughness
 		"player_power": return player_power
+		"player_gun_damage": return player_gun_damage
+		"sling_aim_look": return sling_aim_look
+		"sling_aim_zoom": return sling_aim_zoom
+		"sling_rest_distance": return sling_rest_distance
+		"sling_cam_min": return sling_cam_min
+		"sling_look_ahead_time": return sling_look_ahead_time
+		"kill_cam_odds": return kill_cam_odds
+		"cam_max_turn_deg": return cam_max_turn_deg
+		"kill_cam_length": return kill_cam_length
 		"player_ram_reach": return player_ram_reach
 		"player_shot_hit_scale": return player_shot_hit_scale
 		"enemy_shot_hit_scale": return enemy_shot_hit_scale
@@ -1189,6 +1255,8 @@ static func _load_float(field: String, value: float) -> void:
 		"fps_cam_zoom": fps_cam_zoom = v
 		"player_min_shot_speed": player_min_shot_speed = v
 		"sling_aim_depth": sling_aim_depth = v
+		"sling_aim_style": sling_aim_style = v
+		"sling_auto_shoot": sling_auto_shoot = v
 		"sling_look_ahead": sling_look_ahead = v
 		"sling_close_zoom": sling_close_zoom = v
 		"grab_radius_scale": grab_radius_scale = v
@@ -1197,6 +1265,15 @@ static func _load_float(field: String, value: float) -> void:
 		"magnet_pull": magnet_pull = v
 		"player_toughness": player_toughness = v
 		"player_power": player_power = v
+		"player_gun_damage": player_gun_damage = v
+		"sling_aim_look": sling_aim_look = v
+		"sling_aim_zoom": sling_aim_zoom = v
+		"sling_rest_distance": sling_rest_distance = v
+		"sling_cam_min": sling_cam_min = v
+		"sling_look_ahead_time": sling_look_ahead_time = v
+		"kill_cam_odds": kill_cam_odds = v
+		"cam_max_turn_deg": cam_max_turn_deg = v
+		"kill_cam_length": kill_cam_length = v
 		"player_ram_reach": player_ram_reach = v
 		"player_shot_hit_scale": player_shot_hit_scale = v
 		"enemy_shot_hit_scale": enemy_shot_hit_scale = v

@@ -16,5 +16,5 @@ func _run() -> void:
 		while Time.get_ticks_msec() < until:
 			await process_frame
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png("res://scratch/shots/blast3_%s.png" % str(t))
+		root.get_texture().get_image().save_png("res://debug_shots/scratch/shots/blast3_%s.png" % str(t))
 	quit()

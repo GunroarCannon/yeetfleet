@@ -203,7 +203,7 @@ func _finish() -> void:
 	ship.show_yeet_charge(Vector3.ZERO, -1.0)
 	_set_live(false)
 	state = State.IDLE
-	_cooldown = JuiceSettings.yeet_interval * randf_range(0.8, 1.3)
+	_cooldown = JuiceSettings.yeet_interval * randf_range(0.8, 1.3) / maxf(ship.threat, 0.1)
 
 
 func _set_live(on: bool) -> void:

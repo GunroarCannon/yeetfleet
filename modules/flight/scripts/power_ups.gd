@@ -28,7 +28,10 @@ const ICONS := [
 ]
 const ORB_SHADER := preload("res://modules/common/juice/shaders/powerup_orb.gdshader")
 const RIPPLE_SHADER := preload("res://modules/common/juice/shaders/shield_bubble.gdshader")
-const TINT := Color(0.3, 0.75, 1.0)
+const TINT := Color(0.45, 0.9, 1.0)
+## The pickup wash: a light, see-through cyan (a dark blue sheet over the
+## whole screen hid the fight).
+const WASH := Color("8fe6ff")
 ## Most orbs floating at once; the oldest goes first.
 const MAX_ORBS := 8
 ## Within this many metres (plus the hull) an orb drifts to the ship.
@@ -41,6 +44,8 @@ signal picked(kind: int)
 var _root: FlightRoot = null
 ## Live orbs: {node, kind, t, radius}.
 var _orbs: Array[Dictionary] = []
+## Orbs stay put and never blink out (the tutorial's orb waits for the player).
+var hold := false
 var _icon_tex: Array[Texture2D] = []
 ## Game seconds left on the boost and the shield bubble.
 var boost_left := 0.0
@@ -75,7 +80,9 @@ func maybe_drop(pos: Vector3) -> void:
 ## Float a [param kind] orb at [param pos].
 func drop(kind: int, pos: Vector3) -> Node3D:
 	var hull_r := _root.camera_rig.hull_radius if _root != null and _root.camera_rig != null else 3.0
-	var radius := maxf(hull_r * 0.7, 2.0)
+	# Bigger than the ship's own hull and glowing, so one is easy to spot
+	# before it is grabbed.
+	var radius := maxf(hull_r * 1.25, 4.0)
 	var orb := Node3D.new()
 	orb.name = "PowerUp_" + String(NAMES[kind])
 	var shell := MeshInstance3D.new()
@@ -95,10 +102,22 @@ func drop(kind: int, pos: Vector3) -> Node3D:
 	icon.texture = _icon_tex[kind]
 	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	icon.shaded = false
-	icon.modulate = Color(0.85, 0.97, 1.0)
+	icon.modulate = Color(1.0, 1.0, 1.0)
+	icon.no_depth_test = true
 	var width := float(icon.texture.get_width()) if icon.texture != null else 64.0
-	icon.pixel_size = radius * 1.1 / maxf(width, 1.0)
+	icon.pixel_size = radius * 1.2 / maxf(width, 1.0)
 	orb.add_child(icon)
+	# A soft additive halo round it that breathes (see [method _tick_orbs]).
+	var halo := Sprite3D.new()
+	halo.name = "Halo"
+	halo.texture = _halo_texture()
+	halo.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	halo.shaded = false
+	halo.transparent = true
+	halo.modulate = Color(TINT, 0.8)
+	halo.pixel_size = radius * 3.2 / 128.0
+	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	orb.add_child(halo)
 	add_child(orb)
 	orb.global_position = pos
 	orb.scale = Vector3.ONE * 0.05
@@ -113,6 +132,17 @@ func drop(kind: int, pos: Vector3) -> Node3D:
 
 func orb_count() -> int:
 	return _orbs.size()
+
+
+## Where the floating orbs are now, oldest first (the tutorial's hand points
+## at one).
+func orb_positions() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for o in _orbs:
+		var node := o["node"] as Node3D
+		if node != null and is_instance_valid(node):
+			out.append(node.global_position)
+	return out
 
 
 # --- Effects ------------------------------------------------------------------------
@@ -136,13 +166,14 @@ func grant(kind: int) -> void:
 ## A pickup is an event: the game stops for a breath, the screen washes
 ## blue and the power-up's name slams across it.
 func _pickup_moment(kind: int) -> void:
-	var blue := Color("3f8bff")
-	Juice.freeze(0.5, 1.0)
-	Juice.flash(blue, 0.55, 0.45)
-	Juice.vignette(blue, 0.6, 0.8)
+	var blue := WASH
+	Juice.freeze(0.3, 1.0)
+	Juice.flash(blue, 0.2, 0.3)
+	Juice.vignette(blue, 0.25, 0.5)
 	var names := {Kind.EMP: ["FREEZE", "THEY CAN'T MOVE"], Kind.BOOST: ["BOOST", "FASTER & HARDER"], Kind.SHIELD: ["SHIELD", "BUBBLE UP"]}
 	var n: Array = names.get(kind, ["POWER", ""])
-	_root.big_notice(String(n[0]), String(n[1]), blue, 0.9)
+	_root.big_notice(String(n[0]), String(n[1]), Color("35c8ff"), 0.7)
+	GameAudio.ui(&"power_up")
 
 
 func boost_active() -> bool:
@@ -272,6 +303,8 @@ func _tick_orbs(delta: float) -> void:
 		if node == null or not is_instance_valid(node):
 			continue
 		var t := float(o["t"]) + delta
+		if hold:
+			t = minf(t, 1.0)
 		o["t"] = t
 		var life := JuiceSettings.powerup_life
 		if t >= life:
@@ -297,8 +330,31 @@ func _tick_orbs(delta: float) -> void:
 		if life - t < 3.0:
 			fade = 0.35 + 0.65 * absf(sin((life - t) * 6.0))
 		(o["mat"] as ShaderMaterial).set_shader_parameter("fade", fade)
+		var halo := node.get_node_or_null("Halo") as Sprite3D
+		if halo != null:
+			halo.modulate.a = (0.55 + 0.35 * sin(t * 4.0)) * fade
 		keep.append(o)
 	_orbs = keep
+
+
+static var _halo_tex: Texture2D = null
+
+
+## A round soft glow, white in the middle fading out (tinted per use).
+static func _halo_texture() -> Texture2D:
+	if _halo_tex == null:
+		var g := Gradient.new()
+		g.set_color(0, Color(1, 1, 1, 0.9))
+		g.set_color(1, Color(1, 1, 1, 0.0))
+		var tex := GradientTexture2D.new()
+		tex.gradient = g
+		tex.fill = GradientTexture2D.FILL_RADIAL
+		tex.fill_from = Vector2(0.5, 0.5)
+		tex.fill_to = Vector2(1.0, 0.5)
+		tex.width = 128
+		tex.height = 128
+		_halo_tex = tex
+	return _halo_tex
 
 
 func _take(o: Dictionary) -> void:

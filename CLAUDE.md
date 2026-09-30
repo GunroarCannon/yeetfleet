@@ -21,8 +21,8 @@ code must do the same. Decision records live in `docs/decisions/`.
   snake_case with `_` private prefix, typed returns (`-> void`), section
   banners like `# --- Translation ---`. GDScript is whitespace-sensitive: one
   wrong indent is a parse error.
-- **The Godot exe is NOT on PATH.** Use
-  `"C:\Users\hmmm\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Godot_v4.5-stable_win64.exe"`
+- **The Godot exe is NOT on PATH.** The project is on Godot 4.7: use
+  `"C:\Users\hmmm\Godot_v4.7-stable_win64_console.exe"`
   (export it as `GD`). Rescan the class cache after adding any `class_name`
   (`"$GD" --headless --editor --quit --path .`).
 - **Headless verification, always.** Module smokes:
@@ -38,6 +38,12 @@ code must do the same. Decision records live in `docs/decisions/`.
   - profile cycle / rock promote / control modes: the matching `*_check.gd`.
   - scenarios (sides spawn, wingmen fight, locked guns kill, stop restores
     free roam): `... --script modules/flight/tools/scenario_check.gd`.
+  - level dressing & sounds (every sector ends on a boss, neutral giants and
+    backdrop megastructures, grazes don't pop popcorn ships, tutorial guards
+    ships till the wreck step, fly-by / big-engine / low-health / big-blast
+    sounds): `... --script modules/flight/tools/level_feel_check.gd`. Which
+    sound file does which job lives in `Sfx.FILES` (flight) and `GameAudio.UI`
+    (menus); keep the two in step when a sound is reassigned.
   - bullet-hell / fairness (enemy fire styles, real enemy shots, off-screen
     mercy, chase carry, graffiti markers, fly-as, the bug hunt finding a
     planted aim bug): `... --script modules/flight/tools/combat_feel_check.gd`.
@@ -45,7 +51,7 @@ code must do the same. Decision records live in `docs/decisions/`.
     register the suspects on `BugHunt` (flight root's `bug_hunt`, 🐞 chip),
     feed a metric with `BugHunt.record()`, and let a hunt flip each suspect
     against a baseline. Runs append to `user://bug_hunt_runs.csv`.
-  - movement profiles (swipe, slingshot incl. 3D aim, FPS, AI slingshot, HUD hiding, camera
+  - movement profiles (swipe, slingshot incl. 3D aim and the classic/dome/smart aim styles, FPS, AI slingshot, HUD hiding, camera
     gestures, steady/look-ahead sling camera, 3D arrows, player shots never slow, grab area,
     launch magnet, ram/shot reach, lost wing, hostile markers, enemy telegraph): `... --fixed-fps 60
     --script modules/flight/tools/move_profile_check.gd` — run at 144 too. Its waits count
@@ -65,6 +71,12 @@ code must do the same. Decision records live in `docs/decisions/`.
     before the scene loads) and at ×1 time — the player's saved dials and a
     saved time warp (restored a frame late) made them fail on this machine.
     New feel checks should do the same.
+  - menus at a phone's canvas (after its DPI scale): `modules/menu/tools/menu_shot.gd
+    -- res://debug_shots/phone_land 1200 540 960 432` (and `324 720 432 960` for
+    portrait), windowed. Screenshots go in `debug_shots/` (never imported or exported).
+  - store art studio (builds, randomises, saves): `modules/art_studio/tools/art_studio_shot.gd`
+    (windowed, `--resolution 1600x900`); level-card pictures: `modules/menu/tools/picset_bake.gd`
+    (windowed, then rescan).
   - planet looks side by side: `flight_shot.gd -- out.png 90 960 540 planet <style 0-2>`.
   - the player's guns on screen: `modules/flight/tools/fire_shot.gd` and the
     mobile HUD looks: `mobile_hud_shot.gd` (both windowed, see headers).

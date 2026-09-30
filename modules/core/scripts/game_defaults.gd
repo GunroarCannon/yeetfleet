@@ -25,7 +25,10 @@ const DEFAULTS_DIR := "res://data/game_defaults/"
 
 ## Session [member Session.prefs] keys that are debug/testing state, not
 ## tuning: never baked into what ships.
-const SKIP_PREFS: Array[String] = ["time_scale", "warp", "mobile_layout", "tutorial_done"]
+const SKIP_PREFS: Array[String] = ["time_scale", "warp", "mobile_layout", "tutorial_done", "welcomed"]
+## Top-level keys that are the developer's own state, never baked: debug
+## mode is on in the editor but must ship off.
+const SKIP_KEYS: Array[String] = ["debug_mode"]
 
 ## user:// path → the Callable that reloads that class from disk. Filled as each
 ## class loads through [method load_layered].
@@ -136,6 +139,9 @@ static func _overlay(into: ConfigFile, from: ConfigFile) -> void:
 
 static func _strip_debug(cfg: ConfigFile) -> void:
 	for section in cfg.get_sections():
+		for key in SKIP_KEYS:
+			if cfg.has_section_key(section, key):
+				cfg.erase_section_key(section, key)
 		if not cfg.has_section_key(section, "prefs"):
 			continue
 		var prefs: Variant = cfg.get_value(section, "prefs")

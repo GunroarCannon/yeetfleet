@@ -6,7 +6,7 @@
 ## two splits the road, and the roads rejoin at the sector's last level. A
 ## spray-painted name hangs over each sector and hand-drawn marker lines run
 ## along every link. Locked levels show no picture, just LOCKED and the stars
-## they want; tapping one shakes it. The road ends in the fork sign (two
+## they want; tapping one shakes it (and the map says how to open it). The road ends in the fork sign (two
 ## sectors to choose from) or a locked "???" card.
 ##
 ## One custom-drawn Control rather than a node per card: the whole board pans
@@ -17,6 +17,8 @@ extends Control
 
 signal level_tapped(lvl: Dictionary)
 signal fork_tapped(theme: int)
+## A locked card was tapped: the map toasts what opens it.
+signal locked_tapped(lvl: Dictionary)
 
 ## Pixels a press can move and still count as a tap.
 const TAP_SLOP := 14.0
@@ -42,6 +44,15 @@ var _card_w := 150.0
 var _next_key := ""
 var _tex := {}
 var _fg := {}
+## Pixels at the top that the screen's bar covers. The view itself runs to the
+## top of the screen (one tint, nothing sliced at the bar's edge); the board
+## only settles below this line.
+var top_inset := 0.0
+## Colour grades a card's background can be printed in (picked by its roll).
+const GRADES: Array[Color] = [
+	Color(1, 1, 1), Color(1.08, 0.92, 0.78), Color(0.82, 0.95, 1.12),
+	Color(1.08, 0.82, 1.06), Color(0.88, 1.08, 0.86), Color(1.1, 1.0, 0.7),
+]
 
 
 func _init() -> void:
@@ -76,7 +87,7 @@ func focus_next(instant := false) -> void:
 		if c.has("fork") or (c.has("lvl") and String(c["lvl"]["key"]) == _next_key):
 			target = (c["rect"] as Rect2).get_center()
 			break
-	var want := size * 0.5 - target
+	var want := Vector2(size.x * 0.5, top_inset + (size.y - top_inset) * 0.5) - target
 	_offset = _clamp(want) if instant else _offset
 	if not instant:
 		var tw := create_tween()
@@ -167,17 +178,21 @@ func _layout() -> void:
 	for c in _cards:
 		_board = (c["rect"] as Rect2) if _board.size == Vector2.ZERO else _board.merge(c["rect"])
 	for l in _labels:
+		# A name is drawn up from its baseline: take in its whole height.
 		_board = _board.expand(l["pos"])
+		_board = _board.expand((l["pos"] as Vector2) - Vector2(0, cw * 0.4))
 	_board = _board.grow(cw * 0.6)
 	_offset = _clamp(_offset)
 
 
 func _clamp(o: Vector2) -> Vector2:
-	var lo := size - _board.end
-	var hi := -_board.position
+	# The visible area: the whole view below the bar.
+	var area := Rect2(Vector2(0, top_inset), size - Vector2(0, top_inset))
+	var lo := area.end - _board.end
+	var hi := area.position - _board.position
 	return Vector2(
-		clampf(o.x, minf(lo.x, hi.x), maxf(lo.x, hi.x)) if _board.size.x > size.x else (size.x - _board.size.x) * 0.5 - _board.position.x,
-		clampf(o.y, minf(lo.y, hi.y), maxf(lo.y, hi.y)) if _board.size.y > size.y else (size.y - _board.size.y) * 0.5 - _board.position.y,
+		clampf(o.x, minf(lo.x, hi.x), maxf(lo.x, hi.x)) if _board.size.x > area.size.x else area.position.x + (area.size.x - _board.size.x) * 0.5 - _board.position.x,
+		clampf(o.y, minf(lo.y, hi.y), maxf(lo.y, hi.y)) if _board.size.y > area.size.y else area.position.y + (area.size.y - _board.size.y) * 0.5 - _board.position.y,
 	)
 
 
@@ -249,8 +264,9 @@ func _tap(at: Vector2) -> void:
 			if bool(c["unlocked"]):
 				level_tapped.emit(c["lvl"])
 			else:
-				# Locked: a shake says "not yet". No sheet, no words.
+				# Locked: a shake says "not yet", and a toast says how.
 				_shake[String(c["lvl"]["key"])] = 0.4
+				locked_tapped.emit(c["lvl"])
 		elif c.has("fork"):
 			fork_tapped.emit(int(c["fork"]))
 		return
@@ -355,11 +371,11 @@ func _draw_level(c: Dictionary) -> void:
 		var lfs := int(r.size.x * 0.15)
 		GraffitiStyle.draw_text(self, "LOCKED", photo.get_center() - Vector2(0, lfs * 0.5), lfs, GraffitiStyle.DIM, 4)
 		var need := int(lvl["stars_req"])
-		if bool(c["road"]) and need > Campaign.total_stars():
-			# The road is open, the stars are not: show how many it wants.
+		if need > Campaign.total_stars():
+			# Stars are the key: show how many it wants.
 			var sc := photo.get_center() + Vector2(-lfs * 0.7, lfs * 0.75)
 			GraffitiIcons.draw(self, "star", sc, lfs * 1.1)
-			GraffitiStyle.draw_text(self, str(need), sc + Vector2(lfs * 1.35, 0), lfs, GraffitiStyle.SUN, 4)
+			GraffitiStyle.draw_text(self, str(need), sc + Vector2(lfs * 1.35, 0), lfs, GraffitiStyle.SUN, 4, GraffitiStyle.number_font())
 	else:
 		_draw_cover(_bg_tex(lvl), photo, int(pic["roll"]))
 		var fg := _fg_tex(lvl)
@@ -382,9 +398,9 @@ func _draw_level(c: Dictionary) -> void:
 		var chip := Rect2(Vector2(photo.end.x - tw - 12, photo.position.y - tfs * 0.4), Vector2(tw + 10, tfs * 1.3))
 		GraffitiStyle.draw_slab(self, chip, ShipCatalog.type_color(want), 4.0, 2.0, Vector2(2, 2))
 		GraffitiStyle.draw_text(self, tname, chip.get_center(), tfs, GraffitiStyle.INK, 0)
-	var label_fs := int(r.size.x * 0.14)
+	var label_fs := int(r.size.x * 0.16)
 	var label := "Level %d" % int(lvl["number"])
-	var f := GraffitiStyle.head_font()
+	var f := GraffitiStyle.number_font()
 	var lw := f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_fs).x
 	var ly := photo.end.y + (frame.end.y - photo.end.y) * 0.5 + label_fs * 0.35
 	draw_string(f, Vector2(-lw * 0.5, ly), label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_fs, GraffitiStyle.INK)
@@ -442,7 +458,8 @@ func _draw_cover(tex: Texture2D, dst: Rect2, roll: int) -> void:
 	src.size /= zoom
 	var slack := ts - src.size
 	src.position = Vector2(slack.x * float(posmod(int(roll / 5.0), 7)) / 6.0, slack.y * float(posmod(int(roll / 35.0), 5)) / 4.0)
-	draw_texture_rect_region(tex, dst, src)
+	# And graded: the same picture warm on one card, cold or toxic on another.
+	draw_texture_rect_region(tex, dst, src, GRADES[posmod(int(roll / 175.0), GRADES.size())])
 
 
 func _bg_tex(lvl: Dictionary) -> Texture2D:

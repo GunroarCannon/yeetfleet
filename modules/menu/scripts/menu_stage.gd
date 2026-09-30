@@ -48,6 +48,9 @@ const PAD_SHOTS: Array[Dictionary] = [
 ## A new ship on the pad: the camera punches in and whips round, then eases
 ## back out onto its path.
 const PAD_KICK_TIME := 0.9
+## Seconds between the live addon blasts going off round the scene (a
+## random pick in this range each time).
+const BOOM_GAP := Vector2(1.6, 3.2)
 
 var mode: int = Mode.HOME
 var camera: Camera3D
@@ -63,6 +66,8 @@ var _pad_ship_id := ""
 var _time := 0.0
 ## Frozen props that bob a hair so the paused frame still feels alive.
 var _bobbers: Array[Node3D] = []
+## Seconds until the next live blast.
+var _boom_in := 0.6
 ## Where the camera leans the subject: the home frame keeps the wreck left
 ## of the buttons (landscape) or above them (portrait).
 var _portrait := false
@@ -116,6 +121,49 @@ func _process(delta: float) -> void:
 			b.position.y = float(b.get_meta("y0", 0.0)) + sin(_time * 0.6 + i * 1.7) * 0.25
 	if _pad_ship != null and is_instance_valid(_pad_ship):
 		_pad_ship.rotation.y += TURNTABLE_SPEED * delta
+	_boom_in -= delta
+	if _boom_in <= 0.0:
+		_boom_in = randf_range(BOOM_GAP.x, BOOM_GAP.y)
+		_live_boom()
+
+
+## A live BinbunVFX ground or air explosion somewhere round the frozen fight
+## (or behind the garage pad), so the backdrop keeps going off. Silent: the
+## addon's own audio is not asked for.
+## Playback rate of the backdrop's live blasts: slow motion, like the rest
+## of the frozen fight (and slow enough to outlast AddonVfx's 8 s backstop
+## only a little).
+const BOOM_SPEED := 0.3
+
+
+func _live_boom() -> void:
+	var centre := PAD_AT if mode == Mode.GARAGE else Vector3.ZERO
+	var reach := Vector2(22.0, 40.0) if mode == Mode.GARAGE else Vector2(8.0, 30.0)
+	var dir := Vector3(randf_range(-1.0, 1.0), randf_range(-0.5, 0.7), randf_range(-1.0, 1.0)).normalized()
+	var at := centre + dir * randf_range(reach.x, reach.y)
+	if mode == Mode.GARAGE:
+		# Keep the pad ship clear: blasts go off behind and below the pad's rim.
+		at.y = centre.y + randf_range(-6.0, 4.0)
+	var ground := randf() < 0.5
+	var kind := AddonVfx.Kind.EXPLOSION_GROUND if ground else AddonVfx.Kind.EXPLOSION_AIR
+	var normal := -dir if ground else Vector3.UP
+	var size := randf_range(1.6, 3.4)
+	# In slow motion, like the rest of the frozen fight.
+	var fx := AddonVfx.spawn(self, kind, at, normal, size, Color.TRANSPARENT, true)
+	if fx != null:
+		fx.set("speed_scale", BOOM_SPEED)
+		for p in fx.find_children("*", "AnimationPlayer", true, false):
+			(p as AnimationPlayer).speed_scale = BOOM_SPEED
+		for p in fx.find_children("*", "GPUParticles3D", true, false):
+			(p as GPUParticles3D).speed_scale = BOOM_SPEED
+		for p in fx.find_children("*", "CPUParticles3D", true, false):
+			(p as CPUParticles3D).speed_scale = BOOM_SPEED
+	# Under Compatibility the addon's particles can draw nothing on some
+	# GPUs; the sculpted blast the game uses there goes off with it.
+	if AddonVfx.cartoon_blasts:
+		var cb := CartoonBlast.spawn(self, at, size * 0.6 * AddonVfx.CARTOON_SIZE, Vector3.UP, 0.8)
+		if cb != null:
+			cb.speed = BOOM_SPEED
 
 
 func _place_camera(delta: float) -> void:

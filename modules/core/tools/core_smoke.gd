@@ -70,7 +70,7 @@ func _check_session_parsing() -> void:
 func _check_registry() -> void:
 	var expected := [
 		"menu", "ship_builder", "flight", "runner", "arena", "physics_lab", "style_lab",
-		"solar_system_gen", "large_craft_gen", "destruction_lab"
+		"solar_system_gen", "large_craft_gen", "destruction_lab", "font_lab"
 	]
 	_check(ModuleRegistry.ids() == expected, "ids() is %s, expected %s" % [
 		ModuleRegistry.ids(), expected,

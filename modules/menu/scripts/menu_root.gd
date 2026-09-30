@@ -9,17 +9,24 @@
 class_name MenuRoot
 extends Node
 
-enum Screen { HOME, MAP, GARAGE, SETTINGS }
+enum Screen { HOME, MAP, GARAGE, SETTINGS, STORE }
 
 var stage: MenuStage
 var ui: Control
 var current: int = -1
 ## A pay-out waiting to be shown on the map (from a level just flown).
 var last_result := {}
+## The level whose ship is being picked in the garage ({} when the garage
+## was opened for itself), and the one the map reopens its report on.
+var ship_pick_level := {}
+var reopen_level := {}
 
 var _screens := {}
 var _wipe: _Wipe
 var _busy := false
+
+#just used to track if song is playing for the first time per instance
+var first_go := true
 
 
 func _enter_tree() -> void:
@@ -32,15 +39,33 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	# Launched with --module=<something else>: go there (the old launcher's
 	# contract, so tools and shortcuts keep working).
+	var fade := ColorRect.new()
+	fade.color = Color.BLACK
+	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade.z_index = 100
+	add_child(fade)
+	
+	var tw := create_tween()
+	tw.tween_property(fade, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(fade.queue_free)
+	
 	if Session.boot_requested and Session.boot_module != "menu" and ModuleRegistry.has(Session.boot_module):
 		var path := ModuleRegistry.scene_path(Session.boot_module)
 		Session.boot_requested = false
 		get_tree().change_scene_to_file.call_deferred(path)
 		return
+	# Closing the window asks QUIT? first (see _notification); the flight
+	# scene puts the default back when it takes over.
+	get_tree().set_auto_accept_quit(false)
 	Campaign.ensure_loaded()
+	# Where a flight asked to come back to: the sandbox's MAP, flight school.
+	var back_key := String(Session.level_result.get("key", ""))
+	var open_map := back_key == "tutorial" or String(Session.level_result.get("open", "")) == "map"
 	last_result = Campaign.take_result()
 	Session.pending_level = {}
 	Session.pending_ship = {}
+	Session.space_setup = {}
 	apply_volume()
 	# The ⚡ performance dials hold here too: battery saver's frame cap and
 	# render scale matter most on a screen people leave open.
@@ -63,6 +88,10 @@ func _ready() -> void:
 	_screens[Screen.MAP] = MapScreen.new()
 	_screens[Screen.GARAGE] = GarageScreen.new()
 	_screens[Screen.SETTINGS] = SettingsScreen.new()
+	_screens[Screen.STORE] = StoreScreen.new()
+	# The wallet's + (on every screen's wallet) opens the store.
+	WalletChip.on_store = func() -> void: go(Screen.STORE)
+	CoinStore.start()
 	for k in _screens:
 		var s := _screens[k] as MenuScreen
 		s.menu = self
@@ -74,7 +103,16 @@ func _ready() -> void:
 	_wipe.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_wipe)
 	_on_resized()
-	_show(Screen.MAP if not last_result.is_empty() else Screen.HOME)
+	# NEXT on a win card: straight on into the next level, if it opened.
+	var next_key := String(last_result.get("go_next", ""))
+	var next_lvl := LevelGen.from_key(next_key) if next_key != "" else {}
+	if not next_lvl.is_empty() and Campaign.is_unlocked(next_lvl):
+		last_result = {}
+		reopen_level = next_lvl
+		_show(Screen.MAP)
+		launch_level.call_deferred(next_lvl)
+		return
+	_show(Screen.MAP if not last_result.is_empty() or open_map else Screen.HOME)
 
 
 ## Switch screens behind the wipe. The garage also swings the 3D camera to
@@ -85,18 +123,54 @@ func go(screen: int) -> void:
 	_busy = true
 	_wipe.play(func() -> void: _show(screen), func() -> void: _busy = false)
 
+func push_forward_song():
+	GameAudio.current_song.play(25)
 
 func _show(screen: int) -> void:
 	for k in _screens:
 		(_screens[k] as MenuScreen).visible = k == screen
+	if current >= 0 and screen != current:
+		GameAudio.ui(&"garage" if screen == Screen.GARAGE else &"open")
 	current = screen
+	
+	var callback
+	if screen == Screen.HOME and first_go:
+		callback = push_forward_song
+	
+	var playlist := "submenus"
+	if screen == Screen.HOME:
+		playlist = "main"
+	elif screen == Screen.GARAGE:
+		playlist = "garage"
+	GameAudio.music(playlist, callback)
+	first_go = false
 	stage.set_mode(MenuStage.Mode.GARAGE if screen == Screen.GARAGE else MenuStage.Mode.HOME)
 	(_screens[screen] as MenuScreen).opened()
+
+
+## Open the garage to pick the ship for [param lvl]; SELECT SHIP (or back)
+## returns to the map with that level's report open.
+func pick_ship_for(lvl: Dictionary) -> void:
+	ship_pick_level = lvl
+	go(Screen.GARAGE)
+
+
+## Leave the ship pick: back to the map, the level's report open again.
+func finish_ship_pick() -> void:
+	reopen_level = ship_pick_level
+	ship_pick_level = {}
+	go(Screen.MAP)
 
 
 ## Fly a campaign level.
 func launch_level(lvl: Dictionary) -> void:
 	Campaign.launch(lvl)
+	_to_flight()
+
+
+## The tutorial, flown like a level.
+func launch_tutorial() -> void:
+	Campaign.launch_tutorial()
 	_to_flight()
 
 
@@ -111,7 +185,9 @@ func _to_flight() -> void:
 		return
 	_busy = true
 	var lvl := Session.pending_level
-	var title := "SANDBOX" if lvl.is_empty() else "LEVEL %d · %s" % [int(lvl.get("number", 1)), String(lvl.get("title", "")).to_upper()]
+	var title := "SANDBOX" if lvl.is_empty() else "LEVEL %d: %s" % [int(lvl.get("number", 1)), String(lvl.get("title", "")).to_upper()]
+	if bool(lvl.get("tutorial", false)):
+		title = "FLIGHT SCHOOL"
 	# Behind the wipe, the loading card goes up and starts pulling the flight
 	# scene in on a worker thread.
 	_wipe.play(func() -> void:
@@ -127,12 +203,14 @@ func open_workbench() -> void:
 	get_tree().change_scene_to_file("res://modules/core/core.tscn")
 
 
-## The saved master volume (Settings), pushed onto the Master bus.
+## The saved SOUND and MUSIC levels (Settings), pushed onto their buses.
 static func apply_volume() -> void:
-	var v := clampf(float(Session.pref("master_volume", 1.0)), 0.0, 1.0)
+	# SOUND and MUSIC each turn their own bus now; Master stays full (an old
+	# save may have muted it).
 	var bus := AudioServer.get_bus_index(&"Master")
-	AudioServer.set_bus_volume_db(bus, linear_to_db(maxf(v, 0.0001)))
-	AudioServer.set_bus_mute(bus, v <= 0.001)
+	AudioServer.set_bus_volume_db(bus, 0.0)
+	AudioServer.set_bus_mute(bus, false)
+	GameAudio.apply_volumes()
 
 
 func is_portrait() -> bool:
@@ -151,6 +229,21 @@ func _on_resized() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		back()
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# The window's close button: home, and the QUIT? card there.
+		if current == Screen.HOME:
+			(_screens[Screen.HOME] as HomeScreen)._ask_quit()
+		elif not _busy:
+			go(Screen.HOME)
+			_wipe_then_ask_quit()
+	elif what == NOTIFICATION_EXIT_TREE:
+		get_tree().set_auto_accept_quit(true)
+
+
+func _wipe_then_ask_quit() -> void:
+	while _busy:
+		await get_tree().process_frame
+	(_screens[Screen.HOME] as HomeScreen)._ask_quit()
 
 
 func _unhandled_input(event: InputEvent) -> void:

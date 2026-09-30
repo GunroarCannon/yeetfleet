@@ -281,8 +281,10 @@ func _layout() -> void:
 		_place(_menu, Vector2(w - _pad - _u * 0.06, my), _u * 0.06)
 		_place(_view, Vector2(w - _pad - _u * 0.2, my), _u * 0.06)
 	elif one_thumb or simple:
-		_place(_menu, Vector2(w * 0.72 + _u * 0.1, top), _u * 0.04)
-		_place(_view, Vector2(w * 0.72, top), _u * 0.04)
+		# The corner is the buttons'; the speed drops under them.
+		_place(_menu, Vector2(w - _pad - _u * 0.045, top), _u * 0.04)
+		_place(_view, Vector2(w - _pad - _u * 0.15, top), _u * 0.04)
+		_speed_top = top + _u * 0.07
 	else:
 		_place(_menu, Vector2(w * 0.66 + _u * 0.1, top), _u * 0.04)
 		_place(_view, Vector2(w * 0.66, top), _u * 0.04)
@@ -648,6 +650,7 @@ func _draw_live() -> void:
 	if FlightRoot.profile_is_one_thumb(_move_profile):
 		var ship := _root.active_ship_node()
 		if ship != null:
+			_radar.offline = _root.sensors_lost()
 			_radar.draw_radar(c, ship, _root.live_enemies(), _root.landmarks(),
 				Vector2(_mx(_radar_c.x), _radar_c.y), _root.locked_target)
 
@@ -732,6 +735,13 @@ func _draw_band(c: Control, P: Dictionary) -> void:
 			tcol = tcol.lerp(Color("ff3b3b"), 0.5 + 0.5 * sin(_t * 12.0))
 		_text(c, FlightScenarios.clock_text(left_s), "title", Vector2(cx, bh * 1.75), bh * (0.95 if urgent else 0.8),
 			tcol, P["panel_edge"], P, false, -0.08, true, 0.0, false, 4)
+	# A fight with a set number of foes: how many are left, under the clock's
+	# spot (or in it, untimed).
+	var count := _root.scenarios.count_line() if _root.scenarios != null else ""
+	if count != "":
+		var cy := bh * (2.6 if left_s >= 0.0 else 1.75)
+		_text(c, count, "title", Vector2(cx, cy), bh * 0.7, Color("ff5a5a"), P["panel_edge"], P,
+			false, -0.08, true, 0.0, false, 4)
 
 
 ## Draw [param poly] minus [param cut] (the health panel over the band's start).

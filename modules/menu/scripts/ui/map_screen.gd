@@ -8,13 +8,25 @@ var _bar: TopBar
 var _map: LevelMapView
 var _report: ReportPanel
 var _payout: Control = null
+## The how-to-unlock toast, while it is up.
+var _toast: Control = null
+var _tutorial: SlabButton
 
 
 func _ready() -> void:
 	_map = LevelMapView.new()
 	_map.level_tapped.connect(_on_level)
 	_map.fork_tapped.connect(_on_fork)
+	_map.locked_tapped.connect(_on_locked)
 	add_child(_map)
+	# Flight school, any time: the moves shown by a hand, against drones.
+	_tutorial = SlabButton.new()
+	_tutorial.text = "TUTORIAL"
+	_tutorial.fill = GraffitiStyle.LIME
+	_tutorial.text_color = GraffitiStyle.INK
+	_tutorial.skew = 10.0
+	_tutorial.pressed.connect(func() -> void: menu.launch_tutorial())
+	add_child(_tutorial)
 	_bar = TopBar.new()
 	_bar.title = "CAMPAIGN"
 	_bar.back_pressed.connect(func() -> void: menu.go(MenuRoot.Screen.HOME))
@@ -23,9 +35,9 @@ func _ready() -> void:
 	_report.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_report.fly.connect(func(lvl: Dictionary) -> void: menu.launch_level(lvl))
 	_report.choose_fork.connect(_on_choose_fork)
-	_report.to_garage.connect(func() -> void:
+	_report.pick_ship.connect(func(lvl: Dictionary) -> void:
 		_report.close()
-		menu.go(MenuRoot.Screen.GARAGE))
+		menu.pick_ship_for(lvl))
 	add_child(_report)
 	Campaign.notifier.changed.connect(func() -> void:
 		if visible:
@@ -40,8 +52,18 @@ func layout() -> void:
 	var bar_h := bar_height()
 	_bar.position = Vector2(0, 8)
 	_bar.size = Vector2(vp.x, bar_h)
-	_map.position = Vector2(0, bar_h + 8)
-	_map.size = Vector2(vp.x, vp.y - bar_h - 8)
+	# The board runs under the bar, so a sector's name panned up to the top
+	# slides behind the bar rather than being sliced off at its edge.
+	_map.top_inset = bar_h + 8
+	_map.position = Vector2.ZERO
+	_map.size = vp
+	var u := unit()
+	_tutorial.custom_minimum_size = Vector2(190, 62) * u
+	_tutorial.size = _tutorial.custom_minimum_size
+	_tutorial.font_size = int(26 * u)
+	_tutorial.position = Vector2(18, vp.y - _tutorial.size.y - 22)
+	_tutorial.pivot_offset = _tutorial.size * 0.5
+	_tutorial.rotation = -0.03
 
 
 func opened() -> void:
@@ -49,9 +71,15 @@ func opened() -> void:
 	_map.rebuild()
 	_map.focus_next(true)
 	_map.grab_focus.call_deferred()
-	if not menu.last_result.is_empty():
+	# Back from picking a ship for a level: its report again.
+	if not menu.reopen_level.is_empty():
+		_report.show_level(menu.reopen_level)
+		menu.reopen_level = {}
+	# Only a win gets the pay-out card: a loss already had its WRECKED card in
+	# flight, and a bail-out to the map wants the map, not "TRY AGAIN".
+	if bool(menu.last_result.get("won", false)):
 		_show_payout(menu.last_result)
-		menu.last_result = {}
+	menu.last_result = {}
 
 
 func back() -> bool:
@@ -63,6 +91,53 @@ func back() -> bool:
 		_report.close()
 		return true
 	return false
+
+
+## A tap on a locked card: a toast of what opens it, that pops in and fades.
+func _on_locked(lvl: Dictionary) -> void:
+	GameAudio.ui(&"locked")
+	var more := int(lvl.get("stars_req", 0)) - Campaign.total_stars()
+	_show_toast("GET %d MORE STAR%s" % [more, "" if more == 1 else "S"])
+
+
+func _show_toast(text: String) -> void:
+	if _toast != null and is_instance_valid(_toast):
+		_toast.queue_free()
+	var vp := viewport_size()
+	var u := unit()
+	var t := _Toast.new()
+	t.text = text
+	var fs := int(34 * u)
+	var w := GraffitiStyle.head_font().get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 90.0 * u
+	t.font_size = fs
+	t.size = Vector2(minf(w, vp.x - 24.0), fs * 2.1)
+	t.position = Vector2((vp.x - t.size.x) * 0.5, vp.y * 0.72)
+	t.pivot_offset = t.size * 0.5
+	t.rotation = -0.025
+	t.scale = Vector2(0.5, 0.5)
+	add_child(t)
+	_toast = t
+	var tw := t.create_tween()
+	tw.tween_property(t, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(1.8)
+	tw.tween_property(t, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(t.queue_free)
+
+
+## The toast: an ink slab with a hot rim and the words on it.
+class _Toast:
+	extends Control
+	var text := ""
+	var font_size := 30
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		GraffitiStyle.draw_slab(self, r.grow(4.0), GraffitiStyle.HOT, 16.0, 0.0, Vector2(7, 8))
+		GraffitiStyle.draw_slab(self, r, GraffitiStyle.INK, 16.0, 3.0, Vector2.ZERO)
+		GraffitiStyle.draw_text(self, text, size * 0.5, font_size, GraffitiStyle.SUN, 6)
 
 
 func _on_level(lvl: Dictionary) -> void:
@@ -138,7 +213,7 @@ class _PayoutCard:
 		if won:
 			var coins := int(res.get("coins", 0))
 			GraffitiIcons.draw(self, "coin", Vector2(size.x * 0.36, size.y * 0.82), size.y * 0.14, GraffitiStyle.SUN)
-			GraffitiStyle.draw_text(self, "+%d" % coins, Vector2(size.x * 0.54, size.y * 0.82), int(size.y * 0.15), Color.WHITE, 6)
+			GraffitiStyle.draw_text(self, "+%d" % coins, Vector2(size.x * 0.54, size.y * 0.82), int(size.y * 0.17), Color.WHITE, 6, GraffitiStyle.number_font())
 		else:
 			GraffitiStyle.draw_text(self, "TRY AGAIN", Vector2(size.x * 0.5, size.y * 0.62), int(size.y * 0.13), Color.WHITE, 6)
 			GraffitiStyle.draw_text(self, "WRECKS %d" % int(res.get("kills", 0)), Vector2(size.x * 0.5, size.y * 0.82), int(size.y * 0.1), GraffitiStyle.INK, 0)

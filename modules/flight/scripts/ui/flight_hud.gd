@@ -56,6 +56,9 @@ var _view_chip: Button
 var _speed_label: Label
 var _target_label: Label
 var _hint_label: Label
+var _hint_tween: Tween = null
+## Seconds a hint stays up before it fades.
+const HINT_HOLD := 6.0
 var _damage_label: Label
 var _ground_speed_label: Label
 
@@ -169,7 +172,8 @@ func _build_event_container() -> void:
 	_event_container.name = "EventBubbleContainer"
 	_event_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_event_container.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_event_container.offset_top = BuilderTheme.TOUCH_MIN + BuilderTheme.PAD * 2
+	# Under the top band and the health panel, not across them.
+	_event_container.offset_top = 200.0
 	_event_container.custom_minimum_size = Vector2(0.0, 60.0)
 	add_child(_event_container)
 
@@ -212,8 +216,8 @@ func _build_debug_panel() -> void:
 	_add_debug_button("🕹 Next movement profile (U)", func() -> void: _root.cycle_move_profile())
 	_add_debug_button("📱 Mobile HUD (F1 back)", func() -> void: set_mobile_layout(true))
 	_add_debug_button("⚡ Performance", func() -> void: toggle_perf_panel())
-	_add_setting_check("🎯 Auto-shoot while launched (slingshot)", JuiceSettings.sling_auto_fire,
-		func(on: bool) -> void: JuiceSettings.set_effect("sling_auto_fire", on))
+	_add_setting_check("🎯 Auto-shoot the whole launch (off = once per launch)", JuiceSettings.sling_auto_shoot >= 1.5,
+		func(on: bool) -> void: JuiceSettings.set_float("sling_auto_shoot", 2.0 if on else 1.0))
 	_add_setting_check("🎯 Tap auto-aims (slingshot)", JuiceSettings.sling_tap_auto_aim,
 		func(on: bool) -> void: JuiceSettings.set_effect("sling_tap_auto_aim", on))
 	_add_setting_check("🔮 Power-ups from kills", JuiceSettings.power_ups,
@@ -994,7 +998,14 @@ func set_mobile_layout(on: bool) -> void:
 			_mobile_hud.setup(_root)
 			_mobile_hud.set_move_profile(_move_profile)
 			_mobile_hud.speed_meter_max = _speed_meter_max
-			_mobile_hud.exit_requested.connect(func() -> void: set_mobile_layout(false))
+			# In a level or sandbox flight from the game's menu, the menu
+			# button pauses (like the MAP button); in the workbench it
+			# goes back to the desktop HUD.
+			_mobile_hud.exit_requested.connect(func() -> void:
+				if _root.campaign_overlay != null:
+					_root.campaign_overlay.toggle_pause()
+				else:
+					set_mobile_layout(false))
 			_mobile_hud.scenario_requested.connect(toggle_scenario_panel)
 			add_child(_mobile_hud)
 			# Under the hint and pop-ups, over the drawn instruments.
@@ -1554,7 +1565,15 @@ func _build_readouts() -> void:
 	_hint_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hint_label.add_theme_color_override("font_color", BuilderTheme.warn())
+	# Tips are sprayed, not typed: the arcade ka1 face with a fat ink outline.
+	_hint_label.add_theme_font_override("font", GraffitiStyle.tip_font())
+	_hint_label.add_theme_color_override("font_color", GraffitiStyle.SUN)
+	_hint_label.add_theme_color_override("font_outline_color", GraffitiStyle.INK)
+	_hint_label.add_theme_constant_override("outline_size", 8)
+	_hint_label.add_theme_color_override("font_shadow_color", GraffitiStyle.SHADOW)
+	_hint_label.add_theme_constant_override("shadow_offset_x", 2)
+	_hint_label.add_theme_constant_override("shadow_offset_y", 3)
+	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_hint_label)
 
 	_damage_label = Label.new()
@@ -1693,8 +1712,10 @@ func _layout_controls() -> void:
 	_ground_speed_label.position = Vector2(size.x - spd_w - pad, size.y * 0.5 - 18)
 	_ground_speed_label.add_theme_font_size_override("font_size", 16 if is_mob else 14)
 
-	_hint_label.size = Vector2(size.x * 0.6, 24)
-	_hint_label.position = Vector2(size.x * 0.2, size.y * 0.5 + RETICLE_RADIUS * 3.0)
+	var hint_fs := GraffitiStyle.fit(24, size)
+	_hint_label.add_theme_font_size_override("font_size", hint_fs)
+	_hint_label.size = Vector2(size.x * 0.8, hint_fs * 2.6)
+	_hint_label.position = Vector2(size.x * 0.1, size.y * 0.5 + RETICLE_RADIUS * 3.0)
 
 	_damage_label.size = Vector2(260, 20)
 	_damage_label.position = Vector2(pad, size.y * 0.5 + 30)
@@ -2033,7 +2054,7 @@ func _fill_combat_popup(popup: FlightMenu.DraggablePopup) -> void:
 		_trigger_incident("derelict_tumble"))
 	popup.add_action_row("Trigger Meteor Strike (🚨)", func() -> void:
 		_trigger_incident("meteor_strike"))
-	popup.add_action_row("Trigger Faction Skirmish (🎯)", func() -> void:
+	popup.add_action_row("Trigger Faction Skirmish", func() -> void:
 		_trigger_incident("faction_skirmish"))
 	popup.add_action_row("Trigger Rare Drift (◆)", func() -> void:
 		_trigger_incident("rare_drift"))
@@ -2289,9 +2310,21 @@ func set_power(energy: float, heat: float) -> void:
 	_heat = heat
 
 
-func show_hint(text: String) -> void:
-	if _hint_label != null:
-		_hint_label.text = text
+## The hint line under the reticle. Most hints are developer read-outs
+## ("Gravity: HIGH", "ORBIT: stable..."), shown only in debug mode
+## (Settings > DEBUG); [param player] hints (what to do now) always show. A
+## hint holds for [constant HINT_HOLD] seconds, then fades.
+func show_hint(text: String, player := false) -> void:
+	if _hint_label == null or (not player and not Session.debug_mode):
+		return
+	# No dashes in what the player reads: a comma reads faster.
+	_hint_label.text = text.replace(" — ", ", ").replace("—", ", ").to_upper() if player else text
+	_hint_label.modulate.a = 1.0
+	if _hint_tween != null and _hint_tween.is_valid():
+		_hint_tween.kill()
+	_hint_tween = create_tween()
+	_hint_tween.tween_interval(HINT_HOLD)
+	_hint_tween.tween_property(_hint_label, "modulate:a", 0.0, 0.8)
 
 
 # --- Instruments ------------------------------------------------------------
@@ -2744,4 +2777,5 @@ func _draw_minimap(_camera: Camera3D) -> void:
 	var ai_list: Array = []
 	if _root._ai_spawner != null:
 		ai_list = _root._ai_spawner._ships
+	_radar_display.offline = _root.sensors_lost()
 	_radar_display.draw_radar(_overlay, player_ship, ai_list, _root.landmarks(), centre, _root.locked_target)

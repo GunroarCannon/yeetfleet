@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://b3me2xlmv2kq0"
+path="res://.godot/imported/Military March [Psx Bitcrush].ogg-d0840f93120308501760d27d5d95918e.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/sounds/songs/submenus/Military March [Psx Bitcrush].ogg"
+dest_files=["res://.godot/imported/Military March [Psx Bitcrush].ogg-d0840f93120308501760d27d5d95918e.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

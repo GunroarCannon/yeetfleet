@@ -13,7 +13,9 @@
 ##
 ## A second finger turns it into a two-finger gesture: whatever the first
 ## finger was doing is dropped ([signal cancelled]) and [signal two_finger]
-## reports the pinch, twist and pan until both are up. On PC the mouse wheel
+## reports the pinch, twist and pan until both are up — unless [member
+## keep_primary] is on (a slingshot pull under way): then the first finger
+## carries on and the second one only looks around ([signal look_dragged]). On PC the mouse wheel
 ## and a right-drag stand in ([signal wheel], [signal alt_dragged]).
 class_name GestureReader
 extends RefCounted
@@ -38,6 +40,9 @@ signal two_finger(scale: float, twist: float, pan: Vector2)
 signal wheel(steps: float)
 ## Right-button drag on PC, relative pixels.
 signal alt_dragged(relative: Vector2)
+## A second finger dragging while [member keep_primary] holds the first one,
+## relative pixels.
+signal look_dragged(relative: Vector2)
 
 ## Movement (px) past which a press is a swipe/drag, not a tap or hold.
 var move_threshold := 18.0
@@ -45,6 +50,9 @@ var move_threshold := 18.0
 var tap_time := 0.28
 var hold_time := 0.32
 var long_hold_time := 1.4
+## Set by a profile while the first finger's gesture must not be dropped by a
+## second finger (the slingshot's pull): the second one looks around instead.
+var keep_primary := false
 
 var _pointer := -1
 var _start := Vector2.ZERO
@@ -65,6 +73,8 @@ var _pinch_mid := Vector2.ZERO
 ## A real touchscreen: the mouse events it emulates are ignored.
 var _touch_device := false
 var _alt_drag := false
+## The looking-around finger while [member keep_primary] holds (-1 = none).
+var _look_index := -1
 
 
 ## True while a finger is down.
@@ -87,6 +97,9 @@ func feed(event: InputEvent) -> bool:
 		var st := event as InputEventScreenTouch
 		if st.pressed:
 			_touches[st.index] = st.position
+			if keep_primary and _pointer != -1 and _look_index == -1 and not _two:
+				_look_index = st.index
+				return true
 			if _touches.size() == 2:
 				_begin_two()
 				return true
@@ -94,6 +107,9 @@ func feed(event: InputEvent) -> bool:
 				return true
 			return _down(st.index, st.position)
 		_touches.erase(st.index)
+		if st.index == _look_index:
+			_look_index = -1
+			return true
 		if _two:
 			# The pinch holds until every finger is up, so the one left behind
 			# doesn't turn into a swipe.
@@ -107,6 +123,9 @@ func feed(event: InputEvent) -> bool:
 		var sd := event as InputEventScreenDrag
 		if _touches.has(sd.index):
 			_touches[sd.index] = sd.position
+		if sd.index == _look_index:
+			look_dragged.emit(sd.relative)
+			return true
 		if _two:
 			_move_two()
 			return true
@@ -172,6 +191,7 @@ func reset() -> void:
 	_touches.clear()
 	_two = false
 	_alt_drag = false
+	_look_index = -1
 
 
 ## True while two fingers are pinching (or the last of them is still down).

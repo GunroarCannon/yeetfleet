@@ -44,7 +44,16 @@ static var _next_hit_freeze_ms := 0
 ## Flat HP cap for a "popcorn" archetype (see [method set_group_context]) --
 ## low enough that a ramming hit reliably one-shots it, keeping momentum-based
 ## ramming play fun instead of bogged down in a real ship's hit points.
-const POPCORN_MAX_HP := 35.0
+const POPCORN_MAX_HP := 80.0
+## Takes no damage at all while set (the tutorial's drones, until it is time
+## to wreck one).
+var invulnerable := false
+## Takes nothing from the player's guns or rams (a ship the player is guarding:
+## a stray volley or a bounce off it must not lose the mission).
+var player_proof := false
+## [member scale_multiplier] from which a hull counts as a big ship: its death
+## is the big blast, its fly-by the big one (see [FlightRoot]).
+const BIG_SHIP_SCALE := 2.5
 
 ## The preset id this ship was built from, for display.
 var preset_name := ""
@@ -102,6 +111,30 @@ var _pace_timer := 0.0
 ## Target instance id -> {ship instance id: slot expiry (ms)}, shared by every
 ## AI ship so they can take turns on the same target.
 static var _attack_slots := {}
+
+# --- Scenario rules (set by the flight's scenarios from [Difficulty], cleared
+# when a scenario stops; free roam keeps the neutral values) ---
+
+## The friendly ship a guard mission protects, or null. At most
+## [member guard_max_attackers] ships go for it at once (by slot, like the
+## attack slots); a ship within [member guard_player_range] of the player, or
+## one whose own roll is past [member guard_share], goes for the player instead.
+static var guard_ship: AiShip = null
+static var guard_max_attackers := 2
+static var guard_player_range := 0.0
+static var guard_share := 1.0
+## Ship instance id -> slot expiry (ms) on [member guard_ship].
+static var _guard_slots := {}
+const GUARD_SLOT_TTL_MS := 1500
+## Enemies see the player this much nearer than they are (1 = as they are),
+## so they come for the player rather than the nearest wingman.
+static var player_focus := 1.0
+## Damage the player's wingmen deal, × (1 = full).
+static var ally_damage_mult := 1.0
+## Attack slots on the player, overriding [member JuiceSettings.ai_max_attackers] (-1 = don't).
+static var max_attackers_override := -1
+## Size every ship spawned from now on takes, × (a level's climb; 1 = none).
+static var spawn_scale := 1.0
 ## Reference to the player's ship, set by [AiSpawner]. Used for detection
 ## distance checks and combat targeting.
 var player_ref: Node3D = null
@@ -144,6 +177,14 @@ var locked_enemy: Node3D = null
 ## outside the AI tick, for the floating indicator over a ship coming for the
 ## player (see [method is_aggroed_to_player]).
 var current_target: Node3D = null
+## How aggressive this ship is (1 = the norm): shorter rests between bursts,
+## faster fire, more frequent yeets. Set by [method set_threat].
+var threat := 1.0
+## A hull preset id to fly (ship_families.json) instead of a random design;
+## set before [method initialise].
+var design_preset := ""
+## This ship's own 0..1 roll against [member guard_share].
+var _guard_roll := randf()
 ## How far above the hull centre a reaction emote spawns from (see [method
 ## _emote]) -- cached once the hull is assembled, from its own bounds.
 var _emote_height := 1.0
@@ -230,7 +271,10 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 
 	# Build a completely random ship: random chassis, random parts per socket,
 	# random faction paint. Every AI ship is unique.
-	_design = _build_random_design(library)
+	if design_preset != "":
+		_design = library.build_preset_design(design_preset)
+	if _design == null:
+		_design = _build_random_design(library)
 	if _design == null:
 		push_warning("AiShip: could not build random design")
 		return
@@ -273,6 +317,8 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 	if not is_mother and not is_satellite and is_equal_approx(scale_multiplier, 1.0) \
 		and _rng.randf() < 0.18:
 		scale_multiplier = _rng.randf_range(3.0, 6.5)
+	if not is_mother and not is_satellite:
+		scale_multiplier *= spawn_scale
 	_view.apply_scale(Session.ship_scale * scale_multiplier)
 	_hull_holder.add_child(_view.root)
 	_emote_height = _view.aabb.size.y * 0.5 + 0.3
@@ -726,6 +772,8 @@ func _find_enemy() -> Node3D:
 		return null
 	var best: Node3D = null
 	var best_d := INF
+	var player_ok := false
+	var player_d := INF
 	if spawner_ref != null and is_instance_valid(spawner_ref):
 		var ships: Array = spawner_ref._ships
 		for other in ships:
@@ -739,10 +787,82 @@ func _find_enemy() -> Node3D:
 	if player_ref != null and is_instance_valid(player_ref) and player_ref.is_inside_tree():
 		var player_team_id: int = int(player_ref.get_meta("team", 0))
 		if aggressive_to.is_empty() or (player_team_id != 0 and aggressive_to.has(player_team_id)):
-			var d := global_position.distance_squared_to(player_ref.global_position)
-			if d < best_d:
+			player_ok = true
+			player_d = global_position.distance_squared_to(player_ref.global_position)
+			# Seen nearer than it is: enemies hunt the player, not the wingmen.
+			var focus := player_focus if player_team_id != 0 else 1.0
+			if player_d * focus * focus < best_d:
 				best = player_ref
+	if best != null and best == guard_ship:
+		if not _may_attack_guarded(player_ok, player_d):
+			return player_ref
+	else:
+		_guard_slots.erase(get_instance_id())
 	return best
+
+
+## Whether this ship may go for the guarded ship (see [member guard_ship]):
+## not with the player close by or with its roll on the player, and only
+## while one of the guard slots is free. Holds (renews) the slot when it may.
+func _may_attack_guarded(player_ok: bool, player_d: float) -> bool:
+	var me := get_instance_id()
+	if player_ok and (player_d < guard_player_range * guard_player_range or _guard_roll >= guard_share):
+		_guard_slots.erase(me)
+		return false
+	var now := Time.get_ticks_msec()
+	for id: int in _guard_slots.keys():
+		if _guard_slots[id] < now or not is_instance_id_valid(id):
+			_guard_slots.erase(id)
+	if not player_ok or _guard_slots.has(me) or _guard_slots.size() < guard_max_attackers:
+		_guard_slots[me] = now + GUARD_SLOT_TTL_MS
+		return true
+	return false
+
+
+## Clear the scenario rules back to free roam's.
+static func clear_scenario_rules() -> void:
+	guard_ship = null
+	_guard_slots.clear()
+	guard_player_range = 0.0
+	guard_share = 1.0
+	player_focus = 1.0
+	ally_damage_mult = 1.0
+	max_attackers_override = -1
+	spawn_scale = 1.0
+
+
+## Ships going for the guarded ship right now (for the checks).
+static func guard_attackers() -> int:
+	var now := Time.get_ticks_msec()
+	var n := 0
+	for id: int in _guard_slots:
+		if _guard_slots[id] >= now and is_instance_id_valid(id):
+			n += 1
+	return n
+
+
+## Make this ship [param t] times as aggressive as the norm: its guns fire
+## faster and aim truer, its rests are shorter (see [method
+## _paced_fire_allowed]) and it yeets more often (see [YeetDash]).
+func set_threat(t: float) -> void:
+	threat = maxf(t, 0.1)
+	if fire_pattern.is_empty():
+		return
+	fire_pattern["rate_mult"] = float(fire_pattern.get("rate_mult", 1.0)) * sqrt(threat)
+	fire_pattern["aim_error_deg"] = float(fire_pattern.get("aim_error_deg", 0.0)) / threat
+	if systems != null:
+		systems.fire_pattern = fire_pattern
+
+
+## Arm this ship from gun class [param gun_class] (0 fighter … 3 capital:
+## [constant SystemsSim.WEAPON_SIZE_TIERS]) — a railgun or a planet-buster
+## at the top.
+func arm(gun_class: int) -> void:
+	if systems == null:
+		return
+	var c := clampi(gun_class, 0, SystemsSim.WEAPON_SIZE_TIERS.size() - 1)
+	systems.set_weapon_index(SystemsSim.weapon_index_for_size(SystemsSim.WEAPON_SIZE_TIERS[c], _rng))
+	systems.fire_pattern = fire_pattern
 
 
 # --- Off-screen fire allowance -------------------------------------------------
@@ -907,7 +1027,7 @@ func _paced_fire_allowed(delta: float, target: Node3D) -> bool:
 		if _pace_bursting:
 			_pace_timer = randf_range(on.x, on.y)
 		else:
-			_pace_timer = randf_range(off.x, off.y) * JuiceSettings.ai_rest_mult
+			_pace_timer = randf_range(off.x, off.y) * JuiceSettings.ai_rest_mult / threat
 	if not _pace_bursting:
 		_release_attack_slot(target)
 		return false
@@ -927,7 +1047,8 @@ func _claim_attack_slot(target: Node3D) -> bool:
 			holders.erase(id)
 	_attack_slots[key] = holders
 	var me := get_instance_id()
-	if holders.has(me) or holders.size() < int(JuiceSettings.ai_max_attackers):
+	var cap := max_attackers_override if max_attackers_override >= 0 else int(JuiceSettings.ai_max_attackers)
+	if holders.has(me) or holders.size() < cap:
 		holders[me] = now + ATTACK_SLOT_TTL_MS
 		return true
 	return false
@@ -975,7 +1096,7 @@ func _apply_combat_damage(target: Node3D, delta: float) -> void:
 ## hits take the debugger's damage-dealt dial and one-hit-kill switch, and
 ## mark the ship so its death counts as the player's kill.
 func take_damage(amount: float, from_player := false, source: Object = null) -> void:
-	if not _alive:
+	if not _alive or invulnerable or (from_player and player_proof):
 		return
 	# The player is flying this ship: it takes hits as the player would.
 	if pilot_host != null and is_instance_valid(pilot_host) and not from_player:
@@ -984,9 +1105,15 @@ func take_damage(amount: float, from_player := false, source: Object = null) -> 
 			return
 	if _hit_by_non_enemy(from_player, source):
 		_mark("?")
+	# A wingman's hit: turned down, so the wingmen can't win the fight alone.
+	if not from_player and ally_damage_mult != 1.0 and _hit_by_player_side(source):
+		amount *= ally_damage_mult
 	if from_player:
 		amount *= JuiceSettings.player_damage_dealt_mult * JuiceSettings.player_power * player_power_boost \
 				* player_upgrade_power
+		# A gun hit comes with its systems sim as the source; a ram with none.
+		if source != null:
+			amount *= JuiceSettings.player_gun_damage
 		if JuiceSettings.one_hit_kills:
 			amount = maxf(amount, hp + 1.0)
 		_last_player_hit_ms = Time.get_ticks_msec()
@@ -1063,7 +1190,7 @@ func _hit_explosion(heavy: bool) -> void:
 	Juice.light_pop(pos, Color("ffaa55"), 6.0 * size, 0.1)
 	var audio := SpaceAudio.instance()
 	if audio != null and heavy:
-		audio.play_explosion(pos, false)
+		audio.play_blast(pos, &"explosion_small")
 
 
 func _emote(expression: String, hold := 1.0) -> void:
@@ -1121,7 +1248,7 @@ func _on_part_broken(broken: DamageSystem.BrokenPart, effects: Array) -> void:
 		AddonVfx.explosion(host, broken.world_pos, 0.6 * clampf(scale_multiplier, 1.0, 4.0), false, Color("ff9944"))
 	var audio := SpaceAudio.instance()
 	if audio != null:
-		audio.play_explosion(broken.world_pos, false)
+		audio.play_blast(broken.world_pos, &"explosion_small")
 	var xform := Transform3D(Basis(), broken.world_pos)
 	Juice.burst(BurstPresets.Preset.SPARKS, xform, 1.2, Color("ff9933"))
 	Juice.burst(BurstPresets.Preset.DEBRIS, xform, 0.8)
@@ -1203,6 +1330,10 @@ func _destroy() -> void:
 			# Scale by the ship's own size — a mothership's death should not
 			# look the same as a small fighter's.
 			var death_scale := 2.5 * clampf(scale_multiplier, 1.0, 4.0) * JuiceSettings.kill_explosion_size
+			# The bang: a fighter's is a normal blast, a big hull's the big one.
+			var audio := SpaceAudio.instance()
+			if audio != null:
+				audio.play_blast(my_pos, &"explosion_big" if scale_multiplier >= BIG_SHIP_SCALE else &"explosion")
 			if death_scale > 0.0:
 				AddonVfx.explosion(world_host, my_pos, death_scale, true, Color("ff8844"))
 			# A chance (the Juice panel's dial, 33% by default) of a bigger
@@ -1546,3 +1677,16 @@ func _hit_by_non_enemy(from_player: bool, source: Object) -> bool:
 	if attacker == null or attacker == self:
 		return false
 	return not (attacker.team_id != 0 and aggressive_to.has(attacker.team_id))
+
+
+## Whether [param source] (a gun's [SystemsSim]) belongs to a ship on the
+## player's team — a wingman — not the player's own guns.
+func _hit_by_player_side(source: Object) -> bool:
+	var shooter := source as SystemsSim
+	if shooter == null or player_ref == null or not is_instance_valid(player_ref):
+		return false
+	var ship := shooter.get("_root") as AiShip
+	if ship == null or ship.pilot_host != null:
+		return false
+	var p_team := int(player_ref.get_meta("team", 0))
+	return p_team != 0 and ship.team_id == p_team and team_id != p_team

@@ -39,6 +39,9 @@ const PALETTES := {
 static var _sphere: SphereMesh = null
 static var _streak: BoxMesh = null
 static var _bit: BoxMesh = null
+## One thin unit ring (outer radius 1), scaled per blast: a new TorusMesh per
+## kill was a mesh build on the frame of every bang.
+static var _ring: TorusMesh = null
 static var _mats := {}
 
 var _animated := false
@@ -47,6 +50,8 @@ var _palette: Array = PALETTES["fire"]
 var _real := false
 var _life := LIFE
 var _t := 0.0
+## Playback rate (the menu's backdrop plays its blasts in slow motion).
+var speed := 1.0
 var _puffs: Array[Node3D] = []
 var _puff_scale: Array[Vector3] = []
 var _light: OmniLight3D = null
@@ -78,6 +83,26 @@ static func spawn(parent: Node, pos: Vector3, radius: float, dir := Vector3.UP, 
 	b._animated = true
 	b.scale = Vector3.ONE * 0.35
 	return b
+
+
+## Draw one of every look once at [param at] (somewhere the camera sees,
+## under a loading card) and clear them a few frames later: the first real
+## blast then finds its materials and meshes ready instead of compiling them
+## mid-fight.
+static func prewarm(parent: Node3D, at: Vector3, radius := 4.0) -> void:
+	var made: Array[Node] = []
+	var rng := RandomNumberGenerator.new()
+	for pal in PALETTES:
+		made.append(build(parent, at, radius, Vector3.UP, rng, 0.3, 0.5, pal))
+	var m := mushroom(parent, at, radius, Vector3.UP, true)
+	if m != null:
+		made.append(m)
+	var tree := parent.get_tree()
+	for i in 4:
+		await tree.process_frame
+	for n in made:
+		if is_instance_valid(n):
+			n.queue_free()
 
 
 ## A nuke's mushroom cloud standing along [param up]: a glowing stem, a
@@ -138,16 +163,12 @@ func _sculpt_mushroom(radius: float, up: Vector3) -> void:
 			_puffs.append(mi)
 			_puff_scale.append(mi.scale)
 	var ring := MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = radius * 1.35
-	torus.outer_radius = radius * 1.5
-	torus.rings = 48
-	torus.ring_segments = 6
-	ring.mesh = torus
+	ring.mesh = _ring
 	ring.material_override = _mat(Color(1.0, 0.75, 0.45, 0.6), 1.6, true)
 	add_child(ring)
 	ring.look_at(global_position + up, side)
 	ring.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+	ring.scale = Vector3.ONE * radius * 1.5
 	_puffs.append(ring)
 	_puff_scale.append(ring.scale)
 	_light.omni_range = radius * 4.0
@@ -165,6 +186,11 @@ func _sculpt(radius: float, dir: Vector3, rng: RandomNumberGenerator, a: float, 
 		_streak.size = Vector3(0.05, 0.05, 1.0)
 		_bit = BoxMesh.new()
 		_bit.size = Vector3.ONE
+		_ring = TorusMesh.new()
+		_ring.inner_radius = 0.93
+		_ring.outer_radius = 1.0
+		_ring.rings = 40
+		_ring.ring_segments = 6
 	var up := dir.normalized() if dir.length() > 0.01 else Vector3.UP
 	var side := up.cross(Vector3.FORWARD if absf(up.z) < 0.9 else Vector3.RIGHT).normalized()
 	var side2 := up.cross(side).normalized()
@@ -196,17 +222,13 @@ func _sculpt(radius: float, dir: Vector3, rng: RandomNumberGenerator, a: float, 
 	# The shock ring round the base, and a fainter second one.
 	for k in 2:
 		var ring := MeshInstance3D.new()
-		var torus := TorusMesh.new()
-		torus.inner_radius = radius * (0.72 + k * 0.35) * grow
-		torus.outer_radius = radius * (0.78 + k * 0.35) * grow
-		torus.rings = 32
-		torus.ring_segments = 6
-		ring.mesh = torus
+		ring.mesh = _ring
 		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ring.material_override = _mat(Color(1.0, 0.75, 0.45, 0.8 - k * 0.35), 1.6, true)
 		add_child(ring)
 		ring.look_at(global_position + up, side)
 		ring.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+		ring.scale = Vector3.ONE * radius * (0.78 + k * 0.35) * grow
 		ring.position = up * radius * 0.08
 		_puffs.append(ring)
 		_puff_scale.append(ring.scale)
@@ -248,7 +270,7 @@ func _process(delta: float) -> void:
 		return
 	# Game time: a hitstop or kill-freeze holds the blast where it is. A
 	# mushroom uses the wall clock instead.
-	_t += minf(delta / maxf(Engine.time_scale, 0.001), 0.1) if _real else delta
+	_t += (minf(delta / maxf(Engine.time_scale, 0.001), 0.1) if _real else delta) * speed
 	var k := _t / _life
 	if k < 0.12:
 		scale = Vector3.ONE * lerpf(0.35, 1.0, ease(k / 0.12, 0.35))

@@ -68,7 +68,7 @@ func _initialize() -> void:
 	await _callouts()
 	_debris_scale()
 	await _sling()
-	_tutorial()
+	await _tutorial()
 	_finish()
 
 
@@ -109,7 +109,8 @@ func _boost() -> void:
 	pu.grant(PowerUps.Kind.BOOST)
 	_check(is_equal_approx(AiShip.player_power_boost, JuiceSettings.powerup_boost_power), "boost raises the player's attack")
 	_check(_root.model.top_speed > top * 1.1, "boost raises top speed")
-	await _secs(0.8)
+	# 0.5 s of boost, plus the pickup's 0.3 s freeze frame, plus a margin.
+	await _secs(1.0)
 	_check(is_equal_approx(AiShip.player_power_boost, 1.0) and is_equal_approx(_root.model.top_speed, top), "boost runs out and gives both back")
 	JuiceSettings.powerup_boost_time = 8.0
 
@@ -203,14 +204,29 @@ func _sling() -> void:
 	await _ticks(2)
 	_check(_root.locked_target == ships[0], "a tap while resting auto-aims at the ship on screen")
 	_check(_root._button_firing, "…and fires")
-	# Aiming: the steady camera follows the aim once the pull is under way.
-	pilot.run.set_aiming(true)
-	pilot.aim_dir = Vector3.RIGHT
-	pilot.aim_power = 0.6
-	_check(pilot._flight_dir() == Vector3.RIGHT, "aiming, the camera swings round to look along the aim")
-	pilot.aim_power = 0.02
-	_check(pilot._flight_dir() == Vector3.ZERO, "a barely-started pull leaves the camera still")
-	pilot.run.set_aiming(false)
+	# Aiming: the camera holds its frame (it no longer swings round behind
+	# the ship) and turns to look along the aim, following the thumb; it
+	# resets on release.
+	var rest := -cam.global_transform.basis.z
+	var edge := minf(cam.get_viewport().get_visible_rect().size.x, cam.get_viewport().get_visible_rect().size.y)
+	pilot._begin_aim()
+	var a := pilot._aim_anchor
+	pilot._update_aim(a + Vector2(0.0, edge * 0.01))
+	pilot._update_camera()
+	_check(pilot._flight_dir() == Vector3.ZERO and _root.camera_rig.look_ahead == Vector3.ZERO, "a barely-started pull leaves the camera still")
+	pilot._update_aim(a + Vector2(-edge * 0.15, edge * 0.1))
+	pilot._update_camera()
+	var ahead := _root.camera_rig.look_ahead
+	_check(pilot._flight_dir() == Vector3.ZERO and ahead.length() > 1.0 and ahead.normalized().dot(pilot.aim_dir) > 0.5,
+		"aiming, the camera stays put and looks along the aim")
+	pilot._update_aim(a + Vector2(edge * 0.2, edge * 0.05))
+	pilot._update_camera()
+	var ahead2 := _root.camera_rig.look_ahead
+	_check(pilot._flight_dir() == Vector3.ZERO and ahead2.normalized().dot(pilot.aim_dir) > 0.5 and not ahead2.is_equal_approx(ahead),
+		"…and the look follows the thumb")
+	pilot.aim_power = 0.0
+	pilot._on_released(a)
+	_check(pilot._flight_dir().is_equal_approx(rest), "let go without a launch, it goes back to where it was")
 	# Launched at the ship: the guns fire on their own.
 	_root.locked_target = null
 	var to := (ships[0].global_position - _root.model.global_position).normalized()
@@ -229,20 +245,54 @@ func _tutorial() -> void:
 	_root.set_move_profile(FlightRoot.MoveProfile.SLINGSHOT)
 	_root.start_tutorial()
 	var tut := _root.tutorial
-	_check(tut.current_event() == "launch", "the slingshot tutorial starts with the launch")
+	# A drone to guard, then to wreck.
+	var drones := await _spawn(1, 150.0)
+	_check(tut.current_event() == "story", "the tutorial opens on a story card")
+	# NEXT on each card, then look round and zoom, before the launch.
+	for i in 2:
+		tut.note("story")
+		_tick_tutorial(tut)
+	_check(tut.current_event() == "look", "the slingshot tutorial teaches looking round first")
+	_check(tut.guards_enemies(), "ships cannot be hurt before the wreck step")
+	tut.note("look", FlightTutorial.LOOK_NEED * 0.4)
+	tut._process(0.016)
+	_check(tut.current_event() == "look", "looking round has to add up before it ticks")
+	tut.note("look", FlightTutorial.LOOK_NEED)
+	_tick_tutorial(tut)
+	_check(tut.current_event() == "zoom", "…then zooming")
+	tut.note("zoom", FlightTutorial.ZOOM_NEED)
+	_tick_tutorial(tut)
+	_check(tut.current_event() == "launch", "…then the launch")
 	tut.note("kill")
 	tut._process(0.016)
 	_check(tut.current_event() == "launch", "a step only advances on its own action")
 	tut.note("launch")
-	for i in int(FlightTutorial.TICK_TIME / 0.1) + 2:
-		tut._process(0.1)
+	_tick_tutorial(tut)
 	_check(tut.current_event() == "tap_fire", "doing it ticks it off and moves on")
+	tut.note("tap_fire")
+	_tick_tutorial(tut)
+	tut.note("story")
+	_tick_tutorial(tut)
+	_check(tut.current_event() == "kill" and not tut.guards_enemies(), "at the wreck step ships can be hurt again")
+	await _ticks(3)
+	var pinned: Dictionary = _root._interaction_markers._pinned
+	_check(pinned.has(drones[0]) and (pinned[drones[0]] as Color).is_equal_approx(InteractionMarkers.COLORS[AiShip.Attitude.HOSTILE]),
+		"at the wreck step the drone wears the red target")
+	for d in drones:
+		if is_instance_valid(d):
+			d.queue_free()
 	tut.queue_free()
 	if was_done == null:
 		Session.prefs.erase("tutorial_done")
 	else:
 		Session.prefs["tutorial_done"] = was_done
 	_root.set_move_profile(FlightRoot.MoveProfile.CLASSIC)
+
+
+## Run the tutorial's clock past a step's NICE! beat.
+func _tick_tutorial(tut: FlightTutorial) -> void:
+	for i in int(FlightTutorial.TICK_TIME / 0.1) + 2:
+		tut._process(0.1)
 
 
 ## Park [param s] [param dist] m straight in front of the camera: the saved

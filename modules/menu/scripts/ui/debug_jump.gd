@@ -91,5 +91,5 @@ func _win_all() -> void:
 			Campaign.apply_result(l, {"won": true, "time": 1.0, "kills": 5, "hull": 1.0})
 
 
-func place(vp: Vector2) -> void:
-	_chip.position = Vector2(12, vp.y - _chip.size.y - 12)
+func place(vp: Vector2, left := 12.0) -> void:
+	_chip.position = Vector2(left, vp.y - _chip.size.y - 12)

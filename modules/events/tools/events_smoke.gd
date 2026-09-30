@@ -80,7 +80,7 @@ func _test_event_bubble() -> void:
 	_check(bubble.mouse_filter == Control.MOUSE_FILTER_IGNORE, "EventBubble mouse filter is ignore")
 
 	bubble._build_ui()
-	_check(bubble.has_node("BubblePanel"), "EventBubble builds UI panel")
+	_check(bubble.custom_minimum_size.x > 100.0 and WorldMarker.word_for(bubble.symbol) == "SOS", "EventBubble sizes its tag and shows a word, not an emoji")
 	bubble.free()
 
 

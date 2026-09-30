@@ -18,5 +18,5 @@ func _run() -> void:
 		if c is AnimationPlayer:
 			print("anim ", c.current_animation, " pos ", c.current_animation_position, " playing ", c.is_playing())
 	await RenderingServer.frame_post_draw
-	root.get_texture().get_image().save_png("res://scratch/shots/blast_p2.png")
+	root.get_texture().get_image().save_png("res://debug_shots/scratch/shots/blast_p2.png")
 	quit()

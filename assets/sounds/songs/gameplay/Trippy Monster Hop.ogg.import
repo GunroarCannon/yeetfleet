@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://cv66l1jbjqd2t"
+path="res://.godot/imported/Trippy Monster Hop.ogg-917bc6aaaa69fa0f0a3778af3108086a.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/sounds/songs/gameplay/Trippy Monster Hop.ogg"
+dest_files=["res://.godot/imported/Trippy Monster Hop.ogg-917bc6aaaa69fa0f0a3778af3108086a.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

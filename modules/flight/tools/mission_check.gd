@@ -94,7 +94,8 @@ func _missions() -> void:
 		# The arrow is laid on a render frame.
 		for i in 4:
 			await process_frame
-		var arrow_ok := obj._arrow.visible or goal == Vector3.INF
+		# (A protect mission starts beside its hauler: nothing to point at yet.)
+		var arrow_ok := obj._arrow.visible or goal == Vector3.INF or (obj.kind == ScenarioObjectives.Kind.ESCORT and obj._hold > 0.0)
 		match obj.kind:
 			ScenarioObjectives.Kind.DELIVER, ScenarioObjectives.Kind.SALVAGE:
 				for p in obj.points.duplicate():
@@ -108,7 +109,26 @@ func _missions() -> void:
 					await _ticks(2)
 					_put_player(p + axis * 30.0)
 					await _ticks(2)
+			ScenarioObjectives.Kind.VOYAGE:
+				_check(obj._voyage_name != "" and sc.status_line().begins_with("REACH "), "%s: names the planet to reach (%s)" % [id, sc.status_line()])
+				_put_player(obj.points[0])
+				await _ticks(3)
+			ScenarioObjectives.Kind.ESCORT when obj._hold > 0.0:
+				# PROTECT: stranded, it stays put; hold out and it is won.
+				_check(sc.guarded_ship() == obj.ship and sc.time_left() > 0.0, "%s: a hauler to keep alive, on a clock" % id)
+				var p0 := obj.ship.global_position
+				await _ticks(60)
+				_check(obj.ship.global_position.distance_to(p0) < 30.0, "%s: the hauler stays where it is" % id)
+				obj._t = obj._hold
+				await _ticks(3)
 			ScenarioObjectives.Kind.ESCORT:
+				# The level's opening look at the ship to guard.
+				_check(sc.guarded_ship() == obj.ship, "%s: the guarded ship is known" % id)
+				var r := CampaignLevelOverlay.ship_radius(obj.ship)
+				var shown := _root.camera_rig.show_ship(obj.ship, r, 0.2, 0.2, 0.2)
+				_check(r > 1.0 and (shown or not _root.camera_rig.is_follow_mode()), "%s: the camera shows the guarded ship" % id)
+				await _ticks(60)
+				_root.camera_rig.cancel_kill_cam()
 				var d0 := obj.ship.global_position.distance_to(obj.destination)
 				await _ticks(120)
 				var d1 := obj.ship.global_position.distance_to(obj.destination)

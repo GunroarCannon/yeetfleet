@@ -28,6 +28,10 @@ var despawn_player_dist := 3500.0
 var bubble_cooldown := 25.0
 var eval_interval := 3.0
 var auto_spawn := true
+## Player view (not debug): a banner shows the incident's title only, and at
+## most one every [constant QUIET_COOLDOWN] seconds.
+var quiet := false
+const QUIET_COOLDOWN := 60.0
 
 # --- State ------------------------------------------------------------------
 
@@ -154,9 +158,13 @@ func trigger_incident(type_name: String, spawn_pos: Vector3 = Vector3.ZERO) -> I
 	active_incidents.append(inc)
 	incident_started.emit(inc)
 
-	# Trigger visual HUD bloom
-	_request_bubble(inc.symbol, inc.title, inc.subtitle, inc.marker_color)
-	_time_since_bubble = 0.0
+	# Trigger visual HUD bloom (quiet: the title alone, and rarely).
+	if not quiet:
+		_request_bubble(inc.symbol, inc.title, inc.subtitle, inc.marker_color)
+		_time_since_bubble = 0.0
+	elif _time_since_bubble >= QUIET_COOLDOWN:
+		_request_bubble(inc.symbol, inc.title, "", inc.marker_color)
+		_time_since_bubble = 0.0
 
 	return inc
 

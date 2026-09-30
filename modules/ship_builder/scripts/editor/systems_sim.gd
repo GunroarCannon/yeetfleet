@@ -1212,15 +1212,20 @@ func _spawn_impact_explosion(hit_pos: Vector3, normal: Vector3, weapon: Dictiona
 			Juice.burst(BurstPresets.Preset.VAPOUR, xform, spark_s * 1.5, Color(0.3, 0.3, 0.35, 0.6))
 			Juice.burst(BurstPresets.Preset.DEBRIS, xform, spark_s * 1.2)
 
-	# Audio: play impact explosion sounds (spatial 3D)
+	# Audio (spatial 3D): an ordinary shot is a hit, not a blast — a blast on
+	# every landed bolt made a fight sound like popcorn. Warheads still go off.
 	var audio := SpaceAudio.instance()
 	if audio != null:
 		if is_sing:
 			audio.play_singularity_pulse(hit_pos)
 		elif w_type == "flak":
 			audio.play_flak_detonation(hit_pos)
+		elif is_nova:
+			audio.play_blast(hit_pos, &"explosion_big")
+		elif is_heavy or w_type == "missile":
+			audio.play_blast(hit_pos, &"explosion_small")
 		else:
-			audio.play_explosion(hit_pos, is_nova or is_heavy)
+			audio.play_hit(hit_pos)
 
 	# BinbunVFX layer on top of the Juice one-shots, plus the sprite hit flash.
 	# No sound from the addon here: the SpaceAudio call above already carries the
@@ -2813,6 +2818,9 @@ func _hit_large_craft(gen: LargeCraftGenerator, collider: Object, hit_pos: Vecto
 	var col: Color = weapon.get("color", Color("ff8833"))
 	AddonVfx.ground_explosion(gen, hit_pos, -dir, maxf(1.5, blast_radius * 0.08), col)
 	var detached := gen.shatter_at(hit_pos, blast_radius, impulse)
+	var audio := SpaceAudio.instance()
+	if audio != null and not detached.is_empty():
+		audio.play_blast(hit_pos, &"shatter_big" if blast_radius >= 30.0 or detached.size() > 6 else &"shatter")
 	if detached.is_empty():
 		gen.shoot_at(hit_pos - dir * 5.0, dir, 10.0)
 
@@ -3016,7 +3024,8 @@ func _destroy_planet(planet: Planet, epicentre: Vector3) -> void:
 	Whimsy.confetti(_shot_root, p_pos, 5.0)
 
 	var audio := SpaceAudio.instance()
-	if audio != null:
+	if audio != null and not planet.has_meta("boom_sounded"):
+		planet.set_meta("boom_sounded", true)
 		audio.play_planet_destruction(epicentre)
 
 	# Actual expanding physical multilayer shockwave:

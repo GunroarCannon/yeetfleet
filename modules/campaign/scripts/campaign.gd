@@ -116,6 +116,26 @@ static func pilot_name() -> String:
 	return String(_data["pilot"])
 
 
+## The longest a pilot's name can be.
+const NAME_MAX := 14
+
+
+## Rename the pilot: trimmed, upper case, letters/digits/spaces only, at most
+## [constant NAME_MAX] long. An empty result keeps the old name.
+static func set_pilot_name(name: String) -> void:
+	ensure_loaded()
+	var clean := ""
+	for ch in name.strip_edges().to_upper():
+		if ch == " " or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9"):
+			clean += ch
+	clean = clean.strip_edges().left(NAME_MAX)
+	if clean == "" or clean == pilot_name():
+		return
+	_data["pilot"] = clean
+	save_to_disk()
+	notifier.changed.emit()
+
+
 static func add_coins(amount: int) -> void:
 	ensure_loaded()
 	_data["coins"] = maxi(0, coins() + amount)
@@ -269,7 +289,8 @@ static func record(key: String) -> Dictionary:
 ## Playable when its road is open (see [method road_open]) and the pilot has
 ## the stars it asks for.
 static func is_unlocked(lvl: Dictionary) -> bool:
-	return road_open(lvl) and total_stars() >= int(lvl.get("stars_req", 0))
+	# Stars alone open a level: beating the one before is not required.
+	return total_stars() >= int(lvl.get("stars_req", 0))
 
 
 ## Whether a level linking into this one has been won: in its sector's graph,
@@ -299,8 +320,12 @@ static func total_stars() -> int:
 
 ## Whether the last sector on the road is finished, so the fork shows.
 static func at_fork() -> bool:
+	# Like a level, the fork opens on stars: enough for the next sector's first
+	# level (or the boss beaten, for saves from before the star gate).
 	var r := route()
-	return record(LevelGen.level_key(r, LevelGen.LEVELS_PER_SECTOR - 1))["wins"] > 0
+	if record(LevelGen.level_key(r, LevelGen.LEVELS_PER_SECTOR - 1))["wins"] > 0:
+		return true
+	return total_stars() >= LevelGen.stars_needed(r.size() * LevelGen.LEVELS_PER_SECTOR + 1)
 
 
 ## The two themes the road forks into next.
@@ -352,8 +377,49 @@ static func launch(lvl: Dictionary) -> void:
 		"overrides": (lvl["overrides"] as Dictionary).duplicate(true),
 		"title": String(lvl["title"]), "number": int(lvl["number"]),
 		"par": float(lvl["par"]),
+		"grade": (lvl.get("grade", {}) as Dictionary).duplicate(true),
+		"word": String(lvl["word"]),
+		"brief": String(LevelGen.KIND_BRIEF.get(String(lvl["kind"]), "")),
+		# What NEXT on the win card can go to (see [method next_candidates]).
+		"next": next_candidates(lvl),
+		"stars_now": total_stars(),
+		"stars_here": int(record(String(lvl["key"]))["stars"]),
 	}
 	Session.pending_ship = flight_ship(String(pick["id"]), bool(pick["loaner"]))
+	Session.space_setup = (lvl.get("space", {}) as Dictionary).duplicate(true)
+	Session.level_result = {}
+
+
+## Levels never won that are open now, or that winning [param lvl] would
+## open — what the win card's NEXT can go to: `[{key, stars_req}]`, the
+## ones [param lvl] opens first.
+static func next_candidates(lvl: Dictionary) -> Array:
+	var out: Array = []
+	var r := LevelGen.parse_route(String(lvl.get("route", "")))
+	var here := String(lvl.get("key", ""))
+	for i in (lvl.get("unlocks", []) as Array):
+		var nxt := LevelGen.level(r, int(i))
+		if record(String(nxt["key"]))["wins"] == 0:
+			out.append({"key": String(nxt["key"]), "stars_req": int(nxt["stars_req"])})
+	for sec in sectors():
+		for other: Dictionary in sec["levels"]:
+			var k := String(other["key"])
+			if k != here and record(k)["wins"] == 0 and is_unlocked(other) 					and not out.any(func(c: Dictionary) -> bool: return c["key"] == k):
+				out.append({"key": k, "stars_req": int(other["stars_req"])})
+	return out
+
+
+## The tutorial as a level on the map: flight school against a few drones,
+## with the hand showing each move. Pays nothing, keeps no record.
+static func launch_tutorial() -> void:
+	Session.pending_level = {
+		"key": "tutorial", "tutorial": true, "preset": "practice",
+		"overrides": {"enemies": 3, "name": "Flight school"},
+		"title": "Flight school", "number": 0, "par": 0.0,
+		"word": "LEARN", "brief": "Learn the moves.",
+	}
+	Session.pending_ship = flight_ship(current_ship())
+	Session.space_setup = {}
 	Session.level_result = {}
 
 
@@ -361,6 +427,8 @@ static func launch(lvl: Dictionary) -> void:
 static func launch_sandbox() -> void:
 	Session.pending_level = {}
 	Session.pending_ship = flight_ship(current_ship())
+	# A new system every time: planets, sizes, colours and incidents.
+	Session.space_setup = LevelGen.random_space(randi())
 	Session.level_result = {}
 
 
@@ -372,10 +440,18 @@ static func take_result() -> Dictionary:
 	Session.level_result = {}
 	if res.is_empty() or not res.has("key"):
 		return {}
+	# Sandbox pay-outs: points scored before being wrecked, as coins.
+	if String(res["key"]) == "sandbox":
+		var earned := maxi(0, int(res.get("coins", 0)))
+		if earned > 0:
+			add_coins(earned)
+		return {}
 	var lvl := LevelGen.from_key(String(res["key"]))
 	if lvl.is_empty():
 		return {}
-	return apply_result(lvl, res)
+	var out := apply_result(lvl, res)
+	out["go_next"] = String(res.get("go_next", ""))
+	return out
 
 
 ## Split from [method take_result] so a check can feed results directly.
@@ -397,11 +473,8 @@ static func apply_result(lvl: Dictionary, res: Dictionary) -> Dictionary:
 	var old_stars := int(rec.get("stars", 0))
 	var first_win := won and int(rec.get("wins", 0)) == 0
 	if won:
-		stars = 1
-		if float(res.get("hull", 0.0)) >= 0.5:
-			stars += 1
-		if time > 0.0 and time <= float(lvl["par"]):
-			stars += 1
+		# The shared rule the end card shows (see [StarRating]).
+		stars = StarRating.stars(lvl.get("grade", {}), float(lvl["par"]), res)
 		rec["wins"] = int(rec.get("wins", 0)) + 1
 		var best := float(rec.get("best", 0.0))
 		rec["best"] = time if best <= 0.0 else minf(best, time)
@@ -410,7 +483,7 @@ static func apply_result(lvl: Dictionary, res: Dictionary) -> Dictionary:
 		pay += maxi(0, stars - old_stars) * STAR_BONUS
 		st["wins"] = int(st.get("wins", 0)) + 1
 		var kind := String(lvl["kind"])
-		if kind in ["courier", "race", "salvage", "dock", "escort", "capital"]:
+		if kind in ["courier", "race", "salvage", "dock", "escort", "capital", "protect", "voyage"]:
 			st["cargo_wins"] = int(st.get("cargo_wins", 0)) + 1
 		else:
 			st["fight_wins"] = int(st.get("fight_wins", 0)) + 1

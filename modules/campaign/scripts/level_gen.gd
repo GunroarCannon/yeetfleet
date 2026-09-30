@@ -34,9 +34,27 @@ const SECTOR_GRAPHS: Array = [
 	[[1, 2], [3], [4], [5], [5], []],
 	[[1, 2], [3, 4], [4], [5], [5], []],
 ]
-## Stars a level asks for (in total, across the whole campaign) per level
-## number — gates to make a player go back for better runs now and then.
-const STAR_GATE_PER_LEVEL := 1.15
+## Stars are the only key to a level: it opens once the campaign's total
+## reaches [method stars_needed]. The first [constant FREE_LEVELS] are free;
+## after that a level asks for a share of every star the levels before it
+## could have paid (3 each), a share that climbs toward [constant
+## STAR_SHARE_MAX] with time constant [constant STAR_SHARE_RAMP] levels. The
+## result: level 4 wants 1, level 10 about 12, level 20 about 35, level 30
+## about 56 — near two stars a level in the long run, so a pilot who scrapes
+## through everything has to go back for better runs, and one who plays well
+## can skip ahead.
+const FREE_LEVELS := 3
+## Eras: from level [constant ERA_START], every [constant ERA_LEVELS] levels
+## the enemies step up at once — hull ×[constant ERA_HP_STEP] and damage
+## ×[constant ERA_DAMAGE_STEP] per era, on top of the slow climb — so a
+## starter ship with every pip bought starts to feel thin around level 20 and
+## outclassed by 30, and the garage's bigger hulls earn their price.
+const ERA_START := 20
+const ERA_LEVELS := 10
+const ERA_HP_STEP := 1.22
+const ERA_DAMAGE_STEP := 1.12
+const STAR_SHARE_MAX := 0.65
+const STAR_SHARE_RAMP := 6.0
 
 enum Turf { WILDS, PIRATE, TRADE, MILITARY, SWARM }
 
@@ -50,10 +68,10 @@ const THEME_COLORS: Array[Color] = [
 ## Scenario ids each theme draws from, with weights. The ids are the
 ## flight module's [code]FlightScenarios[/code] preset ids.
 const THEME_KINDS := {
-	Turf.WILDS: {"race": 3, "salvage": 3, "courier": 2, "survive": 1, "duel": 1},
-	Turf.PIRATE: {"skirmish": 3, "ambush": 2, "escort": 2, "duel": 2, "assault": 1},
-	Turf.TRADE: {"courier": 3, "salvage": 2, "dock": 2, "escort": 2, "race": 1},
-	Turf.MILITARY: {"battle": 3, "capital": 2, "assault": 2, "survive": 1, "skirmish": 1},
+	Turf.WILDS: {"race": 3, "salvage": 3, "courier": 2, "voyage": 2, "survive": 1, "duel": 1},
+	Turf.PIRATE: {"skirmish": 3, "ambush": 2, "escort": 2, "duel": 2, "assault": 1, "protect": 1},
+	Turf.TRADE: {"courier": 3, "salvage": 2, "dock": 2, "escort": 2, "protect": 2, "race": 1, "voyage": 1},
+	Turf.MILITARY: {"battle": 3, "capital": 2, "assault": 2, "survive": 1, "skirmish": 1, "protect": 1},
 	Turf.SWARM: {"waves": 3, "survive": 2, "battle": 1, "ambush": 2},
 }
 
@@ -74,7 +92,8 @@ const KIND_SHIP := {
 	"assault": ShipCatalog.Type.TITAN, "duel": ShipCatalog.Type.FIGHTER,
 	"skirmish": ShipCatalog.Type.FIGHTER, "ambush": ShipCatalog.Type.FIGHTER,
 	"battle": ShipCatalog.Type.TANK, "waves": ShipCatalog.Type.FIGHTER,
-	"survive": ShipCatalog.Type.TANK,
+	"survive": ShipCatalog.Type.TANK, "boss": ShipCatalog.Type.FIGHTER,
+	"protect": ShipCatalog.Type.TANK, "voyage": ShipCatalog.Type.SCOUT,
 }
 
 ## Short word + icon id for each kind: what the report and the card show.
@@ -93,7 +112,44 @@ const KIND_INFO := {
 	"escort": {"word": "ESCORT", "icon": "shield"},
 	"capital": {"word": "ESCORT", "icon": "shield"},
 	"assault": {"word": "WRECK IT", "icon": "target"},
+	"boss": {"word": "BOSS", "icon": "target"},
+	"protect": {"word": "PROTECT", "icon": "shield"},
+	"voyage": {"word": "VOYAGE", "icon": "ring"},
 }
+
+## What to do, in a few words, for each kind: the pause card's brief.
+const KIND_BRIEF := {
+	"practice": "Wreck the target drones.",
+	"duel": "Beat the lone pilot.",
+	"skirmish": "Wreck every enemy ship.",
+	"ambush": "They jumped you. Wreck them all.",
+	"battle": "Big fight. Wreck their side.",
+	"waves": "Wreck every wave.",
+	"survive": "Stay alive till the clock runs out.",
+	"courier": "Grab every cargo package. Any order.",
+	"race": "Fly through every ring. Any order.",
+	"salvage": "Grab all the cargo pods.",
+	"dock": "Fly into the carrier's bay and stop.",
+	"escort": "Keep the hauler alive. Guard it.",
+	"capital": "Keep the big ship alive till it's home.",
+	"assault": "Wreck the mothership.",
+	"boss": "A huge warship blocks the road. Wreck it.",
+	"protect": "A stranded hauler. Keep it alive till the clock runs out.",
+	"voyage": "Fly all the way out to the far planet.",
+}
+
+## Planet looks (the flight scene's SpaceScene.LOOKS ids) a theme's main
+## world is drawn from; the other two worlds take any look.
+const THEME_LOOKS := {
+	Turf.WILDS: ["ice", "rock", "lush", "ocean"],
+	Turf.PIRATE: ["lava", "desert", "rock"],
+	Turf.TRADE: ["lush", "ocean", "gas"],
+	Turf.MILITARY: ["desert", "rock", "gas_blue"],
+	Turf.SWARM: ["toxic", "candy", "lava"],
+}
+const ALL_LOOKS: Array[String] = ["lush", "desert", "ice", "lava", "toxic", "candy", "ocean", "rock", "gas", "gas_blue"]
+## Incidents a sandbox system can have going on (the events module's ids).
+const SANDBOX_EVENTS: Array[String] = ["pirate_raid", "meteor_strike", "faction_skirmish", "distress_call", "derelict_tumble", "rare_drift", "cargo_request"]
 
 ## Background and subject picture tags per theme and kind (see the menu
 ## module's PicSet, which maps a tag + roll to a baked picture).
@@ -108,12 +164,26 @@ const KIND_FG := {
 	"practice": "ships", "duel": "ships", "skirmish": "boom", "ambush": "boom",
 	"battle": "boom", "waves": "boom", "survive": "boom", "courier": "pods",
 	"race": "rings", "salvage": "pods", "dock": "carrier", "escort": "carrier",
-	"capital": "carrier", "assault": "boom",
+	"capital": "carrier", "assault": "boom", "boss": "boom", "protect": "carrier", "voyage": "ships",
 }
 
-## The first sector is the tutorial road: the same five kinds in order for
-## everyone, one idea each (level-setup.md §3).
-const ONBOARDING: Array[String] = ["practice", "courier", "race", "duel", "salvage", "skirmish"]
+## The first sector is the tutorial road: the same kinds in order for
+## everyone, one idea each (level-setup.md §3), ending on its boss.
+const ONBOARDING: Array[String] = ["practice", "courier", "race", "duel", "salvage", "boss"]
+## The kinds that are a fight: they get the level's scenery and mixed foes.
+const FIGHT_KINDS: Array[String] = [
+	"duel", "skirmish", "ambush", "battle", "waves", "survive", "escort", "capital", "assault", "boss",
+	"protect",
+]
+## Who else can turn up beside a level's main foes ([code]FlightScenarios.FIGHTER_ARCHETYPES[/code] keys).
+const FOE_MIX := {
+	"Pirates": ["Lone wolves", "Strike team"],
+	"Lone wolves": ["Pirates"],
+	"Swarm": ["Lone wolves", "Pirates"],
+	"Police patrol": ["Strike team"],
+	"Military squad": ["Strike team"],
+	"Strike team": ["Military squad"],
+}
 
 const WORDS_ADJ := {
 	Turf.WILDS: ["Drifty", "Lonely", "Wobbly", "Frosty", "Dusty", "Quiet"],
@@ -158,6 +228,24 @@ static func parse_route(code: String) -> Array[int]:
 		if t >= 0:
 			out.append(t)
 	return out
+
+
+## Stars the whole campaign must hold before level [param number] (1-based)
+## opens. Never falls as the number rises (see [constant FREE_LEVELS]).
+static func stars_needed(number: int) -> int:
+	if number <= FREE_LEVELS:
+		return 0
+	var could_have := 3.0 * float(number - 1)
+	var share := STAR_SHARE_MAX * (1.0 - exp(-float(number - FREE_LEVELS) / STAR_SHARE_RAMP))
+	return maxi(1, roundi(could_have * share))
+
+
+## Which era level [param number] is in: 0 before [constant ERA_START], then
+## one more every [constant ERA_LEVELS] levels.
+static func era_of(number: int) -> int:
+	if number < ERA_START:
+		return 0
+	return 1 + (number - ERA_START) / ERA_LEVELS
 
 
 ## A level's key: the route that reaches its sector, then its index there.
@@ -267,11 +355,48 @@ static func level(route: Array, index: int) -> Dictionary:
 	var number := depth * LEVELS_PER_SECTOR + index + 1
 	var r := _rng("level/" + key)
 	var kind := ONBOARDING[index] if depth == 0 else _weighted(r, THEME_KINDS[theme])
+	# The last level before the road forks is always the sector's boss.
+	if index == LEVELS_PER_SECTOR - 1:
+		kind = "boss"
 	# 0 at level 1, 1 around level 40; keeps creeping after that.
 	var d := clampf(float(number - 1) / 40.0, 0.0, 1.6)
 	var foes: Array = THEME_FOES[theme]
 	var arch := String(foes[r.randi_range(0, foes.size() - 1)])
 	var o := _overrides(kind, d, r, arch)
+	# The climb (see [Difficulty]): every level a step up — hull, damage,
+	# size, aggression, gun class, how many may shoot at once, dreadnoughts.
+	# Its own roll, so the level's other numbers are what they always were.
+	var climb := Difficulty.for_level(number, kind, _rng("climb/" + key).randf())
+	o["enemy_hp"] = snappedf(float(o["enemy_hp"]) * float(climb["hp_mult"]), 0.05)
+	o["enemy_damage"] = snappedf(float(o["enemy_damage"]) * float(climb["damage_mult"]), 0.05)
+	if int(o.get("enemies", 0)) > 0 and kind != "duel" and kind != "practice":
+		o["enemies"] = int(o["enemies"]) + int(climb["extra_enemies"])
+	for k: String in climb:
+		if not k in ["hp_mult", "damage_mult", "extra_enemies"]:
+			o[k] = climb[k]
+	if climb.has("ace_hp"):
+		o["enemy_hp"] = snappedf(float(o["enemy_hp"]) / 1.4 * float(climb["ace_hp"]), 0.05)
+	var era := era_of(number)
+	if era > 0:
+		o["enemy_hp"] = snappedf(float(o["enemy_hp"]) * pow(ERA_HP_STEP, era), 0.05)
+		o["enemy_damage"] = snappedf(float(o["enemy_damage"]) * pow(ERA_DAMAGE_STEP, era), 0.05)
+		if o.has("boss_hp"):
+			o["boss_hp"] = snappedf(float(o["boss_hp"]) * pow(ERA_HP_STEP, era), 0.05)
+	# Guard missions come with wingmen most of the time. Its own roll, so
+	# the level's other numbers are what they always were.
+	if kind in ["escort", "capital"] and _rng("allies/" + key).randf() < 0.8:
+		o["allies"] = maxi(int(o.get("allies", 0)), 2)
+	# A fight is never just the fight: other kinds of foe, neutral giants
+	# drifting through, a megastructure out in the distance. Their own roll.
+	if kind in FIGHT_KINDS:
+		if kind != "duel" and (depth > 0 or index >= 3):
+			o["enemy_mix"] = FOE_MIX.get(arch, [])
+		# No neutral giants drifting through: a big ship on screen should be
+		# part of the job (the boss, the ship to guard), never scenery that
+		# reads as a target. The far-off megastructure only frames a boss.
+		o["bystanders"] = 0
+		if kind == "boss":
+			o["backdrop"] = 1
 	# Some levels insist on a type of ship; never in the first sector.
 	var ship_type := -1
 	if depth > 0 and r.randf() < 0.3 and KIND_SHIP.has(kind):
@@ -287,11 +412,16 @@ static func level(route: Array, index: int) -> Dictionary:
 		"theme": theme, "kind": kind, "title": title,
 		"word": String(info["word"]), "icon": String(info["icon"]),
 		# 1–5 skulls: how hard the numbers make it.
-		"danger": clampi(1 + int(d * 3.0) + (1 if kind in ["ambush", "assault", "capital"] else 0), 1, 5),
+		"danger": clampi(1 + int(d * 3.0) + era + (1 if kind in ["ambush", "assault", "capital", "boss"] else 0), 1, 5),
+		"era": era,
 		"ship_type": ship_type,
-		"stars_req": maxi(0, int(float(number - 3) * STAR_GATE_PER_LEVEL)) if number > 3 else 0,
+		"stars_req": stars_needed(number),
 		"unlocks": (sector_graph(route)[index] as Array).duplicate(),
 		"par": _par_time(kind, o),
+		# How its stars are earned: hull, speed, the guarded ship — weighted
+		# per level, with bars that rise with difficulty (see StarRating).
+		"grade": StarRating.grade_for(kind, d, seed_of("grade/" + key),
+			Difficulty.v("fight_weight") if kind in Difficulty.KILL_GRADED else 0.0, Difficulty.v("star_bar_bonus")),
 		"reward": 40 + number * 12,
 		"preset": kind,
 		"overrides": o,
@@ -303,6 +433,42 @@ static func level(route: Array, index: int) -> Dictionary:
 			"roll": r.randi_range(0, 9999),
 			"flip": r.randf() < 0.5,
 		},
+		"space": space_setup(key, theme),
+	}
+
+
+## The system a level is flown in ([member Session.space_setup]): its own
+## planets, sizes and layout from the level's key, the main world's look
+## from the theme. The same key always gives the same system.
+static func space_setup(key: String, theme: int) -> Dictionary:
+	var r := _rng("space/" + key)
+	var mains: Array = THEME_LOOKS.get(theme, ALL_LOOKS)
+	return _space(r, String(mains[r.randi_range(0, mains.size() - 1)]))
+
+
+## A fresh random system for the sandbox: any looks, any sizes, and a few
+## incidents going on.
+static func random_space(seed_val: int) -> Dictionary:
+	var r := RandomNumberGenerator.new()
+	r.seed = seed_val
+	var out := _space(r, ALL_LOOKS[r.randi_range(0, ALL_LOOKS.size() - 1)])
+	var events: Array[String] = []
+	for i in r.randi_range(1, 3):
+		var e := SANDBOX_EVENTS[r.randi_range(0, SANDBOX_EVENTS.size() - 1)]
+		if not e in events:
+			events.append(e)
+	out["events"] = events
+	return out
+
+
+static func _space(r: RandomNumberGenerator, main_look: String) -> Dictionary:
+	return {
+		"seed": r.randi(),
+		"looks": [main_look, ALL_LOOKS[r.randi_range(0, ALL_LOOKS.size() - 1)], ALL_LOOKS[r.randi_range(0, ALL_LOOKS.size() - 1)], "rock"],
+		"sizes": [r.randf_range(0.6, 1.5), r.randf_range(0.5, 1.8), r.randf_range(0.5, 1.8)],
+		"yaw": r.randf_range(0.0, TAU),
+		"rocks": r.randf_range(0.4, 1.6),
+		"rings": r.randf() < 0.3,
 	}
 
 
@@ -320,12 +486,14 @@ static func from_key(key: String) -> Dictionary:
 
 ## Scenario dial overrides for a kind at difficulty [param d] (0..1.6).
 static func _overrides(kind: String, d: float, r: RandomNumberGenerator, arch: String) -> Dictionary:
+	# Enemies start at full strength (they used to start at 0.6 hull and half
+	# damage, which made the early game a walk) and keep climbing.
 	var o := {
-		"enemy_hp": snappedf(lerpf(0.6, 1.5, d / 1.6), 0.05),
-		"enemy_damage": snappedf(lerpf(0.5, 1.4, d / 1.6), 0.05),
+		"enemy_hp": snappedf(lerpf(1.0, 2.0, d / 1.6), 0.05),
+		"enemy_damage": snappedf(lerpf(0.85, 1.7, d / 1.6), 0.05),
 		"enemy_arch": arch,
 	}
-	var extra := int(d * 3.0)
+	var extra := 1 + int(d * 3.0)
 	match kind:
 		"practice":
 			o["enemies"] = 4
@@ -373,9 +541,24 @@ static func _overrides(kind: String, d: float, r: RandomNumberGenerator, arch: S
 			o["enemies"] = 3 + extra
 			o["allies"] = 2
 			o["wave_every"] = maxf(16.0, 28.0 - d * 8.0)
+		"protect":
+			o["enemies"] = 2 + extra
+			o["wave_every"] = maxf(12.0, 20.0 - d * 6.0)
+			o["hold_time"] = roundf(55.0 + d * 30.0)
+		"voyage":
+			# Mostly a trip; later on, someone is out there too.
+			o["enemies"] = 0 if d < 0.4 else extra
+			if d >= 0.3 and r.randf() < 0.4:
+				o["time_limit"] = 150.0
 		"assault":
 			o["enemies"] = 2 + extra
 			o["allies"] = 2
+		"boss":
+			o["enemies"] = 1 + extra
+			o["allies"] = 2
+			o["boss_size"] = snappedf(3.0 + d * 1.5, 0.1)
+			o["boss_hp"] = snappedf(lerpf(0.7, 1.8, d / 1.6), 0.05)
+			o["boss_reinforce"] = maxf(16.0, 30.0 - d * 10.0)
 	return o
 
 
@@ -392,7 +575,7 @@ static func _par_time(kind: String, o: Dictionary) -> float:
 			return 40.0 + 18.0 * float(o.get("pods", 4))
 		"escort", "capital", "dock":
 			return 150.0
-		"waves", "battle":
+		"waves", "battle", "boss":
 			return 120.0
 	return 75.0
 

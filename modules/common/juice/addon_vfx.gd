@@ -343,6 +343,12 @@ static func explosion(
 	# Compatibility the addon's GPU particles can draw nothing at all.
 	if heavy or scale >= 1.2:
 		cartoon(parent, pos, scale)
+		# The cartoon blast is the look there: the addon's particle scene on
+		# top cost a hitch on every kill and drew nothing.
+		if cartoon_blasts:
+			if sound != &"":
+				play(sound, pos)
+			return
 	if not enabled():
 		return
 	spawn(parent, Kind.BIG_IMPACT if heavy else Kind.EXPLOSION_AIR, pos, Vector3.UP, scale, color, true)
@@ -531,6 +537,7 @@ static func _ensure_audio_pool() -> Array[AudioStreamPlayer3D]:
 	var loop := Engine.get_main_loop()
 	if not loop is SceneTree:
 		return _audio_pool
+	GameAudio.ensure_buses()
 	_audio_host = Node3D.new()
 	_audio_host.name = "AddonVfxAudio"
 	(loop as SceneTree).root.add_child(_audio_host)
@@ -542,6 +549,7 @@ static func _ensure_audio_pool() -> Array[AudioStreamPlayer3D]:
 		p.unit_size = AUDIO_UNIT_SIZE
 		p.max_distance = AUDIO_MAX_DISTANCE
 		p.max_db = 6.0
+		p.bus = GameAudio.BUS_SFX
 		_audio_host.add_child(p)
 		_audio_pool.append(p)
 	return _audio_pool

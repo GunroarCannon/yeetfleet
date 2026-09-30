@@ -54,8 +54,21 @@ signal pressed
 		rich = v
 		queue_redraw()
 
+## Inside a [ScrollContainer]: let the press through so a drag scrolls the
+## list (a drag past a few pixels cancels the tap).
+@export var pass_drag := false:
+	set(v):
+		pass_drag = v
+		mouse_filter = Control.MOUSE_FILTER_PASS if v else Control.MOUSE_FILTER_STOP
+
+## The [GameAudio] one-shot a press plays (empty: silent).
+@export var tap_sound := &"tap"
+## Button words that mean "go back": they play [code]back[/code], not [code]tap[/code].
+const BACK_WORDS: Array[String] = ["BACK", "CLOSE", "CANCEL", "NO", "SKIP", "✕"]
+
 var _hover := false
 var _down := false
+var _down_at := Vector2.ZERO
 ## 0 → 1: eased hover/focus emphasis, animated in [method _process].
 var _emph := 0.0
 var _pop := 0.0
@@ -105,13 +118,21 @@ func _gui_input(event: InputEvent) -> void:
 	if tap != null and tap.button_index == MOUSE_BUTTON_LEFT:
 		if tap.pressed:
 			_down = true
+			_down_at = tap.global_position
 			queue_redraw()
 		elif _down:
 			_down = false
+			queue_redraw()
 			if Rect2(Vector2.ZERO, size).has_point(tap.position):
 				_fire()
-		accept_event()
+		if not pass_drag:
+			accept_event()
 		return
+	var drag := event as InputEventMouseMotion
+	if drag != null and _down and pass_drag and drag.global_position.distance_to(_down_at) > 14.0:
+		# A scroll, not a tap.
+		_down = false
+		queue_redraw()
 	# Touch arrives as the emulated mouse above (the project default), so a
 	# ScreenTouch branch here would fire every tap twice.
 	if event.is_action_pressed("ui_accept"):
@@ -121,19 +142,9 @@ func _gui_input(event: InputEvent) -> void:
 
 ## The rich dress (see [member rich]), drawn over the fill, under the text.
 func _draw_rich(r: Rect2, col: Color, lean: float) -> void:
-	var pts := GraffitiStyle.slab_points(r, lean)
-	# Two-tone: a darker diagonal band across the left end.
-	var band := PackedVector2Array([
-		pts[0], pts[0].lerp(pts[1], 0.2), pts[3].lerp(pts[2], 0.12), pts[3],
-	])
-	draw_colored_polygon(band, col.darkened(0.22))
-	# A thin light streak through the top third, broken like a spray pass.
-	var y := r.position.y + r.size.y * 0.26
-	var x := r.position.x + r.size.x * 0.24
-	while x < r.end.x - lean:
-		var seg := r.size.x * 0.1
-		draw_line(Vector2(x, y), Vector2(minf(x + seg, r.end.x - lean), y), Color(1, 1, 1, 0.35), 3.0)
-		x += seg * 1.45
+	# (A darker band across the left end and a dashed light streak along the
+	# top used to sit here; they read as stray boxes and marks, so the slab
+	# stays one clean colour.)
 	# Drips off the bottom edge, in the slab's colour with an ink rim.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(text)
@@ -154,6 +165,12 @@ func _draw_rich(r: Rect2, col: Color, lean: float) -> void:
 func _fire() -> void:
 	_pop = 1.0
 	_wake()
+	if tap_sound != &"":
+		# A back or close button left on the default plays the back tones.
+		var id := tap_sound
+		if id == &"tap" and text.strip_edges().to_upper() in BACK_WORDS:
+			id = &"back"
+		GameAudio.ui(id)
 	pressed.emit()
 
 
@@ -186,7 +203,10 @@ func _draw() -> void:
 		var base := Vector2(x0 - w * 0.5, h * 0.5 + f.get_ascent(font_size) * 0.5 - f.get_descent(font_size) * 0.35)
 		for k in range(3, 0, -1):
 			draw_string_outline(f, base + Vector2(k * 2.5, k * 2.5), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 6, col.darkened(0.55))
-	if sub == "":
+	if sub == "" and rich:
+		# The big panels: a fat ink outline so the word reads on any slab colour.
+		GraffitiStyle.draw_text(self, text, Vector2(x0, h * 0.5), font_size, tc, maxi(8, int(font_size * 0.2)))
+	elif sub == "":
 		GraffitiStyle.draw_text(self, text, Vector2(x0, h * 0.5), font_size, tc)
 	else:
 		GraffitiStyle.draw_text(self, text, Vector2(x0, h * 0.38), font_size, tc)

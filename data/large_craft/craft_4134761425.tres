@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="LargeCraftData" format=3]
+
+[ext_resource type="Script" path="res://modules/large_craft_gen/scripts/large_craft_data.gd" id="1_3jwnb"]
+
+[resource]
+script = ExtResource("1_3jwnb")
+craft_seed = 4134761425
+params = {
+"dock_arm_count": 9,
+"dock_arm_length": 60.175762,
+"greeble_count": 179,
+"hull_height_ratio": 0.8566725,
+"hull_width": 69.0,
+"part_scale_jitter": 0.08699654,
+"scale_mult": 5.569269,
+"segment_count": 65,
+"spire_count": 24,
+"taper": 0.7894086
+}
+display_name = "craft_4134761425"

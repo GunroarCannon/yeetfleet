@@ -21,6 +21,28 @@ const DEFAULT_RING_B := Color(0.55, 0.48, 0.38)
 
 @export var planet_name := "Untitled"
 @export var planet_type: PlanetType = PlanetType.ROCKY
+
+## Syllables and suffixes for [method random_name].
+const NAME_HEADS: Array[String] = ["Ka", "Ve", "Zo", "Tar", "Qu", "Mi", "Ob", "Sel", "Ny", "Dra", "Ix", "Or", "Pel", "Ru", "Tho", "Gal", "Ae", "Bri", "Cor", "Lu"]
+const NAME_MIDS: Array[String] = ["ra", "lo", "the", "vin", "ska", "ne", "mor", "xa", "di", "run", "shi", "", "", ""]
+const NAME_TAILS: Array[String] = ["n", "s", "ia", "on", "ar", "us", "ex", "a", "or", "is", "", ""]
+const NAME_SUFFIXES: Array[String] = ["", "", "", " Prime", " II", " IV", " VII", " Major", " Minor", " b"]
+
+
+## A planet name drawn from [param seed] ("Kathera", "Ixrun IV", "Seldi
+## Prime"): the same seed always gives the same name, so the flight scene and
+## the campaign's briefings agree on what a system's worlds are called.
+static func random_name(seed: int) -> String:
+	var r := RandomNumberGenerator.new()
+	r.seed = seed
+	var n := NAME_HEADS[r.randi() % NAME_HEADS.size()] + NAME_MIDS[r.randi() % NAME_MIDS.size()] + NAME_TAILS[r.randi() % NAME_TAILS.size()]
+	return n + NAME_SUFFIXES[r.randi() % NAME_SUFFIXES.size()]
+
+
+## The name of body [param role] (0 main, 1 second, 2 third, 3 moon) in a
+## system recipe seeded [param system_seed] (see LevelGen's space setup).
+static func system_name(system_seed: int, role: int) -> String:
+	return random_name(system_seed * 31 + role * 7919 + 17)
 @export var seed_value: int = 0
 
 # --- Appearance ---

@@ -104,14 +104,17 @@ func _ready() -> void:
 # --- 1. Audio Bus Architecture ---
 
 func _setup_audio_buses() -> void:
+	# Everything here lands on the SFX bus, which Settings > SOUND turns
+	# (MUSIC has its own bus: see [GameAudio]).
+	GameAudio.ensure_buses()
 	# 1. Cockpit Bus
 	var cockpit_idx := AudioServer.get_bus_index(BUS_COCKPIT)
 	if cockpit_idx == -1:
 		cockpit_idx = AudioServer.bus_count
 		AudioServer.add_bus(cockpit_idx)
 		AudioServer.set_bus_name(cockpit_idx, BUS_COCKPIT)
-		AudioServer.set_bus_send(cockpit_idx, BUS_MASTER)
 		AudioServer.set_bus_volume_db(cockpit_idx, 0.0)
+	AudioServer.set_bus_send(cockpit_idx, GameAudio.BUS_SFX)
 
 	# 2. Exterior Bus (Vacuum sound muffled through hull vibrations)
 	var ext_idx := AudioServer.get_bus_index(BUS_EXTERIOR)
@@ -119,14 +122,15 @@ func _setup_audio_buses() -> void:
 		ext_idx = AudioServer.bus_count
 		AudioServer.add_bus(ext_idx)
 		AudioServer.set_bus_name(ext_idx, BUS_EXTERIOR)
-		AudioServer.set_bus_send(ext_idx, BUS_MASTER)
 		AudioServer.set_bus_volume_db(ext_idx, -1.5)
 		
-		# Low-pass filter to emulate vibration transmission through solid hull plates
+		# Low-pass filter to emulate vibration transmission through solid hull
+		# plates. Not too low: at 950 Hz every blast was a dull thud.
 		var lpf := AudioEffectLowPassFilter.new()
-		lpf.cutoff_hz = 950.0
+		lpf.cutoff_hz = 3200.0
 		lpf.resonance = 1.15
 		AudioServer.add_bus_effect(ext_idx, lpf)
+	AudioServer.set_bus_send(ext_idx, GameAudio.BUS_SFX)
 
 	# 3. Weapons Sub-bus
 	var weap_idx := AudioServer.get_bus_index(BUS_WEAPONS)
@@ -218,39 +222,39 @@ func _synthesize_sound_bank() -> void:
 		sound_planet_destruction = _synth_planet_cataclysm()
 
 
-## Pull every stream the Sci-Fi Sound Library can supply. Slots with no library
-## equivalent are left null for [method _synthesize_sound_bank] to fill.
+## Pull every stream the sound files can supply (see [Sfx] for which file does
+## which job). Slots with no file are left null for [method
+## _synthesize_sound_bank] to fill.
 func _load_library_bank() -> void:
 	sound_laser = Sfx.stream(&"laser")
-	sound_kinetic = Sfx.stream(&"kinetic")
-	sound_railgun = Sfx.stream(&"railgun")
-	sound_plasma = Sfx.stream(&"plasma")
+	sound_laser_pulse = Sfx.stream(&"laser")
+	sound_laser_heavy = Sfx.stream(&"laser_power")
+	sound_gamma = Sfx.stream(&"laser_strong")
+	sound_kinetic = Sfx.stream(&"click")
+	sound_autocannon = Sfx.stream(&"click")
+	sound_gauss = Sfx.stream(&"drone_shot")
+	sound_railgun = Sfx.stream(&"gun_heavy")
+	sound_antimatter = Sfx.stream(&"gun_heavy")
+	sound_torpedo = Sfx.stream(&"gun_heavy")
+	sound_plasma = Sfx.stream(&"fire_shot")
+	sound_plasma_heavy = Sfx.stream(&"fire_shot")
+	sound_solar_flame = Sfx.stream(&"fire_shot")
 	sound_missile_launch = Sfx.stream(&"missile")
+	sound_missile_heavy = Sfx.stream(&"missile")
 	sound_singularity_hum = Sfx.stream(&"ambience_blackhole")
-	sound_alarm = Sfx.stream(&"alarm")
+	sound_explosion_small = Sfx.stream(&"explosion")
+	sound_explosion_heavy = Sfx.stream(&"explosion_big")
+	sound_collision_impact = Sfx.stream(&"impact")
+	sound_flak_detonation = Sfx.stream(&"shatter")
+	sound_alarm = Sfx.stream(&"low_health")
 	sound_engine_loop = Sfx.stream(&"engine_loop_small")
 	sound_light_switch = Sfx.stream(&"menu_select")
 	sound_hit = Sfx.stream(&"hit")
-	sound_beam_loop = Sfx.stream(&"warp")
-	var lasers := Sfx.streams(&"laser")
-	if lasers.size() > 4:
-		sound_laser_pulse = lasers[0]
-		sound_laser_heavy = lasers[3]
-	var kinetics := Sfx.streams(&"kinetic")
-	if not kinetics.is_empty():
-		sound_autocannon = kinetics[0]
-	var railguns := Sfx.streams(&"railgun")
-	if railguns.size() > 1:
-		sound_gauss = railguns[0]
-		sound_antimatter = railguns[1]
-	# No library sounds exist for these yet, so leave them for the synth.
-	# (Kept explicit so the next pass at the library has an obvious place to land.)
-	sound_flak_detonation = null
+	sound_planet_destruction = Sfx.stream(&"explosion_planet")
+	# The beams keep the synth's hum as their loop; the sweep plays over the
+	# start of it (see [method start_beam_loop]).
+	sound_beam_loop = null
 	sound_cryo_beam = null
-	sound_solar_flame = null
-	sound_explosion_small = null
-	sound_explosion_heavy = null
-	sound_collision_impact = null
 	sound_shield_hit = null
 
 
@@ -681,6 +685,16 @@ func _setup_players() -> void:
 	_alarm_player.bus = BUS_COCKPIT
 	add_child(_alarm_player)
 
+	# The player's own one-shots that are not gunfire (a bump, a part lost, a
+	# far-off blast): their own voices, so they never cut the guns off.
+	_pilot_pool.clear()
+	for i in PILOT_POOL_SIZE:
+		var pp := AudioStreamPlayer.new()
+		pp.name = "PilotSFX_%d" % i
+		pp.bus = BUS_COCKPIT
+		add_child(pp)
+		_pilot_pool.append(pp)
+
 	# Continuous beam loop player for the active cockpit
 	_beam_player = AudioStreamPlayer.new()
 	_beam_player.name = "BeamAudio"
@@ -708,12 +722,60 @@ func _setup_players() -> void:
 		p.unit_size = 18.0
 		p.max_distance = 3200.0
 		p.max_db = 6.0
+		# Air absorption: the further off, the duller as well as the quieter,
+		# so a far fight reads as far rather than just faint.
+		p.attenuation_filter_cutoff_hz = DISTANT_CUTOFF_HZ
+		p.attenuation_filter_db = DISTANT_FILTER_DB
 		p.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_PHYSICS_STEP
 		add_child(p)
 		_spatial_pool.append(p)
 
 
 # --- 4. Spatial Playback Methods ---
+
+## Voices for the player's own non-gun one-shots (see [method play_pilot]).
+const PILOT_POOL_SIZE := 4
+## The loudest a positional sound gets, however close: without a ceiling the
+## inverse-square falloff turns a shot fired from a ship's length away into
+## the loudest thing in the mix.
+const SPATIAL_MAX_DB := 2.0
+## An enemy's shot: heard over a smaller sphere and capped under the rest, so
+## a gun fired right beside the player is a crack, not a slap.
+const SHOT_UNIT_SIZE := 12.0
+const SHOT_MAX_DB := -3.0
+## The player's own guns sit this far under the file's level: they fire all
+## the time and are never far away.
+const PLAYER_GUN_DB := -3.0
+## Where the air-absorption filter settles for far-off sounds.
+const DISTANT_CUTOFF_HZ := 2200.0
+const DISTANT_FILTER_DB := -30.0
+## Metres from the listener past which a big blast is heard as a far-off
+## rumble ([code]explosion_far[/code]) instead of up close.
+const FAR_BLAST_DISTANCE := 1400.0
+## The blasts big enough to carry that far.
+const BIG_BLASTS: Array[StringName] = [&"explosion_big", &"explosion_planet", &"shatter_big"]
+## Per blast: [unit size, max distance] for [method play_blast]. Bigger
+## blasts carry further.
+const BLAST_REACH := {
+	&"explosion_small": Vector2(16.0, 2200.0),
+	&"explosion": Vector2(24.0, 3000.0),
+	&"shatter": Vector2(24.0, 3000.0),
+	&"shatter_big": Vector2(36.0, 4500.0),
+	&"explosion_big": Vector2(48.0, 6000.0),
+	&"explosion_planet": Vector2(250.0, 45000.0),
+}
+## Seconds between low-health warnings while the hull stays low.
+const LOW_HEALTH_EVERY := 1.6
+## The warning is sped up a little (and pitched with it).
+const LOW_HEALTH_PITCH := 1.25
+## Closing speed (m/s) below which a bump is only a click.
+const BUMP_CLICK_SPEED := 20.0
+
+var _pilot_pool: Array[AudioStreamPlayer] = []
+var _pilot_idx := 0
+var _low_health := false
+var _low_health_clock := 0.0
+
 
 func play_spatial(
 	stream: AudioStream,
@@ -733,10 +795,51 @@ func play_spatial(
 	player.global_position = pos
 	player.unit_size = unit_size
 	player.max_distance = max_distance
+	player.max_db = SPATIAL_MAX_DB
+	player.volume_db = Sfx.trim_db(stream)
 	player.pitch_scale = randf_range(1.0 - pitch_range, 1.0 + pitch_range)
 	player.stream = stream
 	player.play()
 	return player
+
+
+## One of the [Sfx] library's sounds [param id] at [param pos] (a random
+## variant, a random pitch), falling off with distance like the rest.
+func play_sfx(
+	id: StringName, pos: Vector3, volume_db := 0.0, pitch_range := 0.1,
+	unit_size := 22.0, max_distance := 3000.0
+) -> AudioStreamPlayer3D:
+	if not FxSettings.library_sounds:
+		return null
+	var p := play_spatial(Sfx.random_stream(id), pos, unit_size, max_distance, pitch_range, BUS_EXTERIOR)
+	if p != null:
+		p.volume_db += volume_db
+	return p
+
+
+## One of the [Sfx] library's sounds [param id] on the player's own ship: no
+## falloff, its own voice (see [constant PILOT_POOL_SIZE]).
+func play_pilot(id: StringName, volume_db := 0.0, pitch := 1.0, pitch_range := 0.06) -> void:
+	var stream := Sfx.random_stream(id) if FxSettings.library_sounds else null
+	_play_pilot_stream(stream, volume_db, pitch * randf_range(1.0 - pitch_range, 1.0 + pitch_range))
+
+
+func _play_pilot_stream(stream: AudioStream, volume_db: float, pitch: float) -> void:
+	if stream == null or _pilot_pool.is_empty():
+		return
+	var p := _pilot_pool[_pilot_idx]
+	_pilot_idx = (_pilot_idx + 1) % _pilot_pool.size()
+	p.stop()
+	p.stream = stream
+	p.volume_db = volume_db + Sfx.trim_db(stream)
+	p.pitch_scale = pitch
+	p.play()
+
+
+## Metres from the camera (the listener) to [param pos]; 0 with no camera.
+func listener_distance(pos: Vector3) -> float:
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	return cam.global_position.distance_to(pos) if cam != null else 0.0
 
 
 ## Play a weapon shot sound, selecting a unique voice by weapon id or category.
@@ -750,51 +853,49 @@ func play_weapon_fire(
 	shooter_id: int = 0, gap_mult: float = 1.0, pitch_mult: float = 1.0
 ) -> void:
 	var stream: AudioStream = sound_laser
-	var p_scale := randf_range(0.96, 1.04)
+	var p_scale := randf_range(0.94, 1.06)
 
 	match w_id:
 		"pulse_laser":
 			stream = sound_laser_pulse if sound_laser_pulse != null else sound_laser
-			# Wider and lower-centred than the old 1.08-1.16: that band was narrow
-			# enough that sustained fire sounded like the same sample replayed,
-			# and skewed high enough to read as shrill on top of it.
 			p_scale = randf_range(0.92, 1.10)
 		"heavy_pulse_blaster":
 			stream = sound_laser_heavy if sound_laser_heavy != null else sound_laser
-			p_scale = randf_range(0.84, 0.90)
+			p_scale = randf_range(0.95, 1.08)
 		"twin_autocannon":
 			stream = sound_autocannon if sound_autocannon != null else sound_kinetic
-			p_scale = randf_range(0.98, 1.12)
+			p_scale = randf_range(0.9, 1.2)
 		"gauss_slugger":
 			stream = sound_gauss if sound_gauss != null else sound_railgun
-			p_scale = randf_range(0.92, 1.02)
+			p_scale = randf_range(0.92, 1.06)
 		"plasma_annihilator":
 			stream = sound_plasma_heavy if sound_plasma_heavy != null else sound_plasma
 			p_scale = randf_range(0.88, 0.98)
 		"gamma_burst":
 			stream = sound_gamma if sound_gamma != null else sound_laser_heavy
-			p_scale = randf_range(1.20, 1.32)
+			p_scale = randf_range(0.96, 1.1)
 		"antimatter_railgun":
 			stream = sound_antimatter if sound_antimatter != null else sound_railgun
-			p_scale = randf_range(0.80, 0.88)
+			p_scale = randf_range(0.9, 1.0)
 		"seeker_missiles":
 			stream = sound_missile_launch
-			p_scale = randf_range(1.10, 1.22)
+			p_scale = randf_range(1.35, 1.55)
 		"hellfire_missiles":
 			stream = sound_missile_heavy if sound_missile_heavy != null else sound_missile_launch
-			p_scale = randf_range(0.82, 0.90)
+			p_scale = randf_range(1.1, 1.25)
 		"nova_torpedo":
 			stream = sound_torpedo if sound_torpedo != null else sound_missile_launch
-			p_scale = randf_range(0.60, 0.72)
+			p_scale = randf_range(0.7, 0.8)
 		"flak_scatter":
-			stream = sound_flak_detonation
-			p_scale = randf_range(1.04, 1.15)
+			# Each pellet volley is a click; the burst itself is the shatter.
+			stream = sound_kinetic if sound_kinetic != null else sound_flak_detonation
+			p_scale = randf_range(0.75, 0.9)
 		"cryo_lance":
 			stream = sound_cryo_beam if sound_cryo_beam != null else sound_laser
 			p_scale = randf_range(1.18, 1.26)
 		"solar_flamer":
 			stream = sound_solar_flame if sound_solar_flame != null else sound_plasma
-			p_scale = randf_range(0.92, 1.02)
+			p_scale = randf_range(1.1, 1.25)
 		_:
 			match w_type:
 				"kinetic": stream = sound_kinetic
@@ -802,13 +903,12 @@ func play_weapon_fire(
 				"plasma": stream = sound_plasma
 				"missile": stream = sound_missile_launch
 				"singularity": stream = sound_singularity_hum
-				"flak": stream = sound_flak_detonation
+				"flak": stream = sound_kinetic
 				_: stream = sound_laser
 
 	# Loudness jitter on top of the per-weapon pitch range above, so repeated
 	# shots from the same gun don't sound like the exact same sample played
-	# back-to-back. Widened from the original (-2.5, 1.0) — that range was
-	# barely audible shot-to-shot on a weapon fired near-continuously.
+	# back-to-back.
 	var v_jitter := randf_range(-4.0, 1.5)
 
 	p_scale *= pitch_mult
@@ -819,14 +919,15 @@ func play_weapon_fire(
 	if is_player:
 		_cockpit_player.stream = stream
 		_cockpit_player.pitch_scale = p_scale
-		_cockpit_player.volume_db = v_jitter
+		_cockpit_player.volume_db = v_jitter + Sfx.trim_db(stream) + PLAYER_GUN_DB
 		_cockpit_player.bus = BUS_WEAPONS
 		_cockpit_player.play()
 	else:
 		var duck_db := minf(_fire_duck_level * 2.0, FIRE_DUCK_MAX_DB)
-		var p := play_spatial(stream, pos, 24.0, 2600.0, 0.12, BUS_EXTERIOR)
+		var p := play_spatial(stream, pos, SHOT_UNIT_SIZE, 2600.0, 0.12, BUS_EXTERIOR)
 		if p != null:
 			p.pitch_scale = p_scale
+			p.max_db = SHOT_MAX_DB
 			p.volume_db += v_jitter - duck_db
 		_fire_duck_level += FIRE_DUCK_PER_SHOT
 
@@ -853,8 +954,10 @@ func _shot_sound_due(key: int, stream: AudioStream, pitch: float, gap_mult := 1.
 	return true
 
 
-## Start or sustain a continuous beam audio loop (cockpit for player, spatial for AI).
+## Start or sustain a continuous beam audio loop (cockpit for player, spatial
+## for AI). A beam opens with the long laser sweep over the start of its hum.
 func start_beam_loop(w_id: String, is_player: bool = false, pos: Vector3 = Vector3.ZERO) -> void:
+	var sweep_pitch := 1.2 if w_id == "cryo_lance" else (0.8 if w_id == "hyper_beam" else 1.0)
 	if is_player:
 		if _beam_player != null:
 			var s: AudioStream = sound_beam_loop
@@ -869,9 +972,13 @@ func start_beam_loop(w_id: String, is_player: bool = false, pos: Vector3 = Vecto
 			if not _beam_player.playing:
 				_beam_player.volume_db = -18.0
 				_beam_player.play()
+				play_pilot(&"laser_sweep", -3.0, sweep_pitch)
 	else:
 		if _spatial_beam_player == null or not is_instance_valid(_spatial_beam_player):
 			_spatial_beam_player = play_spatial(sound_beam_loop, pos, 24.0, 2800.0, 0.05, BUS_EXTERIOR)
+			var sweep := play_sfx(&"laser_sweep", pos, -2.0, 0.08, 24.0, 2800.0)
+			if sweep != null:
+				sweep.pitch_scale *= sweep_pitch
 		elif _spatial_beam_player != null:
 			_spatial_beam_player.global_position = pos
 
@@ -884,23 +991,44 @@ func stop_beam_loop(_w_id: String = "") -> void:
 		_spatial_beam_player = null
 
 
+## A blast at [param pos]: a ship's death. [param heavy] is a big ship or the
+## player going up.
 func play_explosion(pos: Vector3, heavy: bool = false) -> void:
-	var stream := sound_explosion_heavy if heavy else sound_explosion_small
-	play_spatial(stream, pos, 38.0 if heavy else 22.0, 4500.0 if heavy else 2800.0, 0.18, BUS_EXTERIOR)
+	play_blast(pos, &"explosion_big" if heavy else &"explosion")
+
+
+## A blast of kind [param kind], one of [constant BLAST_REACH]'s ids
+## (smallest to biggest: explosion_small, explosion, shatter, shatter_big,
+## explosion_big, explosion_planet). A big one far from the listener is heard
+## as the far-off rumble instead, at a normal loudness, so a planet going up
+## across the system still lands.
+func play_blast(pos: Vector3, kind: StringName = &"explosion") -> void:
+	if not FxSettings.library_sounds:
+		# The synth bank: the old two sizes.
+		var heavy := kind in BIG_BLASTS
+		play_spatial(sound_explosion_heavy if heavy else sound_explosion_small, pos,
+			38.0 if heavy else 22.0, 4500.0 if heavy else 2800.0, 0.18, BUS_EXTERIOR)
+		return
+	if kind in BIG_BLASTS and listener_distance(pos) > FAR_BLAST_DISTANCE:
+		play_pilot(&"explosion_far", -4.0, 1.0, 0.12)
+		return
+	var reach: Vector2 = BLAST_REACH.get(kind, Vector2(24.0, 3000.0))
+	play_sfx(kind, pos, 0.0, 0.16, reach.x, reach.y)
 
 
 func play_planet_destruction(pos: Vector3) -> void:
+	if FxSettings.library_sounds:
+		play_blast(pos, &"explosion_planet")
+		# Hull-conducted rumble in the cockpit for physical feedback.
+		if listener_distance(pos) <= FAR_BLAST_DISTANCE:
+			play_pilot(&"explosion_far", -8.0, 0.8)
+		return
 	if sound_planet_destruction == null:
 		sound_planet_destruction = _synth_planet_cataclysm()
 	# 1. 3D spatial cataclysm audible across tens of kilometers
 	play_spatial(sound_planet_destruction, pos, 250.0, 45000.0, 0.05, BUS_EXTERIOR)
 	# 2. Hull-conducted rumble in cockpit for visceral physical feedback
-	if _cockpit_player != null and is_instance_valid(_cockpit_player):
-		_cockpit_player.stream = sound_planet_destruction
-		_cockpit_player.pitch_scale = randf_range(0.94, 1.04)
-		_cockpit_player.volume_db = 2.0
-		_cockpit_player.bus = BUS_COCKPIT
-		_cockpit_player.play()
+	_play_pilot_stream(sound_planet_destruction, 2.0, randf_range(0.94, 1.04))
 
 
 func play_flak_detonation(pos: Vector3) -> void:
@@ -911,58 +1039,94 @@ func play_singularity_pulse(pos: Vector3) -> void:
 	play_spatial(sound_singularity_hum, pos, 35.0, 4000.0, 0.08, BUS_EXTERIOR)
 
 
-func play_collision_sound(pos: Vector3, impact_speed: float, is_player: bool = false) -> void:
+## Two hulls knocked together. A soft bump is a small click; a real one (or
+## any bump with a big ship, [param big]) the heavy impact.
+func play_collision_sound(pos: Vector3, impact_speed: float, is_player: bool = false, big := false) -> void:
+	var stream := sound_collision_impact
+	var vol := 0.0
+	if FxSettings.library_sounds and impact_speed < BUMP_CLICK_SPEED and not big:
+		stream = Sfx.random_stream(&"click")
+		vol = -6.0
+	var pitch := clampf(0.8 + impact_speed * 0.005, 0.7, 1.4) * randf_range(0.94, 1.06)
+	if big:
+		pitch *= 0.8
 	if is_player:
-		_cockpit_player.stream = sound_collision_impact
-		_cockpit_player.pitch_scale = clampf(0.8 + impact_speed * 0.005, 0.7, 1.4)
-		_cockpit_player.bus = BUS_COCKPIT
-		_cockpit_player.play()
+		_play_pilot_stream(stream, vol, pitch)
 	else:
-		var p := play_spatial(sound_collision_impact, pos, 26.0, 2500.0, 0.15, BUS_EXTERIOR)
+		var p := play_spatial(stream, pos, 26.0, 2500.0, 0.0, BUS_EXTERIOR)
 		if p:
-			p.pitch_scale = clampf(0.8 + impact_speed * 0.005, 0.7, 1.4)
+			p.pitch_scale = pitch
+			p.volume_db += vol
 
 
 func play_shield_hit_sound(pos: Vector3, is_player: bool = false) -> void:
 	if is_player:
-		_cockpit_player.stream = sound_shield_hit
-		_cockpit_player.pitch_scale = randf_range(0.95, 1.08)
-		_cockpit_player.bus = BUS_COCKPIT
-		_cockpit_player.play()
+		_play_pilot_stream(sound_shield_hit, 0.0, randf_range(0.95, 1.08))
 	else:
 		play_spatial(sound_shield_hit, pos, 20.0, 2000.0, 0.12, BUS_EXTERIOR)
 
 
 ## A shot landing on a hull, as opposed to a shot leaving one. Distinct from
 ## [method play_explosion] so a hit can be small, quick and frequent.
-func play_hit(pos: Vector3, is_player: bool = false) -> void:
+## [param big]: a hit from (or on) a big ship, the heavy impact instead.
+func play_hit(pos: Vector3, is_player: bool = false, big := false) -> void:
+	var stream := sound_hit
+	if FxSettings.library_sounds:
+		stream = Sfx.random_stream(&"impact" if big else &"hit")
 	if is_player:
-		var p := play_spatial(sound_hit, pos, 20.0, 1400.0, 0.12, BUS_EXTERIOR)
+		var p := play_spatial(stream, pos, 20.0, 1400.0, 0.14, BUS_EXTERIOR)
 		if p:
-			p.volume_db = -6.0
+			p.volume_db += -4.0
 	else:
-		play_spatial(sound_hit, pos, 22.0, 2200.0, 0.14, BUS_EXTERIOR)
+		play_spatial(stream, pos, 22.0, 2200.0, 0.16, BUS_EXTERIOR)
+
+
+## Something came off the player's ship (a part broken away).
+func play_eject() -> void:
+	play_pilot(&"eject", -2.0, 1.0, 0.1)
+
+
+## A ship zipping close past the player; [param big] for a big ship passing.
+func play_flyby(pos: Vector3, big := false) -> void:
+	if big:
+		play_sfx(&"big_flyby", pos, -3.0, 0.08, 60.0, 6000.0)
+	else:
+		play_sfx(&"flyby", pos, -2.0, 0.14, 16.0, 1200.0)
+
+
+## A big ship's engines coming on as it starts to move.
+func play_big_engine(pos: Vector3) -> void:
+	play_sfx(&"big_engine", pos, 0.0, 0.1, 150.0, 9000.0)
+
+
+## The spaceship slowing down, now and then while near a megaship.
+func play_megaship_near(pos: Vector3) -> void:
+	play_sfx(&"megaship_near", pos, -2.0, 0.12, 200.0, 9000.0)
+
+
+## The low-hull warning: while on, the alert repeats every [constant
+## LOW_HEALTH_EVERY] seconds, a little sped up.
+func set_low_health(on: bool) -> void:
+	if on and not _low_health:
+		_low_health_clock = 0.0
+	_low_health = on
 
 
 ## The UI click, from the library's menu-select pair.
 func play_ui_select() -> void:
 	if sound_light_switch == null:
 		return
-	_cockpit_player.stream = sound_light_switch
-	_cockpit_player.pitch_scale = randf_range(0.98, 1.02)
-	_cockpit_player.bus = BUS_COCKPIT
-	_cockpit_player.play()
+	_play_pilot_stream(sound_light_switch, 0.0, randf_range(0.98, 1.02))
 
 
 func play_alarm_beep() -> void:
 	_alarm_player.stream = sound_alarm
+	_alarm_player.pitch_scale = LOW_HEALTH_PITCH
 	_alarm_player.play()
 
 
 func play_light_switch_sound() -> void:
-	_cockpit_player.stream = sound_light_switch
-	_cockpit_player.bus = BUS_COCKPIT
-	_cockpit_player.play()
+	_play_pilot_stream(sound_light_switch, 0.0, 1.0)
 
 
 # --- 5. Dynamic Engine Spool ---
@@ -999,3 +1163,8 @@ func _process(delta: float) -> void:
 		if _beam_target_vol <= -70.0 and _beam_player.volume_db <= -70.0:
 			_beam_player.stop()
 	_fire_duck_level = maxf(_fire_duck_level - FIRE_DUCK_DECAY * delta, 0.0)
+	if _low_health:
+		_low_health_clock -= delta
+		if _low_health_clock <= 0.0:
+			_low_health_clock = LOW_HEALTH_EVERY
+			play_alarm_beep()

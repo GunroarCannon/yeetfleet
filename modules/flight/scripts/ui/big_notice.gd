@@ -69,7 +69,8 @@ class _Band:
 			slide = ease(clampf((t - IN_TIME - hold) / OUT_TIME, 0.0, 1.0), 2.5)
 		var dx := slide * vp.x * 1.3
 		var cy := vp.y * 0.42
-		var bh := 150.0 * u
+		# A slim band, see-through inside: the fight stays readable under it.
+		var bh := 112.0 * u
 		var lean := bh * 0.5
 		var band := PackedVector2Array([
 			Vector2(-lean + dx, cy - bh * 0.5), Vector2(vp.x + lean + dx, cy - bh * 0.62),
@@ -78,20 +79,20 @@ class _Band:
 		var shadow := PackedVector2Array()
 		for p in band:
 			shadow.append(p + Vector2(10, 14) * u)
-		draw_colored_polygon(shadow, Color(0, 0, 0, 0.5))
+		draw_colored_polygon(shadow, Color(0, 0, 0, 0.3))
 		draw_colored_polygon(band, col)
 		var inner := PackedVector2Array([
 			band[0].lerp(band[3], 0.12), band[1].lerp(band[2], 0.12),
 			band[2].lerp(band[1], 0.12), band[3].lerp(band[0], 0.12),
 		])
-		draw_colored_polygon(inner, Color(0.04, 0.02, 0.08, 0.9))
+		draw_colored_polygon(inner, Color(col.darkened(0.6), 0.45))
 		# The word lands a beat after the band, from oversize.
 		var wk := clampf((t - IN_TIME * 0.6) / 0.2, 0.0, 1.0)
 		if wk <= 0.0:
 			return
 		var zoom := lerpf(1.8, 1.0, ease(wk, 0.4))
 		var tf := GraffitiStyle.title_font()
-		var fs := int(96.0 * u * zoom)
+		var fs := int(80.0 * u * zoom)
 		GraffitiStyle.draw_text(self, word, Vector2(vp.x * 0.5 + dx, cy - bh * 0.06), fs, col.lightened(0.35), int(fs * 0.14), tf)
 		if sub != "":
 			GraffitiStyle.draw_text(self, sub, Vector2(vp.x * 0.5 + dx, cy + bh * 0.36), int(30.0 * u), Color.WHITE, 6)

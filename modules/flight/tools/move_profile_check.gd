@@ -53,6 +53,7 @@ func _initialize() -> void:
 	await _check_sling_launch_and_end()
 	await _check_sling_bounce_seek(sp)
 	await _check_sling_catch()
+	await _check_sling_steady_aim()
 	await _check_sling_tap_fire(sp)
 	_check_sling_orbit_ends_run()
 	await _check_ai_sling(sp)
@@ -63,6 +64,7 @@ func _initialize() -> void:
 	await _check_player_shots_fast()
 	await _check_magnet_and_reach(sp)
 	await _check_markers_and_telegraph(sp)
+	await _check_sling_aim_styles(sp)
 	_root.set_move_profile(FlightRoot.MoveProfile.CLASSIC)
 	_report("classic profile hands the ship back", not _root.model.external_drive and _root.pilot() == null)
 	_finish()
@@ -213,8 +215,11 @@ func _check_sling_launch_and_end() -> void:
 	var s := pilot.ship_screen_pos()
 	_report("sling: ship is on screen and ready", s != Vector2.INF and run.state == SlingRun.State.READY)
 	var cam_b := _root.camera_node().global_transform.basis.orthonormalized()
-	# Pulled straight down: up the view, tipped into the screen by the depth dial.
-	var want := MovePilot.depth_dir(Vector2(0.0, -1.0), cam_b, JuiceSettings.sling_aim_depth)
+	# Pulled straight down on the shipped dome aim: round the half-sphere
+	# toward the camera, so it throws forward along the line of sight through
+	# the ship, not up the view.
+	var ray := _root.camera_node().project_ray_normal(s)
+	var want := SlingshotPilot.dome_dir(Vector2(0.0, 1.0), cam_b, JuiceSettings.sling_aim_depth, ray)
 	var max_time := JuiceSettings.sling_max_time
 	var magnet := JuiceSettings.magnet_strength
 	JuiceSettings.magnet_strength = 0.0
@@ -232,7 +237,7 @@ func _check_sling_launch_and_end() -> void:
 	var into := v.normalized().dot(-cam_b.z)
 	print("  launch: %.0f m/s, %.1f° off the 3D aim, %.2f into the screen (pulled down)" % [v.length(), ang, into])
 	_report("sling: pulling back from the ship aims", aiming)
-	_report("sling: release launches opposite the pull", run.state == SlingRun.State.FLYING and ang < 15.0)
+	_report("sling: release launches along the aim (pulling back throws it forward)", run.state == SlingRun.State.FLYING and ang < 15.0)
 	_report("sling: the launch is 3D (into the screen, not flat on it)", into > 0.5)
 	_report("sling: the hull spins free in flight", _root.model.free_spin)
 	await _seconds(0.5)
@@ -264,8 +269,8 @@ func _check_sling_bounce_seek(sp: AiSpawner) -> void:
 	var seek_was := JuiceSettings.sling_bounce_seek
 	JuiceSettings.sling_bounce_seek = 0.9
 	# Auto-fire would shoot the wall down before the ship reaches it.
-	var auto_was := JuiceSettings.sling_auto_fire
-	JuiceSettings.sling_auto_fire = false
+	var auto_was := JuiceSettings.sling_auto_shoot
+	JuiceSettings.sling_auto_shoot = 0.0
 	run.launch(up, 0.8)
 	var bounced := false
 	var v_after := Vector3.ZERO
@@ -282,7 +287,7 @@ func _check_sling_bounce_seek(sp: AiSpawner) -> void:
 	print("  bounce: %s, then %.1f° from the next ship (pure reflection would be ~%.0f°)" % [
 		bounced, ang, rad_to_deg((-up).angle_to(to_next))])
 	_report("sling: the ship bounces off what it hits", bounced)
-	JuiceSettings.sling_auto_fire = auto_was
+	JuiceSettings.sling_auto_shoot = auto_was
 	_report("sling: the bounce heads for the next body", bounced and ang < 40.0)
 	JuiceSettings.sling_bounce_seek = seek_was
 	run.catch_ship()
@@ -312,6 +317,48 @@ func _check_sling_catch() -> void:
 	_report("sling: the same finger aims the next launch", re_aim)
 	run.set_aiming(false)
 	await _seconds(0.3)
+
+
+## A still thumb holds a still aim: the camera swings round behind the ship
+## along the pull, but the pull is read in the view from touch-down and from
+## where the ship is drawn, so the aim must not wander ("goes wild"). The band
+## starts on the hull, and in flight the camera keeps the launch line.
+func _check_sling_steady_aim() -> void:
+	var pilot := _root.pilot() as SlingshotPilot
+	var run := pilot.run
+	_root.model.halt()
+	var magnet := JuiceSettings.magnet_strength
+	JuiceSettings.magnet_strength = 0.0
+	await _seconds(0.5)
+	var s := pilot.ship_screen_pos()
+	var finger := s + Vector2(short() * 0.22, short() * 0.18)
+	_touch(s, true)
+	await _frames(2)
+	_drag(finger)
+	await _frames(3)
+	var first := pilot.aim_dir
+	var worst := 0.0
+	var band_off := 0.0
+	var ring_off := 0.0
+	# Hold still while the view swings.
+	for i in 60:
+		await process_frame
+		worst = maxf(worst, rad_to_deg(first.angle_to(pilot.aim_dir)))
+		band_off = maxf(band_off, pilot.finger.distance_to(finger))
+		var at := _root.camera_node().unproject_position(_root.model.get_global_transform_interpolated().origin)
+		ring_off = maxf(ring_off, pilot.ship_screen_pos().distance_to(at))
+	var cam_turned := rad_to_deg((-_root.camera_node().global_basis.z).angle_to(first))
+	print("  steady aim: aim wandered %.2f° over a second, band %.1f px off the thumb, ring %.1f px off the hull, camera %.0f° off the aim" % [worst, band_off, ring_off, cam_turned])
+	_report("sling: a still thumb keeps a still aim while the view swings", worst < 3.0)
+	_report("sling: the band ends under the thumb, the ring sits on the drawn hull", band_off < 1.0 and ring_off < 1.0)
+	_touch(finger, false)
+	await _seconds(0.4)
+	var held := pilot._flight_dir()
+	_report("sling: in flight the camera holds the launch line", run.state != SlingRun.State.FLYING
+		or (held != Vector3.ZERO and rad_to_deg(held.angle_to(pilot._launch_dir)) < 1.0))
+	run.catch_ship()
+	JuiceSettings.magnet_strength = magnet
+	await _seconds(1.0)
 
 
 func _check_sling_tap_fire(sp: AiSpawner) -> void:
@@ -620,7 +667,12 @@ func _check_magnet_and_reach(sp: AiSpawner) -> void:
 	if is_instance_valid(t):
 		t.queue_free()
 	await _seconds(3.5)
-	_report("sling camera: eases in once the ship has slowed", _root.camera_rig.profile_distance < 1.0)
+	# Settled at rest: back out at the resting distance, never onto the hull.
+	var rest_d := _root.camera_rig.profile_distance
+	print("  sling camera at rest: × %.2f (rest dial × %.2f, nearest × %.2f)" % [rest_d, JuiceSettings.sling_rest_distance, JuiceSettings.sling_cam_min])
+	_report("sling camera: sits out at the rest distance once the ship has slowed",
+		rest_d >= 1.0 and rest_d <= JuiceSettings.sling_rest_distance + 0.01)
+
 
 	# Ram reach: flying past a ship, a little wider than touching, rams it.
 	var magnet := JuiceSettings.magnet_strength
@@ -686,6 +738,8 @@ func _check_magnet_and_reach(sp: AiSpawner) -> void:
 	m.halt()
 	print("  lost wing: player yaw/roll spin %.2f rad/s" % spin)
 	_report("lost wing: the player isn't thrown into a spiral", spin < 0.05)
+	_root.set_move_profile(FlightRoot.MoveProfile.SLINGSHOT)
+	await _check_aim_look()
 	await _frames(2)
 
 
@@ -721,6 +775,67 @@ func _check_markers_and_telegraph(sp: AiSpawner) -> void:
 	_report("telegraph: then it fires", first_fire >= 0.0)
 	t.queue_free()
 	await _frames(2)
+
+
+## The aim styles ([member JuiceSettings.sling_aim_style]): the dome throws a
+## pull back forward (not up), a pull up down and a pull right leftward and
+## into the screen; smart locks onto a ship the classic cone misses, turns
+## the aim onto its lead and adds the power to reach it.
+func _check_sling_aim_styles(sp: AiSpawner) -> void:
+	_root.set_move_profile(FlightRoot.MoveProfile.SLINGSHOT)
+	_root.model.halt()
+	await _seconds(0.6)
+	var pilot := _root.pilot() as SlingshotPilot
+	var style := JuiceSettings.sling_aim_style
+	var magnet := JuiceSettings.magnet_strength
+	var edge := short()
+	var s := pilot.ship_screen_pos()
+	var cam_b := _root.camera_node().global_transform.basis.orthonormalized()
+	var ray := _root.camera_node().project_ray_normal(s)
+	var dirs := {}
+	for pull: Vector2 in [Vector2(0.0, 1.0), Vector2(0.0, -1.0), Vector2(1.0, 0.0)]:
+		dirs[pull] = SlingshotPilot.dome_dir(pull, cam_b, JuiceSettings.sling_aim_depth, ray)
+	var back: Vector3 = dirs[Vector2(0.0, 1.0)]
+	var up_pull: Vector3 = dirs[Vector2(0.0, -1.0)]
+	var right_pull: Vector3 = dirs[Vector2(1.0, 0.0)]
+	print("  dome: pull back → %.2f into / %.2f up; pull up → %.2f up; pull right → %.2f right, %.2f into" % [
+		back.dot(-cam_b.z), back.dot(cam_b.y), up_pull.dot(cam_b.y), right_pull.dot(cam_b.x), right_pull.dot(-cam_b.z)])
+	_report("dome aim: pulling back throws the ship forward, not up",
+		back.angle_to(ray) < deg_to_rad(1.0) and back.dot(-cam_b.z) > 0.8)
+	_report("dome aim: pulling up throws it down, pulling right throws it left and into the screen",
+		up_pull.dot(cam_b.y) < -0.7 and right_pull.dot(cam_b.x) < -0.7 and right_pull.dot(-cam_b.z) > 0.1)
+
+	# A hostile 20° off the dome's line: outside the classic 12° snap, inside smart's.
+	JuiceSettings.magnet_strength = 0.85
+	var axis := back.cross(cam_b.x).normalized()
+	var t := _parked(sp, _root.model.global_position + back.rotated(axis, deg_to_rad(20.0)) * 1200.0)
+	await _frames(3)
+	var pull := Vector2(0.0, edge * 0.1)
+	var raw := clampf(pull.length() / (edge * 0.38), 0.0, 1.0)
+	var got := {}
+	for st in [1.0, 2.0]:
+		JuiceSettings.sling_aim_style = st
+		_touch(s, true)
+		await _frames(2)
+		_drag(s + pull)
+		await _frames(3)
+		var to := (t.global_position - _root.model.global_position).normalized()
+		got[st] = [pilot.aim_target == t, pilot.aim_power, rad_to_deg(pilot.aim_dir.angle_to(to))]
+		# Back onto the ship and let go: no launch.
+		_drag(s)
+		await _frames(2)
+		_touch(s, false)
+		await _frames(3)
+	print("  smart aim: dome locked %s (%.2f power, %.0f° off); smart locked %s (%.2f power from %.2f, %.0f° off)" % [
+		got[1.0][0], got[1.0][1], got[1.0][2], got[2.0][0], got[2.0][1], raw, got[2.0][2]])
+	_report("smart aim: locks onto a ship the plain snap misses and turns onto it",
+		not got[1.0][0] and got[2.0][0] and got[2.0][2] < 6.0)
+	_report("smart aim: adds the power to reach it", got[2.0][1] > raw + 0.1)
+	_report("smart aim: a pull let go on the ship doesn't launch", pilot.run.state != SlingRun.State.FLYING)
+	if is_instance_valid(t):
+		t.queue_free()
+	JuiceSettings.sling_aim_style = style
+	JuiceSettings.magnet_strength = magnet
 
 
 func _parked(sp: AiSpawner, pos: Vector3) -> AiShip:
@@ -842,3 +957,70 @@ func _finish() -> void:
 	else:
 		print("── FAIL (%d) ─────────────────────────────────────────────" % _failures.size())
 		quit(1)
+
+
+## Pulling: the view holds its frame and turns to look along the aim; a
+## second finger looks around without ending the pull, and from then on the
+## camera is left alone until the pull ends.
+func _check_aim_look() -> void:
+	# "Opposite on screen" is the classic aim; the dome wraps a pull down round
+	# toward the camera (see _check_sling_aim_styles).
+	var style := JuiceSettings.sling_aim_style
+	JuiceSettings.sling_aim_style = 0.0
+	await _check_aim_look_classic()
+	JuiceSettings.sling_aim_style = style
+
+
+func _check_aim_look_classic() -> void:
+	_root.model.halt()
+	await _seconds(1.0)
+	var pilot := _root.pilot() as SlingshotPilot
+	var rig := _root.camera_rig
+	var s := pilot.ship_screen_pos()
+	var edge := short()
+	var cam := _root.camera_node()
+	# Measured in the camera as it was at touch-down (the aim's own frame).
+	var cam_xf := cam.global_transform
+	_touch(s, true)
+	await _frames(2)
+	var pull := Vector2(edge * 0.12, edge * 0.25)
+	_drag(s + pull)
+	await _frames(4)
+	var live_xf := cam.global_transform
+	cam.global_transform = cam_xf
+	var p0 := cam.unproject_position(_root.model.global_position)
+	var p1 := cam.unproject_position(_root.model.global_position + pilot.aim_dir * 5.0)
+	cam.global_transform = live_xf
+	var off := rad_to_deg(absf((p1 - p0).angle_to(-pull)))
+	print("  pull vs launch on screen: %.1f° apart (snapped onto a ship: %s)" % [off, pilot.aim_target != null])
+	_report("pulling: the launch looks opposite the pull on screen", pilot.aim_target != null or off < 6.0)
+	var aiming := pilot.run.state == SlingRun.State.AIMING
+	var held: Variant = rig.follow_dir.call() if rig.follow_dir.is_valid() else Vector3.ZERO
+	var looks := rig.look_ahead.length() > 1.0 and pilot.aim_dir != Vector3.ZERO 			and rig.look_ahead.normalized().dot(pilot.aim_dir) > 0.5
+	_report("pulling: the frame holds still (no swing round behind the ship)", aiming and held == Vector3.ZERO)
+	_report("pulling: the view looks along the aim", looks)
+	var yaw0 := rig.user_yaw
+	var look_ahead0 := rig.look_ahead
+	_touch_i(1, s + Vector2(-edge * 0.4, 0.0), true)
+	for k in 6:
+		var e := InputEventScreenDrag.new()
+		e.index = 1
+		e.position = s + Vector2(-edge * 0.4 + k * 12.0, 0.0)
+		e.relative = Vector2(12.0, 0.0)
+		_root._unhandled_input(e)
+		await _frames(1)
+	_drag(s + Vector2(-edge * 0.12, edge * 0.28))
+	await _frames(4)
+	_report("pulling: a second finger looks around and the pull carries on",
+		pilot.run.state == SlingRun.State.AIMING and absf(rig.user_yaw - yaw0) > 1.0)
+	_report("pulling: after looking, the camera leaves the view alone", rig.look_ahead.is_equal_approx(look_ahead0))
+	_touch_i(1, s, false)
+	_touch(s + Vector2(-edge * 0.12, edge * 0.28), false)
+	await _seconds(0.5)
+	_report("pulling: letting go still launches", pilot.run.state == SlingRun.State.FLYING)
+	# Back to the plain profile, at rest, for the checks after this one (a
+	# flying sling auto-fires at whatever they put ahead).
+	_root.set_move_profile(FlightRoot.MoveProfile.CLASSIC)
+	_root.model.halt()
+	rig.reset_user_view()
+	await _seconds(0.5)

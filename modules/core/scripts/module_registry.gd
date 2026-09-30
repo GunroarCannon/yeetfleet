@@ -72,10 +72,22 @@ const MODULES: Array[Dictionary] = [
 		"tagline": "Modular capital ships, carriers, stations, and docking pads.",
 	},
 	{
+		"id": "art_studio",
+		"name": "Art Studio",
+		"scene": "res://modules/art_studio/art_studio.tscn",
+		"tagline": "Store art by hand: feature graphic, icon and screenshot scenes, every part on a dial.",
+	},
+	{
 		"id": "destruction_lab",
 		"name": "Destruction & Effects Lab",
 		"scene": "res://modules/destruction_lab/destruction_lab.tscn",
 		"tagline": "Explosion & destruction testbed — spawn targets, click & trigger blast waves, impacts, shatter.",
+	},
+	{
+		"id": "font_lab",
+		"name": "Font Lab",
+		"scene": "res://modules/font_lab/font_lab.tscn",
+		"tagline": "Try every font on a mock of the game's UI: tap any text to swap its face.",
 	},
 ]
 

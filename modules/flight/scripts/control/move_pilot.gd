@@ -127,6 +127,7 @@ func orbit_camera(relative: Vector2) -> void:
 		return
 	var k := ORBIT_DEG_PER_EDGE / short_edge() * JuiceSettings.cam_gesture_speed
 	rig.orbit_by(Vector2(-relative.x, relative.y) * k)
+	root.tutorial_note("look", relative.length() / short_edge())
 
 
 func _on_two_finger(scale: float, twist: float, pan: Vector2) -> void:
@@ -135,6 +136,7 @@ func _on_two_finger(scale: float, twist: float, pan: Vector2) -> void:
 		return
 	if JuiceSettings.cam_pinch_zoom:
 		rig.pinch_by(scale)
+		root.tutorial_note("zoom", absf(log(maxf(scale, 0.01))))
 	if JuiceSettings.cam_twist_rotate:
 		orbit_camera(pan)
 		rig.orbit_by(Vector2(-rad_to_deg(twist) * JuiceSettings.cam_gesture_speed, 0.0))
@@ -143,6 +145,7 @@ func _on_two_finger(scale: float, twist: float, pan: Vector2) -> void:
 func _on_wheel(steps: float) -> void:
 	if root.camera_rig != null and JuiceSettings.cam_pinch_zoom:
 		root.camera_rig.pinch_by(pow(1.12, steps))
+		root.tutorial_note("zoom", absf(steps) * 0.12)
 
 
 # --- Arrows ---
@@ -204,7 +207,8 @@ var magnet_target: AiShip = null
 ## inside [member JuiceSettings.magnet_cone_deg], any side when
 ## [member JuiceSettings.magnet_friendlies] (hostiles still first).
 ## [param cone_deg] overrides the cone (the slingshot's aim snap is narrower).
-func find_magnet(dir: Vector3, cone_deg := -1.0) -> AiShip:
+## [param hostile_only]: never a friend, whatever the dial says.
+func find_magnet(dir: Vector3, cone_deg := -1.0, hostile_only := false) -> AiShip:
 	var cone_w := JuiceSettings.magnet_cone_deg if cone_deg < 0.0 else cone_deg
 	if model == null or dir == Vector3.ZERO or JuiceSettings.magnet_strength <= 0.0 or cone_w <= 0.0:
 		return null
@@ -213,7 +217,8 @@ func find_magnet(dir: Vector3, cone_deg := -1.0) -> AiShip:
 		if s != root.controlled_ai and s.model != model:
 			ships.append(s)
 	var cone := cos(deg_to_rad(cone_w))
-	return TargetPriority.best(ships, model.global_position, dir, cone, MAGNET_RANGE, JuiceSettings.magnet_friendlies)
+	return TargetPriority.best(ships, model.global_position, dir, cone, MAGNET_RANGE,
+		JuiceSettings.magnet_friendlies and not hostile_only)
 
 
 ## Where to fly at [param ship] to meet it at [param speed].
@@ -330,10 +335,21 @@ func near_ship(pos: Vector2) -> bool:
 ## view's up (at [param depth] 0) into the screen, away from the camera (at 1).
 ## [param frame] is the camera basis to read it in (hold the one from when the
 ## finger went down, so a moving camera doesn't move the aim).
-static func depth_dir(screen_vec: Vector2, frame: Basis, depth: float) -> Vector3:
+##
+## With [param ray] (the line of sight from the camera through the ship), "into
+## the screen" runs along that line instead of the view's forward axis. A move
+## along the line of sight stays on the same screen point, so the launch then
+## always LOOKS like it goes exactly the way the vector points on screen; along
+## the view axis, a ship off the screen's centre seemed to slide sideways
+## toward the middle (a pull down-right launched "right").
+static func depth_dir(screen_vec: Vector2, frame: Basis, depth: float, ray := Vector3.ZERO) -> Vector3:
 	if screen_vec.length_squared() < 1e-6:
 		return Vector3.ZERO
 	var s := screen_vec.normalized()
+	if ray != Vector3.ZERO:
+		var flat := (frame.x * s.x - frame.y * s.y).normalized()
+		var k := clampf(depth, 0.0, 1.0) * maxf(-s.y, 0.0)
+		return (flat * (1.0 - k) + ray.normalized() * k).normalized()
 	var up_screen := frame.y.lerp(-frame.z, clampf(depth, 0.0, 1.0)).normalized()
 	return (frame.x * s.x - up_screen * s.y).normalized()
 
@@ -353,9 +369,12 @@ func ship_screen_pos() -> Vector2:
 	var cam := root.camera_node()
 	if cam == null or model == null:
 		return Vector2.INF
-	if cam.is_position_behind(model.global_position):
+	# Where the hull is drawn, not the last physics tick: at speed the two are
+	# a hull length apart, and the grab ring floated off beside the ship.
+	var at := ship_draw_position()
+	if cam.is_position_behind(at):
 		return Vector2.INF
-	return cam.unproject_position(model.global_position)
+	return cam.unproject_position(at)
 
 
 ## The shorter side of the view, in the same pixels as input positions.

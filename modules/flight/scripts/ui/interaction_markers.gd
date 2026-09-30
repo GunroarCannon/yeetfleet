@@ -53,6 +53,18 @@ var ships_source: Callable = Callable()
 var exclude_source: Callable = Callable()
 
 var _markers: Dictionary = {}
+## Ships marked whatever happens, in their own colour (the ship a mission
+## has the player guard: gold), drawn bigger: ship -> Color.
+var _pinned: Dictionary = {}
+
+
+## Always mark [param ship] in [param col] (on screen or held at the edge).
+func pin(ship: AiShip, col: Color) -> void:
+	_pinned[ship] = col
+
+
+func unpin(ship: AiShip) -> void:
+	_pinned.erase(ship)
 
 
 func _ready() -> void:
@@ -75,13 +87,20 @@ func _process(delta: float) -> void:
 			wanted[ship] = true
 			if not _markers.has(ship):
 				_add(ship)
+	for ship: Variant in _pinned.keys():
+		if not is_instance_valid(ship) or not (ship as AiShip)._alive:
+			_pinned.erase(ship)
+			continue
+		wanted[ship] = true
+		if not _markers.has(ship):
+			_add(ship)
 	for ship: Variant in _markers.keys():
 		var m: Marker = _markers[ship]
 		if not wanted.has(ship) and not m.leaving:
 			_remove(m)
 		elif wanted.has(ship) and is_instance_valid(m.ship):
 			# Attitude can change (a wary ship opens fire): ease into the colour.
-			var target: Color = COLORS.get(m.ship.attitude_to_player(), Color.WHITE)
+			var target: Color = _pinned[ship] if _pinned.has(ship) else COLORS.get(m.ship.attitude_to_player(), Color.WHITE)
 			m.color = m.color.lerp(target, clampf(delta * 6.0, 0.0, 1.0))
 	queue_redraw()
 
@@ -158,6 +177,8 @@ func _draw() -> void:
 			p = _edge_point(p, behind, inner)
 		var dist := cam.global_position.distance_to(world)
 		var r := BASE_RADIUS * ui_scale * m.scale * (distance_scale(dist) if on_screen else JuiceSettings.marker_min_scale)
+		if _pinned.has(key):
+			r = maxf(r, BASE_RADIUS * ui_scale * m.scale) * 1.35
 		_draw_graffiti(p, r, m.color, m.alpha, m.shape)
 		if not on_screen or dist > 600.0:
 			_draw_distance(p + Vector2(0.0, r + 14.0 * ui_scale), dist, m.color, m.alpha, ui_scale)

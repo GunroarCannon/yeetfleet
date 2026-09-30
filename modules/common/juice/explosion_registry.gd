@@ -45,35 +45,35 @@ const SLOT_META := {
 		"desc": "Massive multi-stage breakup for dreadnoughts and stations",
 		"default_effect": "binbun_nuke",
 		"default_scale": 4.5,
-		"default_sound": "warp",
+		"default_sound": "explosion_big",
 	},
 	SLOT_PLANET_IMPACT: {
 		"name": "Planet & Asteroid Impact",
 		"desc": "Detonation when heavy munitions or ships collide with celestial bodies",
 		"default_effect": "binbun_ground_explosion",
 		"default_scale": 2.2,
-		"default_sound": "railgun",
+		"default_sound": "explosion_planet",
 	},
 	SLOT_MISSILE_BLAST: {
 		"name": "Missile Warhead Blast",
 		"desc": "Standard kinetic and explosive missile warhead detonation",
 		"default_effect": "binbun_impact_01",
 		"default_scale": 1.2,
-		"default_sound": "missile",
+		"default_sound": "explosion_small",
 	},
 	SLOT_NOVA_NUKE: {
 		"name": "Nova Torpedo / Thermonuclear",
 		"desc": "Heavy capital-grade thermonuclear torpedo detonation",
 		"default_effect": "binbun_nuke",
 		"default_scale": 3.0,
-		"default_sound": "jingle_lose",
+		"default_sound": "explosion_big",
 	},
 	SLOT_PLASMA_BURST: {
 		"name": "Plasma Cannon Detonation",
 		"desc": "Superheated plasma bolt impact and splash explosion",
 		"default_effect": "procedural_plasma_bomb",
 		"default_scale": 1.6,
-		"default_sound": "plasma",
+		"default_sound": "explosion_small",
 	},
 	SLOT_SINGULARITY: {
 		"name": "Singularity Collapse",
@@ -87,7 +87,7 @@ const SLOT_META := {
 		"desc": "High-voltage electrical discharge when deflector shields collapse",
 		"default_effect": "binbun_ball_lightning",
 		"default_scale": 1.8,
-		"default_sound": "alarm",
+		"default_sound": "glitch",
 	},
 	SLOT_PART_BREAKOFF: {
 		"name": "Part Breakoff Flash",
@@ -124,7 +124,7 @@ static func _build_catalog() -> void:
 		"desc": "Volumetric expanding fireball with smoke plumes, shockwave disc, and sparks",
 		"default_scale": 1.0,
 		"default_color": Color(1.0, 0.55, 0.15),
-		"default_sound": "hit",
+		"default_sound": "explosion",
 	})
 	_register_effect({
 		"id": "binbun_ground_explosion",
@@ -135,7 +135,7 @@ static func _build_catalog() -> void:
 		"desc": "Directional cratering explosion blast with upward debris and hemispherical shock",
 		"default_scale": 1.0,
 		"default_color": Color(1.0, 0.60, 0.20),
-		"default_sound": "railgun",
+		"default_sound": "explosion_planet",
 	})
 	_register_effect({
 		"id": "binbun_nuke",
@@ -146,7 +146,7 @@ static func _build_catalog() -> void:
 		"desc": "Huge tactical thermonuclear mushroom cloud with double shockwave rings and blinding flash",
 		"default_scale": 1.0,
 		"default_color": Color(1.0, 0.70, 0.30),
-		"default_sound": "jingle_lose",
+		"default_sound": "explosion_big",
 	})
 	_register_effect({
 		"id": "binbun_big_impact_01",
@@ -157,7 +157,7 @@ static func _build_catalog() -> void:
 		"desc": "Heavy stylized impact blast with radial energy spokes and corona flare",
 		"default_scale": 1.0,
 		"default_color": Color(1.0, 0.85, 0.25),
-		"default_sound": "railgun",
+		"default_sound": "impact",
 	})
 	_register_effect({
 		"id": "binbun_big_impact_02",
@@ -168,7 +168,7 @@ static func _build_catalog() -> void:
 		"desc": "High-energy concussive blast with spinning diamond sparks and particle burst",
 		"default_scale": 1.0,
 		"default_color": Color(0.9, 0.4, 1.0),
-		"default_sound": "railgun",
+		"default_sound": "impact",
 	})
 	_register_effect({
 		"id": "binbun_impact_01",
@@ -777,6 +777,8 @@ static func _play_spatial_sound(parent: Node3D, pos: Vector3, sound_id: String) 
 	var asp := AudioStreamPlayer3D.new()
 	asp.tree_exiting.connect(func() -> void: _live_sounds = maxi(_live_sounds - 1, 0))
 	asp.stream = stream
+	asp.volume_db = Sfx.trim_db(stream)
+	asp.max_db = 2.0
 	asp.unit_size = 28.0
 	asp.max_distance = 3200.0
 	asp.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") >= 0 else &"Master"

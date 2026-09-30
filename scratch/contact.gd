@@ -16,6 +16,6 @@ func _initialize() -> void:
 		img.convert(Image.FORMAT_RGBA8)
 		img.resize(cell.x - 8, cell.y - 8)
 		sheet.blend_rect(img, Rect2i(Vector2i.ZERO, img.get_size()), Vector2i((i % cols) * cell.x + 4, (i / cols) * cell.y + 4))
-	sheet.save_png("res://scratch/shots/contact.png")
+	sheet.save_png("res://debug_shots/scratch/shots/contact.png")
 	print(list)
 	quit()

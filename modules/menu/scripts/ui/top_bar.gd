@@ -48,11 +48,13 @@ func _layout() -> void:
 	_title.add_theme_font_size_override("font_size", ts)
 	_title.add_theme_constant_override("outline_size", maxi(4, int(ts * 0.18)))
 	_title.position = Vector2(_back.position.x + _back.size.x + 22, (size.y - ts * 1.25) * 0.5)
-	var ww := clampf(size.x * 0.42, 190.0, 380.0 * u)
+	var ww := clampf(size.x * 0.46, 220.0, 440.0 * u)
 	_wallet.size = Vector2(ww, h * 0.72)
 	_wallet.position = Vector2(size.x - ww - 16, (size.y - _wallet.size.y) * 0.5)
 	# A narrow phone: the title gives way to the wallet.
-	_title.visible = _title.position.x + ts * title.length() * 0.62 < _wallet.position.x
+	# Measured in its own (wide, graffiti) font, not guessed from its length.
+	var tw := GraffitiStyle.title_font().get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, ts).x
+	_title.visible = _title.position.x + tw + 8.0 < _wallet.position.x
 
 
 func set_title(t: String) -> void:

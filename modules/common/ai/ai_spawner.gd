@@ -566,6 +566,38 @@ func spawn_pilot_vessel(near: Transform3D, size_mult: float) -> AiShip:
 	return ship
 
 
+## A big ship of [param size_mult] times the normal size at [param xform],
+## on [param team] with [param arch]'s behaviour: a scenario's boss, or a
+## neutral giant just passing through (team 0 fights no one). Ignores the
+## live-ship cap (a set piece must appear) and is never culled for range.
+func spawn_big(xform: Transform3D, size_mult: float, team: int, arch: AiFactions.ArchetypeData, preset := "") -> AiShip:
+	if _library == null:
+		return null
+	var ship := AiShip.new()
+	ship.name = "Big_%d" % _ships.size()
+	ship.scale_multiplier = size_mult
+	# A hull preset to fly (a boss's dreadnought), or "" for a random design.
+	ship.design_preset = preset
+	ship.is_pilot_vessel = true
+	ship.spawner_ref = self
+	add_child(ship)
+	ship.initialise(_library, xform, _find_player_node())
+	if ship.model == null:
+		ship.queue_free()
+		return null
+	ship.team_id = team
+	ship.aggressive_to = _team_aggression(team)
+	ship.set_group_context(-1, arch, [])
+	var grav := _find_gravity()
+	if grav != null:
+		ship.set_gravity(grav)
+	ship.set_phys_world(_find_world())
+	ship.destroyed.connect(_on_ship_destroyed)
+	ship.marked.connect(_on_ship_marked)
+	_ships.append(ship)
+	return ship
+
+
 ## A normal-size fighter ejected by a mother ship, near the host. Inherits the
 ## host's team and aggression, so a mother's fighters take up its fight.
 func spawn_fighter_near(host: Node3D) -> AiShip:

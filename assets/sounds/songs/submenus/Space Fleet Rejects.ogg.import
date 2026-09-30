@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://dtrvne08jsnel"
+path="res://.godot/imported/Space Fleet Rejects.ogg-ab4080f5eb6e023304ab5c36e82dea6a.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/sounds/songs/submenus/Space Fleet Rejects.ogg"
+dest_files=["res://.godot/imported/Space Fleet Rejects.ogg-ab4080f5eb6e023304ab5c36e82dea6a.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

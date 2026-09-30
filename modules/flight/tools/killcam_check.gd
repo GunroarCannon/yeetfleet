@@ -63,6 +63,9 @@ func _initialize() -> void:
 	JuiceSettings.freeze_on_kill = false
 	JuiceSettings.kill_cam = true
 	JuiceSettings.kill_cam_chance = 1.0
+	# Every kill in this check gets its kill cam, at the dials' own length.
+	JuiceSettings.kill_cam_odds = 1.0
+	JuiceSettings.kill_cam_length = 1.0
 	JuiceSettings.kill_cam_hold = 0.6
 	JuiceSettings.kill_cam_blend = 0.3
 	JuiceSettings.kill_cam_time_scale = 0.04

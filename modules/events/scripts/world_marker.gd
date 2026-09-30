@@ -1,6 +1,8 @@
 ## A 3D billboarded marker that indicates in-world points of interest.
 ##
-## Displays the icon vocabulary defined in GAMEDOC.md §9 (🚨, 🎯, 📦, ◆, !).
+## Carries the icon vocabulary defined in GAMEDOC.md §9 (🚨, 🎯, 📦, ◆, !) as
+## its [member symbol], but shows each as a short word in the game's head
+## face ([method word_for]: SOS, FIGHT, CARGO…) — no emoji on screen.
 ## Billboards toward the camera, scales smoothly across distances, and modulates
 ## its glow/pulse for distress and threat signals.
 class_name WorldMarker
@@ -11,6 +13,11 @@ extends Node3D
 const DEFAULT_COLOR := Color(1.0, 0.2, 0.2)
 const MAX_DISTANCE := 3500.0
 const MIN_DISTANCE := 15.0
+## What each icon key reads as on screen.
+const WORDS := {
+	"🚨": "SOS", "🎯": "FIGHT", "📦": "CARGO", "◆": "LOOT", "!": "!",
+	"▲": "ENEMY", "●": "PAL",
+}
 
 # --- Exported / Configurable ------------------------------------------------
 
@@ -82,11 +89,12 @@ func _build_visuals() -> void:
 	_label.no_depth_test = true
 	_label.render_priority = 10
 	_label.pixel_size = 0.03
-	_label.font_size = 56
-	_label.outline_size = 12
+	_label.font = GraffitiStyle.head_font()
+	_label.font_size = 44
+	_label.outline_size = 14
 	_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.9)
 	_label.modulate = marker_color
-	_label.text = symbol
+	_label.text = word_for(symbol)
 	add_child(_label)
 
 	_dist_label = Label3D.new()
@@ -95,6 +103,7 @@ func _build_visuals() -> void:
 	_dist_label.no_depth_test = true
 	_dist_label.render_priority = 10
 	_dist_label.pixel_size = 0.02
+	_dist_label.font = GraffitiStyle.head_font()
 	_dist_label.font_size = 24
 	_dist_label.outline_size = 6
 	_dist_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.9)
@@ -115,10 +124,16 @@ func configure(icon_key: String, target: Node3D = null, data_dict: Dictionary = 
 		_apply_key_defaults(icon_key)
 
 	if _label != null:
-		_label.text = symbol
+		_label.text = word_for(symbol)
 		_label.modulate = marker_color
 	if _dist_label != null:
 		_dist_label.modulate = marker_color.lightened(0.2)
+
+
+## The word an icon key reads as ([constant WORDS]); anything unknown shows
+## as itself.
+static func word_for(icon: String) -> String:
+	return String(WORDS.get(icon, icon))
 
 
 func _apply_key_defaults(key: String) -> void:

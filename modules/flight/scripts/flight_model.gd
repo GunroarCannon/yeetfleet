@@ -1107,7 +1107,11 @@ func _on_phys_impacted(other: PhysBody, impulse: float, point: Vector3, normal: 
 ## ram's damage, a shove along [param push] (unit, away from the rammer) and a
 ## spin, as if they had collided; the rammer takes nothing from it.
 func take_reach_ram(rammer: PhysBody, point: Vector3, push: Vector3, closing: float) -> void:
+	# A reach ram is a graze (the hulls never touched): it lands, but for a
+	# share of a real ram and it never pops a popcorn ship outright.
+	_reach_ram = true
 	_apply_collision_damage(rammer, 0.0, point, closing)
+	_reach_ram = false
 	set_velocity(velocity + push * closing * 0.35)
 	var lever := point - global_position
 	apply_impact_spin(lever.cross(push) * (closing * 0.08) + push.cross(global_transform.basis.y) * (closing * 0.04))
@@ -1163,6 +1167,16 @@ func _other_durability(other: PhysBody) -> float:
 	return other_d
 
 
+## Closing speed (m/s) a real ram needs to pop a popcorn ship outright.
+const POPCORN_POP_SPEED := 35.0
+## The share of a real ram's damage a reach ram (a graze) deals.
+const REACH_RAM_SHARE := 0.5
+## The most of an AI hull one graze can take.
+const GRAZE_MAX_SHARE := 0.4
+## True while [method take_reach_ram] is dealing its damage.
+var _reach_ram := false
+
+
 func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, closing: float) -> void:
 	if closing < 10.0:
 		return
@@ -1196,6 +1210,8 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 				dmg *= 2.0
 
 	dmg *= JuiceSettings.ram_damage_mult
+	if _reach_ram:
+		dmg *= REACH_RAM_SHARE
 	# Movement-profile ramming dials: what the rammer deals, what this hull takes.
 	dmg *= ram_taken_mult
 	if other != null and other.node is FlightModel:
@@ -1222,11 +1238,16 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 			p.take_damage(dmg, point)
 		elif p is AiShip:
 			var ai := p as AiShip
-			# Popcorn enemies (see AiFactions.ArchetypeData.popcorn): any
-			# ramming hit that reaches this point (closing >= 10 m/s) pops
-			# them outright, rather than needing enough scaled damage to.
-			if ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled:
+			# Popcorn enemies (see AiFactions.ArchetypeData.popcorn): a real,
+			# hard ram pops them outright. It used to be any contact over
+			# 10 m/s, grazes included, so a brush in passing killed them.
+			if ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled \
+					and not _reach_ram and closing >= POPCORN_POP_SPEED:
 				dmg = ai.hp + 1.0
+			# A graze takes a bite, never the whole ship (the ram dials can
+			# make even a slow brush out-damage a full hull).
+			if _reach_ram:
+				dmg = minf(dmg, ai.max_hp * GRAZE_MAX_SHARE)
 			# Rammed by the player's own ship (its owner is the flight root, not
 			# an AiShip) — counts as the player's hit for kill cams and stats.
 			var rammer: Node = other.node.get_parent() if other != null and other.node != null else null

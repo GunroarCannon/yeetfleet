@@ -142,6 +142,10 @@ func _check_shot_pool_and_cap(sp: AiSpawner) -> void:
 ## Enemy guns no longer kick or shake the player's camera; the player's own do.
 func _check_enemy_fire_leaves_camera(sp: AiSpawner) -> void:
 	var shake: JuiceShake = Juice._ensure().shake
+	# A clean slate: the player's own shots from earlier checks may still be
+	# flying, and a player hit rightly shakes the view — let them run out.
+	_root.set_firing(false)
+	await _frames(150)
 	var ship := _parked_enemy(sp, 300.0)
 	await _frames(2)
 	# Firing across the view, past the player: its own hits would shake it.

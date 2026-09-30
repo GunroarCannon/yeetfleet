@@ -10,6 +10,12 @@ extends RefCounted
 
 const TITLE_FONT_PATH := "res://assets/fonts/From Street Art.ttf"
 const HEAD_FONT_PATH := "res://assets/fonts/FOO.ttf"
+## Numbers (coins, stars, scores) and level names: a bouncy marker face.
+const NUMBER_FONT_PATH := "res://assets/fonts/orange juice 2.0.ttf"
+## Tips and how-to lines: a chunky arcade face.
+const TIP_FONT_PATH := "res://assets/fonts/ka1.ttf"
+## Radio/terminal text (NO SIGNAL): a bitmap terminal face.
+const TERMINAL_FONT_PATH := "res://assets/fonts/Terminus.ttf"
 
 const INK := Color("15101f")
 const PAPER := Color("f3ead6")
@@ -25,6 +31,7 @@ const SHADOW := Color(0.0, 0.0, 0.0, 0.55)
 
 static var _title_font: Font = null
 static var _head_font: Font = null
+static var _fonts := {}
 
 
 static func title_font() -> Font:
@@ -41,6 +48,28 @@ static func head_font() -> Font:
 		if _head_font == null:
 			_head_font = ThemeDB.fallback_font
 	return _head_font
+
+
+## The Orange Juice face, for numbers and level names.
+static func number_font() -> Font:
+	return _font(NUMBER_FONT_PATH)
+
+
+## The ka1 face, for tips.
+static func tip_font() -> Font:
+	return _font(TIP_FONT_PATH)
+
+
+## The Terminus face, for radio/terminal text.
+static func terminal_font() -> Font:
+	return _font(TERMINAL_FONT_PATH)
+
+
+static func _font(path: String) -> Font:
+	if not _fonts.has(path):
+		var f := load(path) as Font
+		_fonts[path] = f if f != null else head_font()
+	return _fonts[path]
 
 
 ## A label in the heading face with an ink outline — the one text style used

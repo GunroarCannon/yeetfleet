@@ -2,17 +2,18 @@
 ## the headless renderer draws nothing):
 ##
 ##     godot --path . --audio-driver Dummy --resolution 1280x720 \
-##         --script modules/menu/tools/menu_shot.gd -- <out_dir> [w h]
+##         --script modules/menu/tools/menu_shot.gd -- <out_dir> [w h [canvas_w canvas_h]]
 ##
-## Writes home.png, map.png, report.png, fork.png, garage.png, shop.png and
-## settings.png. Runs on a scratch campaign save with a little progress
+## Writes home.png, quit.png, map.png, report.png, pick.png (the garage as a
+## level's ship picker), fork.png, garage.png, shop.png, settings.png,
+## settings_sub.png (the PERFORMANCE submenu), store.png, rename.png and loading.png. Runs on a scratch campaign save with a little progress
 ## (first sector won, some coins) so the map and garage have something to
 ## show; the player's own save is never touched.
 extends SceneTree
 
 const SCRATCH := "user://menu_shot_scratch.json"
 
-var _out := "res://.shots/menu"
+var _out := "res://debug_shots/menu"
 var _menu: MenuRoot
 
 
@@ -22,6 +23,13 @@ func _initialize() -> void:
 		_out = args[0]
 	if args.size() >= 3:
 		root.size = Vector2i(int(args[1]), int(args[2]))
+		DisplayServer.window_set_size(root.size)
+		# The canvas: the window itself, or (5th/6th args) a phone's canvas
+		# after its DPI scale, e.g. 960 432 or 432 960, drawn into a window
+		# of the same shape that fits the desktop.
+		root.content_scale_size = root.size
+		if args.size() >= 5:
+			root.content_scale_size = Vector2i(int(args[3]), int(args[4]))
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_out) if _out.begins_with("res://") or _out.begins_with("user://") else _out)
 	Campaign.save_path = SCRATCH
 	Campaign.reset()
@@ -40,6 +48,11 @@ func _run() -> void:
 	current_scene = _menu
 	await _wait(3.0)
 	await _shot("home")
+	var home := _menu._screens[MenuRoot.Screen.HOME] as HomeScreen
+	home._ask_quit()
+	await _wait(0.5)
+	await _shot("quit")
+	home._close_quit()
 	_menu.go(MenuRoot.Screen.MAP)
 	await _wait(1.2)
 	await _shot("map")
@@ -47,6 +60,12 @@ func _run() -> void:
 	map._on_level(Campaign.sectors()[0]["levels"][3])
 	await _wait(0.8)
 	await _shot("report")
+	# SWAP: the garage as this level's ship picker.
+	map._report.pick_ship.emit(Campaign.sectors()[0]["levels"][3])
+	await _wait(1.4)
+	await _shot("pick")
+	_menu.finish_ship_pick()
+	await _wait(1.0)
 	map._report.close()
 	# Win the rest of the sector: the fork appears.
 	for l in Campaign.sectors()[0]["levels"]:
@@ -69,6 +88,28 @@ func _run() -> void:
 	_menu.go(MenuRoot.Screen.SETTINGS)
 	await _wait(1.0)
 	await _shot("settings")
+	var settings := _menu._screens[MenuRoot.Screen.SETTINGS] as SettingsScreen
+	settings._open_sub("PERFORMANCE")
+	await _wait(2.0)
+	await _shot("settings_sub")
+	settings._close_sub()
+	await _wait(0.6)
+	_menu.go(MenuRoot.Screen.STORE)
+	await _wait(1.0)
+	await _shot("store")
+	var wallet := (_menu._screens[MenuRoot.Screen.STORE] as StoreScreen)._bar._wallet
+	wallet._ask_name()
+	await _wait(0.5)
+	await _shot("rename")
+	wallet._close_name()
+	var card := LoadingScreen.new()
+	card.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_menu.ui.add_child(card)
+	card._title = "LEVEL 3: WOBBLY DRIFT"
+	card._tip = LoadingScreen.TIPS[0]
+	card._target = 0.62
+	await _wait(0.8)
+	await _shot("loading")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
 	quit()
 

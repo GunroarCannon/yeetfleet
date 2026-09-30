@@ -82,6 +82,24 @@ var _glare_nodes: Array[Node3D] = []
 var _cinematic_nodes: Array[Node3D] = []
 var _sun_light: DirectionalLight3D = null
 var _env_ref: Environment = null
+## This flight's system recipe ([member Session.space_setup]); {} = the
+## hand-built default.
+var _setup := {}
+
+## Planet looks a recipe can ask for by id: colours, ice, sea, air, clouds,
+## and "gas" for a banded giant. An unknown id keeps the saved planet.
+const LOOKS := {
+	"lush": {"p": Color(0.38, 0.62, 0.3), "s": Color(0.7, 0.58, 0.36), "w": Color(0.14, 0.36, 0.7), "a": Color(0.45, 0.72, 1.0), "ice": 0.3, "sea": 0.47, "atm": 0.4, "cloud": 0.35},
+	"desert": {"p": Color(0.85, 0.55, 0.28), "s": Color(0.95, 0.8, 0.5), "w": Color(0.5, 0.3, 0.15), "a": Color(1.0, 0.7, 0.4), "ice": 0.05, "sea": 0.12, "atm": 0.35, "cloud": 0.05},
+	"ice": {"p": Color(0.82, 0.9, 1.0), "s": Color(0.55, 0.7, 0.9), "w": Color(0.2, 0.4, 0.7), "a": Color(0.7, 0.9, 1.0), "ice": 0.9, "sea": 0.35, "atm": 0.3, "cloud": 0.2},
+	"lava": {"p": Color(0.25, 0.13, 0.13), "s": Color(0.45, 0.22, 0.16), "w": Color(1.0, 0.45, 0.1), "a": Color(1.0, 0.4, 0.2), "ice": 0.0, "sea": 0.42, "atm": 0.45, "cloud": 0.0},
+	"toxic": {"p": Color(0.5, 0.3, 0.65), "s": Color(0.7, 0.95, 0.3), "w": Color(0.55, 1.0, 0.3), "a": Color(0.7, 1.0, 0.4), "ice": 0.1, "sea": 0.5, "atm": 0.5, "cloud": 0.25},
+	"candy": {"p": Color(1.0, 0.5, 0.75), "s": Color(0.55, 0.9, 1.0), "w": Color(0.9, 0.35, 0.9), "a": Color(1.0, 0.7, 0.9), "ice": 0.25, "sea": 0.45, "atm": 0.45, "cloud": 0.4},
+	"ocean": {"p": Color(0.3, 0.7, 0.45), "s": Color(0.9, 0.85, 0.6), "w": Color(0.05, 0.3, 0.75), "a": Color(0.5, 0.8, 1.0), "ice": 0.2, "sea": 0.72, "atm": 0.45, "cloud": 0.5},
+	"rock": {"p": Color(0.55, 0.53, 0.58), "s": Color(0.38, 0.36, 0.4), "w": Color(0.2, 0.2, 0.25), "ice": 0.15, "sea": 0.0, "atm": 0.0, "cloud": 0.0},
+	"gas": {"gas": true, "p": Color(0.9, 0.68, 0.42), "s": Color(0.62, 0.36, 0.26), "a": Color(1.0, 0.8, 0.5), "atm": 0.4},
+	"gas_blue": {"gas": true, "p": Color(0.45, 0.65, 0.95), "s": Color(0.25, 0.35, 0.72), "a": Color(0.6, 0.8, 1.0), "atm": 0.4},
+}
 
 func _enter_tree() -> void:
 	var size_scale := Session.planet_scale
@@ -96,6 +114,79 @@ func _enter_tree() -> void:
 	planet2_radius = PLANET2_RADIUS * size_scale
 	planet3_centre = PLANET3_CENTRE * spacing
 	planet3_radius = PLANET3_RADIUS * size_scale
+	_setup = Session.space_setup
+	if not _setup.is_empty():
+		var sizes: Array = _setup.get("sizes", [1.0, 1.0, 1.0])
+		planet_radius *= float(sizes[0])
+		planet2_radius *= float(sizes[1])
+		planet3_radius *= float(sizes[2])
+		# Swing the planets round the belt, so each system frames differently.
+		var yaw := float(_setup.get("yaw", 0.0))
+		planet_centre = planet_centre.rotated(Vector3.UP, yaw)
+		planet2_centre = planet2_centre.rotated(Vector3.UP, yaw * 0.7 + 0.9)
+		planet3_centre = planet3_centre.rotated(Vector3.UP, -yaw * 0.5)
+		# A big main world stays well clear of the belt and its moon's orbit.
+		var need := planet_radius + moon_orbit_radius + BELT_OUTER + 1500.0
+		if planet_centre.length() < need:
+			planet_centre = planet_centre.normalized() * need
+
+
+## How much heavier than the default a body is under this flight's recipe
+## (0 main, 1 second, 2 third): its radius multiplier squared, so surface
+## pull stays comparable.
+func mass_mult(body: int) -> float:
+	if _setup.is_empty():
+		return 1.0
+	var sizes: Array = _setup.get("sizes", [1.0, 1.0, 1.0])
+	var k := float(sizes[clampi(body, 0, sizes.size() - 1)])
+	return k * k
+
+
+## Repaint [param data] (already a private copy) with the recipe's look for
+## [param role] (0 main, 1 second, 2 third, 3 moon), jittered by its seed.
+func _vary(data: PlanetData, role: int) -> PlanetData:
+	var looks: Array = _setup.get("looks", [])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(_setup.get("seed", 1)) + role * 7919
+	data.seed_value = rng.randi()
+	# Its own name: the library's (Tarn IV, Ashara…) was on every level.
+	data.planet_name = PlanetData.system_name(int(_setup.get("seed", 1)), role)
+	if role >= looks.size() or not LOOKS.has(String(looks[role])):
+		return data
+	var look: Dictionary = LOOKS[String(looks[role])]
+	var jitter := func(c: Color) -> Color:
+		return Color.from_hsv(fposmod(c.h + rng.randf_range(-0.04, 0.04), 1.0), clampf(c.s * rng.randf_range(0.85, 1.15), 0.0, 1.0), clampf(c.v * rng.randf_range(0.9, 1.08), 0.0, 1.0))
+	data.planet_type = PlanetData.PlanetType.GAS_GIANT if bool(look.get("gas", false)) else PlanetData.PlanetType.ROCKY
+	data.primary_color = jitter.call(look["p"])
+	data.secondary_color = jitter.call(look["s"])
+	if look.has("w"):
+		data.water_color = jitter.call(look["w"])
+	if look.has("a"):
+		data.atmosphere_color = look["a"]
+	data.atmosphere_density = float(look.get("atm", data.atmosphere_density))
+	data.ice_amount = float(look.get("ice", data.ice_amount))
+	data.sea_level = float(look.get("sea", data.sea_level))
+	data.cloud_density = float(look.get("cloud", 0.0))
+	if not data.is_gas_giant():
+		data.terrain_height = rng.randf_range(0.05, 0.14)
+		data.continent_scale = rng.randf_range(0.5, 1.8)
+	else:
+		data.band_count = rng.randf_range(5.0, 14.0)
+	data.ring_enabled = role == 0 and bool(_setup.get("rings", false))
+	if data.ring_enabled:
+		data.ring_color_a = data.secondary_color.lightened(0.3)
+		data.ring_color_b = data.primary_color
+	return data
+
+
+## What body [param role] (0 main, 1 second, 2 third, 3 moon) is called: the
+## level's own name for it ([method PlanetData.system_name]), or
+## [param fallback] (the sandbox's fixed system).
+func body_name(role: int, fallback: String) -> String:
+	if _setup.is_empty():
+		return fallback
+	return PlanetData.system_name(int(_setup.get("seed", 1)), role)
+
 
 ## Points of interest the HUD draws markers for: {name, position, radius, color}.
 var landmarks: Array[Dictionary] = []
@@ -1113,14 +1204,14 @@ func _build_planet() -> void:
 	))
 
 	landmarks.append({
-		"name": "Tarn IV",
+		"name": body_name(0, "Tarn IV"),
 		"position": planet_centre,
 		"radius": planet_radius,
 		"color": Color("6fa8ff"),
 	})
 	# Moon landmark — position updated each frame by _process.
 	landmarks.append({
-		"name": "Tarn IV Moon",
+		"name": body_name(3, "Tarn IV Moon"),
 		"position": planet_centre + Vector3(moon_orbit_radius, 0.0, 0.0),
 		"radius": MOON_RADIUS,
 		"color": Color("b0b8c0"),
@@ -1145,6 +1236,10 @@ func _make_planet(node_name: String, id: String, radius: float, offset: Vector3,
 			PlanetLibrary.PLANETS_DIR, id,
 		])
 		data = fallback
+	if not _setup.is_empty():
+		# A private copy: the library's resource is shared with the editor.
+		var role: int = {"Body": 0, "Ashara": 1, "Glacius": 2, "Moon": 3}.get(node_name, 3)
+		data = _vary(data.duplicate(), role)
 	data.planet_radius = radius
 	if _detail() > 1:
 		# Don't mutate the library's shared resource — duplicate, then raise the
@@ -1160,6 +1255,9 @@ func _make_planet(node_name: String, id: String, radius: float, offset: Vector3,
 	var planet := Planet.new()
 	planet.name = node_name
 	planet.position = offset
+	if not _setup.is_empty():
+		# The recipe's look is the point: the palette only tints it.
+		planet.palette_mix = 0.15
 	# The surface shader is unshaded and lights from this vector, so it has to
 	# agree with the star the player can actually see.
 	planet.sun_direction = SUN_DIR
@@ -1224,7 +1322,7 @@ func _build_extra_planets() -> void:
 		_fallback_planet_ashara()
 	))
 	landmarks.append({
-		"name": "Ashara",
+		"name": body_name(1, "Ashara"),
 		"position": planet2_centre,
 		"radius": planet2_radius,
 		"color": Color("ff6a3d"),
@@ -1240,7 +1338,7 @@ func _build_extra_planets() -> void:
 		_fallback_planet_glacius()
 	))
 	landmarks.append({
-		"name": "Glacius",
+		"name": body_name(2, "Glacius"),
 		"position": planet3_centre,
 		"radius": planet3_radius,
 		"color": Color("a0d4ff"),
@@ -1439,7 +1537,7 @@ func _build_floating_asteroids() -> void:
 
 	# The distant-asteroid density dial (Settings → Quality) scales the count;
 	# at 0 they disappear entirely. Applies on the next scene restart.
-	var float_count := maxi(0, int(FLOATING_ASTEROID_COUNT * Session.asteroid_density))
+	var float_count := maxi(0, int(FLOATING_ASTEROID_COUNT * Session.asteroid_density * float(_setup.get("rocks", 1.0))))
 	for i in float_count:
 		var angle := _rng.randf() * TAU
 		var radius := _rng.randf_range(FLOATING_ASTEROID_MIN_DIST, FLOATING_ASTEROID_MAX_DIST)

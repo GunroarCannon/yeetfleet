@@ -14,6 +14,29 @@ const FILL_SHADER := "res://modules/menu/shaders/title_fill.gdshader"
 @export var text := "YEETFLEET"
 ## Paint drips per letter, on average.
 @export var drips := 0.8
+## Swap the face every [constant CYCLE_TIME] seconds (the home screen does).
+@export var cycle := false
+## The largest type size (store art wants it huge).
+@export var max_size := 260
+
+## The graffiti faces the title cycles through: the default spray face, the
+## Graffiti face and everything in the graffiti folder.
+const FACES: Array[String] = [
+	"res://assets/fonts/From Street Art.ttf",
+	"res://assets/fonts/Graffiti.ttf",
+]
+const FACE_DIR := "res://assets/fonts/graffiti"
+const CYCLE_TIME := 1.2#4.5
+## A face may come back only after this many others have been shown.
+const NO_REPEAT := 2
+
+## The face in use (null: the default title face).
+var font: Font = null
+## Faces shown most recently, newest last (shared, so a trip back to the home
+## screen carries on the cycle).
+static var _recent: Array[String] = []
+static var _faces: Array[String] = []
+var _cycle_t := 0.0
 
 var _fill: _Fill
 var _halo: _Halo
@@ -45,11 +68,18 @@ func _process(delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	_t += delta
+	if cycle:
+		_cycle_t += delta
+		if _cycle_t >= CYCLE_TIME:
+			_cycle_t = 0.0
+			next_face()
 	_halo.bob = sin(_t * 1.6) * 0.06
 	_halo.queue_redraw()
 
 
 func _refresh() -> void:
+	pivot_offset = size * 0.5
+	rotation = deg_to_rad(TILT)
 	queue_redraw()
 	if _fill != null:
 		var m := font_size()
@@ -59,17 +89,67 @@ func _refresh() -> void:
 		_fill.queue_redraw()
 
 
+func title_font() -> Font:
+	return font if font != null else GraffitiStyle.title_font()
+
+
+## Every face that can spell [member text] (checked once per text).
+static func faces(for_text: String) -> Array[String]:
+	if not _faces.is_empty():
+		return _faces
+	var all: Array[String] = FACES.duplicate()
+	for f in DirAccess.get_files_at(FACE_DIR):
+		var name := f.trim_suffix(".import").trim_suffix(".remap")
+		if name.get_extension().to_lower() in ["ttf", "otf"] and not (FACE_DIR.path_join(name) in all):
+			all.append(FACE_DIR.path_join(name))
+	for path in all:
+		var ft := load(path) as Font if ResourceLoader.exists(path) else null
+		if ft == null:
+			continue
+		var ok := true
+		for ch in for_text:
+			if not ft.has_char(ch.unicode_at(0)):
+				ok = false
+		if ok:
+			_faces.append(path)
+	return _faces
+
+
+## Spray the title again in another face: a random one not among the last
+## [constant NO_REPEAT] shown, with a squash-and-pop.
+func next_face() -> void:
+	var all := faces(text)
+	if all.size() < 2:
+		return
+	if _recent.is_empty():
+		_recent.append(all[0])
+	var keep := mini(NO_REPEAT, all.size() - 1)
+	var fresh := all.filter(func(p: String) -> bool: return not (p in _recent.slice(-keep)))
+	var path: String = fresh[randi() % fresh.size()]
+	_recent.append(path)
+	if _recent.size() > all.size():
+		_recent.pop_front()
+	var tw := create_tween()
+	tw.tween_property(self, "scale", Vector2(1.08, 0.6), 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func() -> void:
+		font = load(path) as Font
+		_refresh()
+		_fill.queue_redraw()
+		_halo.queue_redraw())
+	tw.tween_property(self, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
 ## The type size that fits [member text] into the control's width.
 func font_size() -> int:
-	var f := GraffitiStyle.title_font()
+	var f := title_font()
 	var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 100).x
 	var by_width := int(100.0 * (size.x * 0.86) / maxf(w, 1.0))
-	return clampi(mini(by_width, int(size.y * 0.72)), 24, 260)
+	return clampi(mini(by_width, int(size.y * 0.72)), 24, max_size)
 
 
 ## Where the text's left end starts (centred in the control).
 func text_origin() -> Vector2:
-	var f := GraffitiStyle.title_font()
+	var f := title_font()
 	var fs := font_size()
 	var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	return Vector2((size.x - w) * 0.5, baseline())
@@ -79,8 +159,38 @@ func baseline() -> float:
 	return size.y * 0.72
 
 
+## Degrees the whole tag leans (up to the right), so it never reads as a
+## ruler-straight line of type.
+const TILT := -3.5
+
+
+## Each letter placed by hand: [char, baseline position, size]. Letters bob
+## up and down a little and swell or shrink a touch, like a tag sprayed in
+## one go — the same every run (seeded by the text).
+func glyphs() -> Array:
+	var f := title_font()
+	var fs := font_size()
+	var o := text_origin()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(text) + 3
+	var out := []
+	var x := o.x
+	for i in text.length():
+		var ch := text.substr(i, 1)
+		var k := 1.0 + rng.randf_range(-0.07, 0.08)
+		if i == 0:
+			k = 1.12
+		var gs := int(fs * k)
+		var dy := sin(i * 1.9 + 0.6) * fs * 0.045 + rng.randf_range(-0.03, 0.03) * fs
+		out.append([ch, Vector2(x, o.y + dy), gs])
+		# Advance by the letter at the base size, so the width stays what
+		# [method font_size] fitted.
+		x += f.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	return out
+
+
 func _draw() -> void:
-	var f := GraffitiStyle.title_font()
+	var f := title_font()
 	var fs := font_size()
 	var o := text_origin()
 	var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
@@ -98,12 +208,17 @@ func _draw() -> void:
 		c2.a = 0.55
 		draw_circle(p2, rng.randf_range(1.0, 3.2), c2)
 	var ow := maxi(6, int(fs * 0.16))
-	draw_string_outline(f, o + Vector2(fs * 0.05, fs * 0.07), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ow, Color(0, 0, 0, 0.6))
-	draw_string_outline(f, o, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ow, GraffitiStyle.INK)
+	var gl := glyphs()
+	for g in gl:
+		draw_string_outline(f, g[1] + Vector2(fs * 0.05, fs * 0.07), g[0], HORIZONTAL_ALIGNMENT_LEFT, -1, g[2], ow, Color(0, 0, 0, 0.6))
+	for g in gl:
+		draw_string_outline(f, g[1], g[0], HORIZONTAL_ALIGNMENT_LEFT, -1, g[2], ow, GraffitiStyle.INK)
 	# A thin cream rim inside the ink, like a sprayed edge.
-	draw_string_outline(f, o, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, maxi(2, int(ow * 0.35)), GraffitiStyle.PAPER)
+	for g in gl:
+		draw_string_outline(f, g[1], g[0], HORIZONTAL_ALIGNMENT_LEFT, -1, g[2], maxi(2, int(ow * 0.35)), GraffitiStyle.PAPER)
 	# Drips: running down from the baseline, ink edged, bulb at the end.
-	var n := int(text.length() * drips)
+	#Disabled, they don't fit for some fonts
+	var n := 0 # int(text.length() * drips)
 	for i in n:
 		var x := o.x + rng.randf_range(0.04, 0.96) * w
 		var len := fs * rng.randf_range(0.12, 0.42)
@@ -123,8 +238,9 @@ class _Fill:
 	var title: GraffitiTitle
 
 	func _draw() -> void:
-		var f := GraffitiStyle.title_font()
-		draw_string(f, title.text_origin(), title.text, HORIZONTAL_ALIGNMENT_LEFT, -1, title.font_size(), Color.WHITE)
+		var f := title.title_font()
+		for g in title.glyphs():
+			draw_string(f, g[1], g[0], HORIZONTAL_ALIGNMENT_LEFT, -1, g[2], Color.WHITE)
 
 
 ## The halo over the first letter: a tilted glowing ring that floats.
@@ -134,11 +250,11 @@ class _Halo:
 	var bob := 0.0
 
 	func _draw() -> void:
-		var f := GraffitiStyle.title_font()
-		var fs := title.font_size()
-		var first := title.text.substr(0, 1)
-		var gw := f.get_string_size(first, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var o := title.text_origin()
+		var f := title.title_font()
+		var g0: Array = title.glyphs()[0]
+		var fs: int = g0[2]
+		var gw := f.get_string_size(String(g0[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var o: Vector2 = g0[1]
 		var c := Vector2(o.x + gw * 0.55, o.y - fs * (0.98 + bob))
 		var rx := gw * 0.62
 		var ry := fs * 0.12

@@ -16,9 +16,11 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="Yeetfleet"
 config/description="Modular, web/mobile-first Elite-like. Module 1: Ship Builder."
-run/main_scene="res://modules/menu/menu.tscn"
+run/main_scene="res://modules/menu/splash.tscn"
 config/quit_on_go_back=false
 config/features=PackedStringArray("4.7", "GL Compatibility")
+boot_splash/bg_color=Color(1, 1, 1, 1)
+boot_splash/image="res://assets/splash.png"
 config/icon="res://icon.svg"
 
 [autoload]
@@ -38,6 +40,10 @@ window/handheld/orientation=6
 [dotnet]
 
 project/assembly_name="Project Nebula"
+
+[editor]
+
+movie_writer/movie_file="C:/Users/hmmm/Documents/elite-clone/mov.png"
 
 [editor_plugins]
 
@@ -155,3 +161,4 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=1
+environment/defaults/default_clear_color=Color(0.05, 0.02, 0.1, 1)

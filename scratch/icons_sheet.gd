@@ -8,5 +8,5 @@ func _initialize() -> void:
 		img.convert(Image.FORMAT_RGBA8)
 		sheet.blend_rect(img, Rect2i(Vector2i.ZERO, img.get_size()), Vector2i(i * 128, 0))
 		i += 1
-	sheet.save_png("res://scratch/shots/icons.png")
+	sheet.save_png("res://debug_shots/scratch/shots/icons.png")
 	quit()

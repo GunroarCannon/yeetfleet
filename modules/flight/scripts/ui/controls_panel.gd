@@ -10,6 +10,9 @@ class_name ControlsPanel
 extends JuiceSettingsPanel
 
 var _root: FlightRoot = null
+## The slingshot aim styles, in [member JuiceSettings.sling_aim_style] order.
+const AIM_STYLE_NAMES := ["Classic", "Dome", "Smart"]
+
 var _profile_buttons: Array[Button] = []
 
 
@@ -82,8 +85,14 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_float_row(vbox, "Hull strength in a ram (swipe & sling)", "move_durability", 0.05, "×%.2f")
 
 	_section(vbox, "Slingshot profile", Color("ffcf5e"))
+	_aim_style_row(vbox)
 	_check(vbox, "Camera follows the flight smoothly (not the hull's spin)", "sling_steady_cam", JuiceSettings.sling_steady_cam)
-	_check(vbox, "Camera holds still while aiming (the aim never drifts)", "sling_aim_cam_hold", JuiceSettings.sling_aim_cam_hold)
+	_float_row(vbox, "Pulling: look along the aim (× distance)", "sling_aim_look", 0.05, "×%.2f")
+	_float_row(vbox, "Pulling: ease out (× distance)", "sling_aim_zoom", 0.05, "×%.2f")
+	_float_row(vbox, "Resting: camera distance (× normal)", "sling_rest_distance", 0.05, "×%.2f")
+	_float_row(vbox, "Slingshot: closest the camera comes (× normal)", "sling_cam_min", 0.05, "×%.2f")
+	_float_row(vbox, "Look-ahead settle time", "sling_look_ahead_time", 0.05, "%.2fs")
+	_check(vbox, "Camera holds the launch line in flight", "sling_cam_hold_launch", JuiceSettings.sling_cam_hold_launch)
 	_float_row(vbox, "Launch speed at a full pull", "sling_power", 0.1, "×%.1f top speed")
 	_float_row(vbox, "Pull down throws into the screen", "sling_aim_depth", 0.05, "%.0f%%", 100.0)
 	_float_row(vbox, "Camera looks ahead", "sling_look_ahead", 0.05, "×%.2f")
@@ -125,6 +134,30 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_float_row(vbox, "Ram speed that shatters a planet (1 km planet, average hull)", "planet_smash_speed", 10.0, "%.0f m/s")
 	_float_row(vbox, "Ram speed that knocks a planet off its spot", "planet_knock_speed", 5.0, "%.0f m/s")
 	_float_row(vbox, "  how far the knock sends it", "planet_knock", 0.05, "×%.2f")
+
+
+## The slingshot's aim style ([member JuiceSettings.sling_aim_style]): one
+## button each, the saved one pressed.
+func _aim_style_row(vbox: VBoxContainer) -> void:
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 6)
+	row.add_theme_constant_override("v_separation", 6)
+	vbox.add_child(row)
+	var group := ButtonGroup.new()
+	for i in AIM_STYLE_NAMES.size():
+		var b := Button.new()
+		b.text = AIM_STYLE_NAMES[i]
+		b.toggle_mode = true
+		b.button_group = group
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(88.0, float(BuilderTheme.TOUCH_MIN))
+		b.set_pressed_no_signal(roundi(JuiceSettings.sling_aim_style) == i)
+		b.pressed.connect(JuiceSettings.set_float.bind("sling_aim_style", float(i)))
+		row.add_child(b)
+	_note(vbox,
+		"Aim: Classic throws straight opposite the pull. Dome wraps the pull round the half-sphere facing you, "
+		+ "so pulling back throws the ship forward into the screen. Smart is the dome, and it locks onto the ship "
+		+ "or goal you pull toward, leads it and adds the power to reach it.")
 
 
 func _sync_profile() -> void:

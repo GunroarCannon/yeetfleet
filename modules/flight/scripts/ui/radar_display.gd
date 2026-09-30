@@ -13,6 +13,8 @@ signal range_changed(new_range: float)
 @export var max_range: float = 5000.0
 @export var show_elevation_stems: bool = true
 
+## The ship's sensors are gone: the radar shows static and no contacts.
+var offline := false
 var _sweep_angle: float = 0.0
 var _contacts: Array[Dictionary] = [] # Cached for click hit-testing
 
@@ -31,6 +33,28 @@ func set_radar_range(new_range: float) -> void:
 	range_changed.emit(max_range)
 
 
+## No sensors: dark glass full of flickering static and a red "NO SIGNAL".
+func _draw_offline(overlay: Control, centre: Vector2) -> void:
+	overlay.draw_circle(centre, radar_radius, Color(0.03, 0.02, 0.04, 0.8))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = Time.get_ticks_msec() / 70
+	for i in 60:
+		var a := rng.randf() * TAU
+		var r := sqrt(rng.randf()) * radar_radius * 0.95
+		var p := centre + Vector2(cos(a), sin(a)) * r
+		var g := rng.randf_range(0.25, 0.8)
+		overlay.draw_rect(Rect2(p, Vector2(rng.randf_range(2.0, 7.0), 2.0)), Color(g, g, g, 0.6))
+	overlay.draw_arc(centre, radar_radius, 0.0, TAU, 48, Color(1.0, 0.3, 0.25, 0.8), 2.0, true)
+	# A terminal face: it is the radio's own read-out.
+	var font := GraffitiStyle.terminal_font()
+	var fs := maxi(int(radar_radius * 0.22), 10)
+	var text := "NO SIGNAL"
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	if int(Time.get_ticks_msec() / 400) % 2 == 0:
+		overlay.draw_string_outline(font, centre + Vector2(-w * 0.5, fs * 0.35), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, Color.BLACK)
+		overlay.draw_string(font, centre + Vector2(-w * 0.5, fs * 0.35), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.35, 0.3))
+
+
 ## Renders the tactical radar onto the HUD drawing overlay.
 func draw_radar(
 	overlay: Control,
@@ -44,6 +68,9 @@ func draw_radar(
 		return
 
 	_contacts.clear()
+	if offline:
+		_draw_offline(overlay, centre)
+		return
 
 	# Background dark tactical glass
 	overlay.draw_circle(centre, radar_radius, Color(0.02, 0.04, 0.08, 0.65))

@@ -45,6 +45,7 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_float_row(vbox, "Damage you deal", "player_damage_dealt_mult", 0.1, "×%.1f")
 	_float_row(vbox, "Your toughness (hits ÷)", "player_toughness", 0.05, "÷%.2f")
 	_float_row(vbox, "Your firepower (guns & rams)", "player_power", 0.05, "×%.2f")
+	_float_row(vbox, "Your gun damage (guns only)", "player_gun_damage", 0.05, "×%.2f")
 	_float_row(vbox, "Your ram reach (hits without touching)", "player_ram_reach", 0.1, "×%.1f hull")
 	_float_row(vbox, "Your shots hit within", "player_shot_hit_scale", 0.1, "×%.1f ship size")
 	_check(vbox, "A lost wing spins you out (like the AI)", "player_wing_spiral", JuiceSettings.player_wing_spiral)

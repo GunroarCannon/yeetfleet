@@ -46,7 +46,12 @@ enum EffectType {
 	## The ship's mass drops slightly (lost a heavy piece), making it more
 	## manoeuvrable but also more fragile-looking.
 	MASS_REDUCTION,
+	## A sensor, dish, antenna or nav part broken off: the radar goes dark.
+	SENSORS_LOST,
 }
+
+## Words in a part's name that make it a sensor (see [enum EffectType] SENSORS_LOST).
+const SENSOR_WORDS: Array[String] = ["NAV", "SENSOR", "DISH", "ANTENNA", "RADAR", "COMMS", "ARRAY", "MAST"]
 
 
 ## A single effect applied to the flight model.
@@ -286,6 +291,8 @@ func _break_off(placement: Placement, speed_fraction: float) -> void:
 ## place to add new part-to-damage mappings.
 func _effects_for_category(category: String, part: ShipPart) -> Array[DamageEffect]:
 	var out: Array[DamageEffect] = []
+	if is_sensor(part):
+		out.append(_make_effect(EffectType.SENSORS_LOST, 1.0, "Radar down — lost a sensor"))
 	match category:
 		"engine":
 			out.append(_make_effect(EffectType.THRUST_CUT, 0.5, "Thrust halved — lost an engine"))
@@ -362,6 +369,22 @@ func _apply_effect(effect: DamageEffect) -> void:
 			# Lighter ship is faster per unit thrust but more fragile.
 			_model.accel *= (1.0 + effect.strength * 0.5)
 			_model.turn_rate *= (1.0 + effect.strength * 0.3)
+
+
+## True when [param part] is a sensor by its name (a radiator array is not).
+static func is_sensor(part: ShipPart) -> bool:
+	var n := part.display_name.to_upper()
+	if n.contains("RADIATOR"):
+		return false
+	for w in SENSOR_WORDS:
+		if n.contains(w):
+			return true
+	return false
+
+
+## True while an effect of [param type] is active.
+func has_effect(type: EffectType) -> bool:
+	return _active_effects.has(type)
 
 
 ## The full list of active damage effects, for the HUD damage readout.

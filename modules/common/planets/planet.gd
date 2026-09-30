@@ -82,6 +82,9 @@ var _noise_signature := ""
 ## matching it exactly would make every world in a system the same colour. The
 ## remainder keeps the authored per-planet character.
 const PALETTE_MIX := 0.7
+## This planet's own pull toward the palette. A world with a look of its own
+## (a flight's generated system) sets it low, so the palette only tints it.
+var palette_mix := PALETTE_MIX
 
 ## The colours as authored, captured the first time [method apply_palette] runs
 ## so repeated palette switches blend from the original rather than compounding
@@ -166,9 +169,11 @@ func configure(new_data: PlanetData) -> void:
 ## always palette-from-authored, never palette-from-last-palette. A no-op when no
 ## palette is active, which is what keeps the palette rollout invisible until a
 ## palette is actually chosen.
-func apply_palette(mix := PALETTE_MIX) -> void:
+func apply_palette(mix := -1.0) -> void:
 	if data == null:
 		return
+	if mix < 0.0:
+		mix = palette_mix
 	var manager := StyleManager.instance()
 	if manager == null or manager.current_palette == null:
 		return

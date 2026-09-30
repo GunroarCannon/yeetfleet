@@ -251,11 +251,19 @@ var _kc_weight := 0.0
 const KILL_CAM_ORBIT := 14.0
 ## A slower kill cam (a planet's): swoop in and hold × this.
 var _kc_slow := 1.0
+## Per shot, seconds: ease in, hold, ease out. Negative = the Juice dials
+## (a kill); [method show_ship] sets its own.
+var _kc_times := Vector3(-1.0, -1.0, -1.0)
 ## Level intro (see [method start_intro]): real seconds left and in total,
 ## and the view the camera mode computed this frame (restored next frame so
 ## the modes' own smoothing never sees the intro's offset).
 var _intro_left := 0.0
 var _intro_total := 0.0
+## When the intro ends (ticks, ms). It runs on the wall clock and counts down
+## even while a kill cam holds the view or there is no ship yet — it used to
+## count only frames it was drawn in, and a kill cam in the opening seconds
+## left the controls locked for good.
+var _intro_end_ms := 0
 var _intro_base := Transform3D.IDENTITY
 ## Most the kill cam advances in one frame, seconds. The frames right after a
 ## kill are the likeliest to hitch (explosions, debris, a first-use shader
@@ -575,6 +583,11 @@ var follow_dir_rate := 2.0
 ## slingshot looks along its aim and its flight, so what the ship is about to
 ## hit is on screen. Kept even when swung round (the ship slides off centre).
 var look_ahead := Vector3.ZERO
+## The most [member look_ahead] may shift the aim point, × the camera's
+## distance: about 28° off the ship, inside any follow view's half-FOV.
+const LOOK_AHEAD_MAX := 0.55
+## How fast [member look_ahead] is eased in, per second.
+var look_ahead_rate := 2.5
 ## Optional window the follow views' whole distance stays inside, × the
 ## normal chase distance (x: closest, y: furthest; ZERO = no limits). Pinch,
 ## the profile's pull-out and the hit/dash zoom all multiply together, and the
@@ -617,6 +630,7 @@ func reset_user_view() -> void:
 	profile_distance = 1.0
 	follow_dir = Callable()
 	look_ahead = Vector3.ZERO
+	look_ahead_rate = 2.5
 	distance_limits = Vector2.ZERO
 
 
@@ -629,7 +643,9 @@ func _update_user_view(dt: float) -> void:
 	_user_pitch = lerpf(_user_pitch, user_pitch, k)
 	_user_distance = lerpf(_user_distance, user_distance, k)
 	_profile_distance = lerpf(_profile_distance, profile_distance, 1.0 - exp(-3.0 * dt))
-	_look_ahead = look_ahead if _snap else _look_ahead.lerp(look_ahead, 1.0 - exp(-2.5 * dt))
+	_look_ahead = look_ahead if _snap else _look_ahead.lerp(look_ahead, 1.0 - exp(-look_ahead_rate * dt))
+	# Never look so far ahead that the ship itself leaves the shot.
+	_look_ahead = _look_ahead.limit_length(maxf(_chase_offset.length(), 1.0) * LOOK_AHEAD_MAX)
 	_dir_blend = move_toward(_dir_blend, 1.0 if follow_dir.is_valid() else 0.0, dt / 0.4)
 
 
@@ -677,6 +693,19 @@ func _follow_quat(ship_q: Quaternion) -> Quaternion:
 	return Basis.looking_at(f, up).get_rotation_quaternion()
 
 
+## The follow frame eased [param step] of the way to [param target] — but,
+## while a profile steers it ([member follow_dir]), never faster than
+## [member JuiceSettings.cam_max_turn_deg]: a U-turn swings the view round
+## steadily instead of whipping it (the ship spinning out of shot and back).
+func _turn_ref(target: Quaternion, step: float, dt: float) -> Quaternion:
+	if follow_dir.is_valid():
+		var ang := _ref_quat.angle_to(target)
+		var most := deg_to_rad(JuiceSettings.cam_max_turn_deg) * dt
+		if ang > 1e-4 and ang * step > most:
+			step = most / ang
+	return _ref_quat.slerp(target, step)
+
+
 ## How settled the view is against hull motion: 1 while tumbling out of
 ## control or tracking a [member follow_dir] (turn swing, bank and lead fade).
 func _calm() -> float:
@@ -698,6 +727,7 @@ func start_kill_cam(target: Node3D, target_pos: Vector3, target_radius: float, s
 		return false
 	_kc_active = true
 	_kc_slow = maxf(slow, 0.1)
+	_kc_times = Vector3(-1.0, -1.0, -1.0)
 	_kc_t = 0.0
 	_kc_weight = 0.0
 	_kc_node = target
@@ -714,6 +744,18 @@ func start_kill_cam(target: Node3D, target_pos: Vector3, target_radius: float, s
 	# inside the wreck itself.
 	var r := maxf(target_radius, 1.5)
 	_kc_dist = maxf(minf(r * JuiceSettings.kill_cam_distance + 4.0, from.length() * 0.7), r * 1.6)
+	return true
+
+
+## A look at a ship the player should know about (the hauler an escort
+## guards): the kill cam's eased swoop onto [param target], held for
+## [param hold] seconds, then eased back to the player's view. Nothing slows.
+func show_ship(target: Node3D, target_radius: float, hold := 1.4, ease_in := 0.9, ease_out := 0.9) -> bool:
+	if target == null or not start_kill_cam(target, target.global_position, target_radius):
+		return false
+	_kc_times = Vector3(ease_in, hold, ease_out)
+	# Framed a little wider than a wreck: the ship and where it is going.
+	_kc_dist *= 1.6
 	return true
 
 
@@ -740,14 +782,21 @@ func kill_cam_weight() -> float:
 func start_intro(seconds := 2.6) -> void:
 	_intro_total = maxf(seconds, 0.1)
 	_intro_left = _intro_total
+	_intro_end_ms = Time.get_ticks_msec() + int(_intro_total * 1000.0)
 
 
 func intro_active() -> bool:
+	_tick_intro()
 	return _intro_left > 0.0
 
 
+func _tick_intro() -> void:
+	if _intro_left > 0.0:
+		_intro_left = maxf((_intro_end_ms - Time.get_ticks_msec()) / 1000.0, 0.0)
+
+
 func _apply_intro() -> void:
-	_intro_left = maxf(_intro_left - _dt, 0.0)
+	_tick_intro()
 	var k := 1.0 - _intro_left / _intro_total
 	# 1 = all the way out, easing to 0 as the camera settles in behind the ship.
 	var w := 1.0 - smoothstep(0.0, 1.0, k)
@@ -765,9 +814,15 @@ func _apply_intro() -> void:
 
 func _apply_kill_cam() -> void:
 	_kc_t += minf(_dt, KILL_CAM_MAX_STEP)
-	var blend := maxf(JuiceSettings.kill_cam_blend, 0.05)
+	# The length dial shortens the whole shot (and so the slow-mo under it).
+	var length := maxf(JuiceSettings.kill_cam_length, 0.1)
+	var blend := maxf(JuiceSettings.kill_cam_blend, 0.05) * length
 	var blend_in := blend * maxf(JuiceSettings.kill_cam_ease_in, 0.1) * _kc_slow
-	var hold := JuiceSettings.kill_cam_hold * _kc_slow
+	var hold := JuiceSettings.kill_cam_hold * _kc_slow * length
+	if _kc_times.x >= 0.0:
+		blend_in = maxf(_kc_times.x, 0.05)
+		hold = _kc_times.y
+		blend = maxf(_kc_times.z, 0.05)
 	if _kc_t >= blend_in + blend + hold:
 		cancel_kill_cam()
 		return
@@ -800,6 +855,7 @@ func _apply_kill_cam() -> void:
 ## Everything runs in _process, not _physics_process: the camera should be as
 ## smooth as the display, and it only ever reads the ship's state.
 func _process(delta: float) -> void:
+	_tick_intro()
 	if ship == null:
 		return
 	_dt = minf(delta / maxf(_frame_ts, 0.001), 0.1)
@@ -905,7 +961,7 @@ func _update_chase(delta: float) -> void:
 			follow = follow_dir_rate
 			tumble = 0.0
 		var ref_rate := lerpf(follow, REF_OOC_RATE, tumble)
-		_ref_quat = _ref_quat.slerp(ship_q, 1.0 - exp(-ref_rate * dt))
+		_ref_quat = _turn_ref(ship_q, 1.0 - exp(-ref_rate * dt), dt)
 	var ref := Basis(_ref_quat)
 
 	_update_bank_and_lag(dt)
@@ -1028,7 +1084,7 @@ func _update_follow_view(delta: float) -> void:
 		_ref_quat = ship_q
 		_cine_t = randf() * TAU
 	elif follow_dir.is_valid():
-		_ref_quat = _ref_quat.slerp(ship_q, 1.0 - exp(-minf(rate, follow_dir_rate) * dt))
+		_ref_quat = _turn_ref(ship_q, 1.0 - exp(-minf(rate, follow_dir_rate) * dt), dt)
 	else:
 		_ref_quat = _ref_quat.slerp(ship_q, 1.0 - exp(-lerpf(rate, REF_OOC_RATE, _ooc_blend) * dt))
 	var ref := Basis(_ref_quat)

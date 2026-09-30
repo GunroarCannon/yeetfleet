@@ -4,7 +4,8 @@
 ## Symbols and single words, no sentences: the level's photo clipped on, its
 ## name, what kind of job it is, danger skulls, tries / wins / stars / best
 ## time, the pay, and the ship that will fly it — the current ship, or a
-## LOANER stamp when the level wants a type the player does not own. FLY!
+## LOANER stamp when the level wants a type the player does not own. Tapping
+## the ship (or GARAGE) picks another in the garage ([signal pick_ship]). FLY!
 ## launches; a tap outside the sheet closes it. Also shows the fork's
 ## "set course" card.
 class_name ReportPanel
@@ -12,7 +13,8 @@ extends Control
 
 signal fly(lvl: Dictionary)
 signal choose_fork(theme: int)
-signal to_garage
+## The ship box (or GARAGE) was tapped: pick the ship for [param lvl].
+signal pick_ship(lvl: Dictionary)
 signal closed
 
 var _paper: _Paper
@@ -42,8 +44,13 @@ func _ready() -> void:
 	_garage.text = "GARAGE"
 	_garage.fill = GraffitiStyle.SUN
 	_garage.text_color = GraffitiStyle.INK
-	_garage.pressed.connect(func() -> void: to_garage.emit())
+	_garage.pressed.connect(func() -> void:
+		if not _paper.lvl.is_empty():
+			pick_ship.emit(_paper.lvl))
 	_paper.add_child(_garage)
+	_paper.ship_tapped.connect(func() -> void:
+		if not _paper.lvl.is_empty():
+			pick_ship.emit(_paper.lvl))
 	resized.connect(_place)
 
 
@@ -114,12 +121,13 @@ func _place() -> void:
 	var w := clampf(size.x * (0.94 if port else 0.4), 300.0, 520.0 * u)
 	# Below the top bar, so the back slab and the wallet stay visible.
 	var top := clampf(size.y * 0.11, 58.0, 92.0 * u) + 16.0
-	var h := clampf(size.y - top - 12.0, 380.0, 760.0 * u)
+	# Never taller than the screen: a phone in landscape can be ~430 tall.
+	var h := clampf(size.y - top - 12.0, minf(300.0, size.y - top - 8.0), 760.0 * u)
 	_paper.size = Vector2(w, h)
 	_paper.position = Vector2(size.x - w - (size.x - w) * (0.5 if port else 0.0) - (0.0 if port else 24.0), top)
 	_paper.pivot_offset = _paper.size * 0.5
 	_paper.rotation = -0.02
-	var bh := clampf(h * 0.11, 56.0, 80.0 * u)
+	var bh := ReportPanel.fly_height(h, u)
 	_fly.size = Vector2(w * 0.56, bh)
 	_fly.custom_minimum_size = _fly.size
 	_fly.font_size = int(bh * 0.46)
@@ -128,6 +136,12 @@ func _place() -> void:
 	_garage.custom_minimum_size = _garage.size
 	_garage.font_size = int(bh * 0.3)
 	_garage.position = Vector2(24, h - bh - 18)
+
+
+## The FLY slab's height on a pad [param h] tall (the pad's rows are laid
+## out above it).
+static func fly_height(h: float, u: float) -> float:
+	return clampf(h * 0.11, 44.0, 80.0 * u)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -149,12 +163,22 @@ func _on_fly() -> void:
 ## The sheet itself: drawn by hand, the buttons are its children.
 class _Paper:
 	extends Control
+	signal ship_tapped
 	var lvl := {}
 	var fork := -1
 	var styled := false
+	## Where the ship box was drawn (a tap there picks another ship).
+	var ship_rect := Rect2()
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_STOP
+
+	func _gui_input(event: InputEvent) -> void:
+		var mb := event as InputEventMouseButton
+		if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT \
+				and fork < 0 and not lvl.is_empty() and ship_rect.has_point(mb.position):
+			accept_event()
+			ship_tapped.emit()
 
 	func _draw() -> void:
 		var w := size.x
@@ -184,7 +208,10 @@ class _Paper:
 		var theme := int(lvl["theme"])
 		var tcol := LevelGen.THEME_COLORS[theme]
 		# The photo, clipped on at a tilt.
-		var ph := Rect2(Vector2(w * 0.1, h * 0.05), Vector2(w * 0.4, w * 0.3))
+		# On a short pad (a phone in landscape) the photo and name shrink so the
+		# rows keep their room.
+		var ph_h := minf(w * 0.3, h * 0.22)
+		var ph := Rect2(Vector2(w * 0.1, h * 0.05), Vector2(ph_h * 4.0 / 3.0, ph_h))
 		draw_set_transform(ph.get_center(), -0.06)
 		var pr := Rect2(-ph.size * 0.5, ph.size)
 		draw_rect(pr.grow(8), Color.WHITE)
@@ -210,21 +237,22 @@ class _Paper:
 		# LEVEL N stamp, rotated, in the theme colour.
 		var stamp_fs := int(w * 0.07)
 		draw_set_transform(Vector2(w * 0.76, h * 0.11), 0.18)
-		var sw := f.get_string_size("LEVEL %d" % int(lvl["number"]), HORIZONTAL_ALIGNMENT_LEFT, -1, stamp_fs).x
+		var nf := GraffitiStyle.number_font()
+		var sw := nf.get_string_size("LEVEL %d" % int(lvl["number"]), HORIZONTAL_ALIGNMENT_LEFT, -1, stamp_fs).x
 		draw_rect(Rect2(-sw * 0.5 - 10, -stamp_fs * 0.9, sw + 20, stamp_fs * 1.3), tcol.darkened(0.2), false, 4.0)
-		draw_string(f, Vector2(-sw * 0.5, stamp_fs * 0.2), "LEVEL %d" % int(lvl["number"]), HORIZONTAL_ALIGNMENT_LEFT, -1, stamp_fs, tcol.darkened(0.2))
+		draw_string(nf, Vector2(-sw * 0.5, stamp_fs * 0.2), "LEVEL %d" % int(lvl["number"]), HORIZONTAL_ALIGNMENT_LEFT, -1, stamp_fs, tcol.darkened(0.2))
 		draw_set_transform(Vector2.ZERO)
-		# Name in the spray face, and the sector's theme.
-		var tf := GraffitiStyle.title_font()
-		var title_fs := int(w * 0.095)
-		var ty := h * 0.05 + w * 0.3 + title_fs + 16
+		# Name in Orange Juice (the game's face for level names and numbers).
+		var tf := GraffitiStyle.number_font()
+		var title_fs := int(minf(w * 0.095, h * 0.075))
+		var ty := h * 0.05 + ph_h + title_fs + 16
 		draw_string_outline(tf, Vector2(w * 0.1, ty), String(lvl["title"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, w * 0.86, title_fs, 8, ink)
 		draw_string(tf, Vector2(w * 0.1, ty), String(lvl["title"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, w * 0.86, title_fs, tcol)
 		# The ship box sits on top of the FLY slab; the rows share what is
 		# left between the name and it.
 		var u := maxf(minf(get_viewport_rect().size.x, get_viewport_rect().size.y) / 720.0, 0.5)
-		var box_h := clampf(h * 0.15, 60.0, 110.0 * u)
-		var box_y := h - clampf(h * 0.11, 56.0, 80.0 * u) - 30.0 - box_h - 12.0
+		var box_h := clampf(h * 0.15, 48.0, 110.0 * u)
+		var box_y := h - ReportPanel.fly_height(h, u) - 30.0 - box_h - 12.0
 		var fs := int(clampf(minf(w * 0.05, (box_y - ty) / 8.6), 12.0, 30.0))
 		var row_h := (box_y - ty) / 4.6
 		var y := ty + row_h * 0.95
@@ -239,28 +267,35 @@ class _Paper:
 		y += row_h
 		# Tries · wins.
 		draw_string(f, Vector2(x0, y), "TRIES", HORIZONTAL_ALIGNMENT_LEFT, -1, lab, dimc)
-		draw_string(f, Vector2(x0 + fs * 3.2, y), str(int(rec["attempts"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
+		draw_string(nf, Vector2(x0 + fs * 3.2, y), str(int(rec["attempts"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 		draw_string(f, Vector2(x1, y), "WINS", HORIZONTAL_ALIGNMENT_LEFT, -1, lab, dimc)
-		draw_string(f, Vector2(x1 + fs * 2.8, y), str(int(rec["wins"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
+		draw_string(nf, Vector2(x1 + fs * 2.8, y), str(int(rec["wins"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 		y += row_h
 		# Stars · best.
 		for i in 3:
 			GraffitiIcons.draw(self, "star" if i < int(rec["stars"]) else "star_empty", Vector2(x0 + fs * 0.6 + i * fs * 1.35, y - fs * 0.35), fs * 1.2)
 		var best := float(rec["best"])
 		draw_string(f, Vector2(x1, y), "BEST", HORIZONTAL_ALIGNMENT_LEFT, -1, lab, dimc)
-		draw_string(f, Vector2(x1 + fs * 2.8, y), _clock(best) if best > 0.0 else "--", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
+		draw_string(nf, Vector2(x1 + fs * 2.8, y), _clock(best) if best > 0.0 else "--", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 		y += row_h
 		# Par · pay.
 		draw_string(f, Vector2(x0, y), "PAR", HORIZONTAL_ALIGNMENT_LEFT, -1, lab, dimc)
-		draw_string(f, Vector2(x0 + fs * 2.4, y), _clock(float(lvl["par"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
+		draw_string(nf, Vector2(x0 + fs * 2.4, y), _clock(float(lvl["par"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 		var pay := int(lvl["reward"]) if int(rec["wins"]) == 0 else int(float(lvl["reward"]) * Campaign.REPLAY_PAY)
 		GraffitiIcons.draw(self, "coin", Vector2(x1 + fs * 0.5, y - fs * 0.35), fs)
-		draw_string(f, Vector2(x1 + fs * 1.3, y), "+%d" % pay, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
+		draw_string(nf, Vector2(x1 + fs * 1.3, y), "+%d" % pay, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 		# The ship.
 		var pick := Campaign.ship_for(lvl)
 		var id := String(pick["id"])
 		var sbox := Rect2(Vector2(x0 - 6, box_y), Vector2(w * 0.8, box_h))
+		ship_rect = sbox
 		draw_rect(sbox, Color(0.08, 0.06, 0.14, 0.9))
+		# It's a button: a SWAP tab on its right edge.
+		var tab_fs := int(fs * 0.7)
+		var tab_w := f.get_string_size("SWAP", HORIZONTAL_ALIGNMENT_LEFT, -1, tab_fs).x + 18.0
+		var tab := Rect2(Vector2(sbox.end.x - tab_w * 0.4, sbox.position.y + sbox.size.y * 0.5 - tab_fs), Vector2(tab_w, tab_fs * 2.0))
+		GraffitiStyle.draw_slab(self, tab, GraffitiStyle.CYAN, 5.0, 2.0, Vector2(3, 3))
+		GraffitiStyle.draw_text(self, "SWAP", tab.get_center(), tab_fs, GraffitiStyle.INK, 0)
 		var port := PicSet.ship(id)
 		var pbox := Rect2(sbox.position + Vector2(6, 4), Vector2(sbox.size.y * 1.35, sbox.size.y - 8))
 		if port != null:
@@ -289,20 +324,22 @@ class _Paper:
 		var f := GraffitiStyle.head_font()
 		var col := LevelGen.THEME_COLORS[fork]
 		var tf := GraffitiStyle.title_font()
-		var fs := int(w * 0.1)
+		var fs := int(minf(w * 0.1, h * 0.09))
 		draw_string_outline(tf, Vector2(w * 0.1, h * 0.2), LevelGen.THEME_NAMES[fork], HORIZONTAL_ALIGNMENT_LEFT, w * 0.85, fs, 8, GraffitiStyle.INK)
 		draw_string(tf, Vector2(w * 0.1, h * 0.2), LevelGen.THEME_NAMES[fork], HORIZONTAL_ALIGNMENT_LEFT, w * 0.85, fs, col)
-		var sfs := int(w * 0.05)
+		# The list shares what is left above the button (a short pad squeezes it).
+		var kinds: Dictionary = LevelGen.THEME_KINDS[fork]
+		var list_end := h - ReportPanel.fly_height(h, 1.0) - 44.0
+		var sfs := int(clampf(minf(w * 0.05, (list_end - h * 0.36) / (kinds.size() * 1.8 + 1.6)), 10.0, 40.0))
 		var why := ("YOU PLAY " + Campaign.style_word()) if styled else "UNCHARTED"
 		draw_string(f, Vector2(w * 0.12, h * 0.3), why, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, GraffitiStyle.INK)
-		# What the sector holds: the kinds of job, as icons and words.
-		var kinds: Dictionary = LevelGen.THEME_KINDS[fork]
-		var y := h * 0.42
+		# What the sector holds: the kinds of job, as words.
+		var y := h * 0.36 + sfs * 1.4
 		for k in kinds:
 			var info: Dictionary = LevelGen.KIND_INFO[k]
 			draw_string(f, Vector2(w * 0.14, y), String(info["word"]), HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, GraffitiStyle.INK)
 			y += sfs * 1.8
-		draw_string(f, Vector2(w * 0.12, h * 0.8), "NO WAY BACK", HORIZONTAL_ALIGNMENT_LEFT, -1, int(sfs * 0.8), GraffitiStyle.HOT)
+		draw_string(f, Vector2(w * 0.12, minf(h * 0.8, y + sfs * 0.4)), "NO WAY BACK", HORIZONTAL_ALIGNMENT_LEFT, -1, int(sfs * 0.8), GraffitiStyle.HOT)
 
 	static func _clock(sec: float) -> String:
 		var s := roundi(sec)

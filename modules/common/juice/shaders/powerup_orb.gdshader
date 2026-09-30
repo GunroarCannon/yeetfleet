@@ -18,6 +18,8 @@ void fragment() {
 	float lv = grid_line(UV.y * lines_v, 0.07);
 	float line = max(lu, lv);
 	float rim = pow(1.0 - clamp(abs(dot(NORMAL, VIEW)), 0.0, 1.0), 2.0);
-	ALBEDO = mix(tint.rgb, vec3(1.0), line * 0.5);
-	ALPHA = clamp(0.06 + rim * 0.35 + line * 0.85, 0.0, 1.0) * fade;
+	// Bright and see-through: a light fill, a strong rim and hot lines, so the
+	// orb reads from across the fight.
+	ALBEDO = mix(tint.rgb * 1.3, vec3(1.0), line * 0.6 + rim * 0.3);
+	ALPHA = clamp(0.16 + rim * 0.6 + line * 0.9, 0.0, 1.0) * fade;
 }

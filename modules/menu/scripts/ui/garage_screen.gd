@@ -8,6 +8,11 @@
 ## shows the ship's name and type, four upgrade tracks (HULL, GUNS, SPEED,
 ## YEET) with capped pips and a + to buy the next one, and one big action:
 ## FLY THIS, FLYING, or BUY.
+##
+## Opened from a level's report ([member MenuRoot.ship_pick_level]) it is a
+## ship picker: only the owned ships the level takes are on the shelf (no
+## shop, no teasers, nothing it would refuse) — or, owning none of its type,
+## the loaner it lends — and SELECT or back returns to that report.
 class_name GarageScreen
 extends MenuScreen
 
@@ -36,7 +41,11 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_bar = TopBar.new()
 	_bar.title = "GARAGE"
-	_bar.back_pressed.connect(func() -> void: menu.go(MenuRoot.Screen.HOME))
+	_bar.back_pressed.connect(func() -> void:
+		if _picking():
+			menu.finish_ship_pick()
+		else:
+			menu.go(MenuRoot.Screen.HOME))
 	add_child(_bar)
 	_tabs = HBoxContainer.new()
 	_tabs.add_theme_constant_override("separation", 22)
@@ -86,7 +95,12 @@ func _arrow(glyph: String, step: int) -> SlabButton:
 
 func opened() -> void:
 	_shelf = Shelf.HANGAR
-	_rebuild_list(Campaign.current_ship())
+	_bar.set_title("PICK A SHIP" if _picking() else "GARAGE")
+	var start := Campaign.current_ship()
+	if _picking():
+		start = String(Campaign.ship_for(menu.ship_pick_level)["id"])
+	_tabs.visible = not _picking()
+	_rebuild_list(start)
 	layout()
 	_action.grab_focus.call_deferred()
 
@@ -95,7 +109,24 @@ func back() -> bool:
 	if _shelf == Shelf.SHOP:
 		_set_shelf(Shelf.HANGAR)
 		return true
+	if _picking():
+		menu.finish_ship_pick()
+		return true
 	return false
+
+
+## Picking the ship for a level (opened from its report).
+func _picking() -> bool:
+	return menu != null and not menu.ship_pick_level.is_empty()
+
+
+## Whether the level being picked for takes [param id] (any ship when it
+## names no type).
+func _allowed(id: String) -> bool:
+	if not _picking():
+		return true
+	var want := int(menu.ship_pick_level.get("ship_type", -1))
+	return want < 0 or ShipCatalog.type_of(id) == want
 
 
 func _set_shelf(shelf: int) -> void:
@@ -105,7 +136,13 @@ func _set_shelf(shelf: int) -> void:
 
 func _rebuild_list(keep: String) -> void:
 	_list.clear()
-	if _shelf == Shelf.HANGAR:
+	if _picking():
+		for id in Campaign.owned_ids():
+			if _allowed(id):
+				_list.append(id)
+		if _list.is_empty():
+			_list.append(String(Campaign.ship_for(menu.ship_pick_level)["id"]))
+	elif _shelf == Shelf.HANGAR:
 		_list = Campaign.owned_ids()
 		var teased := 0
 		for id in _cheapest_unowned():
@@ -139,6 +176,7 @@ func _step(d: int) -> void:
 	if _list.size() < 2:
 		return
 	_index = posmod(_index + d, _list.size())
+	GameAudio.ui(&"ship")
 	_refresh()
 	_panel.position.x += 30.0 * d
 	create_tween().tween_property(_panel, "position:x", _panel_rest_x(), 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -155,9 +193,10 @@ func _refresh() -> void:
 	_next.visible = many
 	_panel.ship_id = id
 	var owned := id != "" and Campaign.owns(id)
-	# Hangar teasers are shadows; the shop shows the paint it is selling.
+	# Hangar teasers are shadows; the shop shows the paint it is selling (and
+	# a picker's loaner is shown in full: it is the ship flown).
 	if menu != null and id != "":
-		menu.stage.show_pad_ship(id, not owned and _shelf == Shelf.HANGAR)
+		menu.stage.show_pad_ship(id, not owned and _shelf == Shelf.HANGAR and not _picking())
 	for row in _rows:
 		row.ship_id = id
 		row.visible = id != ""
@@ -168,7 +207,23 @@ func _refresh() -> void:
 		return
 	_action.visible = true
 	_action.sub = ""
-	if owned:
+	if _picking() and not owned:
+		# The level lends this one: nothing of its type in the hangar.
+		_action.text = "FLY THE LOANER"
+		_action.icon = ""
+		_action.fill = GraffitiStyle.LIME
+		_action.text_color = GraffitiStyle.INK
+		_action.disabled = false
+	elif owned and _picking():
+		var ok := _allowed(id)
+		_action.text = "SELECT SHIP" if ok else "NOT ALLOWED"
+		_action.icon = ""
+		_action.fill = GraffitiStyle.LIME if ok else Color("3a3150")
+		_action.text_color = GraffitiStyle.INK if ok else Color.WHITE
+		_action.disabled = not ok
+		if not ok:
+			_action.sub = "NEEDS " + ShipCatalog.type_name(int(menu.ship_pick_level.get("ship_type", -1)))
+	elif owned:
 		var flying := Campaign.current_ship() == id
 		_action.text = "FLYING" if flying else "FLY THIS"
 		_action.icon = ""
@@ -193,7 +248,15 @@ func _on_action() -> void:
 	var id := current_id()
 	if id == "":
 		return
+	if _picking() and not Campaign.owns(id):
+		menu.finish_ship_pick()
+		return
 	if Campaign.owns(id):
+		if _picking():
+			if _allowed(id):
+				Campaign.select_ship(id)
+				menu.finish_ship_pick()
+			return
 		if Campaign.current_ship() != id:
 			Campaign.select_ship(id)
 	elif Campaign.buy_ship(id):
@@ -201,10 +264,12 @@ func _on_action() -> void:
 		_shelf = Shelf.HANGAR
 		_rebuild_list(id)
 		Juice.pop(_panel, 0.15)
+		GameAudio.ui(&"buy")
 
 
 func _on_buy_pip(stat: String) -> void:
-	Campaign.buy_pip(current_id(), stat)
+	if Campaign.buy_pip(current_id(), stat):
+		GameAudio.ui(&"upgrade")
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -380,15 +445,15 @@ class _StatRow:
 		var x := size.x * 0.28
 		var avail := size.x - x - clampf(size.x * 0.3, 92.0, 150.0) - 20.0
 		var cell := minf(avail / 10.5, h * 0.5)
-		for i in 10:
+		# Only the cells this hull can ever fill: its own rating plus every pip
+		# it can buy. A maxed track is then a full bar, beside its MAX.
+		for i in mini(base + ShipCatalog.MAX_PIPS, 10):
 			var r := Rect2(Vector2(x + i * cell * 1.05, h * 0.5 - cell * 0.5), Vector2(cell * 0.86, cell))
-			var col := Color(1, 1, 1, 0.1)
+			var col := Color(1, 1, 1, 0.18)
 			if i < base:
 				col = Color("8f86a8")
 			elif i < base + pips:
 				col = GraffitiStyle.LIME
-			elif i < base + ShipCatalog.MAX_PIPS:
-				col = Color(1, 1, 1, 0.18)
 			draw_rect(r.grow(1.5), GraffitiStyle.INK)
 			draw_rect(r, col)
 		# What a pip is worth on this hull, as a percentage.

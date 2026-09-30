@@ -36,6 +36,11 @@ enum Location {
 ## Distance between motes in the drift lattice, in metres. Roughly a fifth of a
 ## second at cruise, which is the spacing at which a passing speck reads as
 ## motion rather than as a flicker.
+const PROXIMITY_AUDIO := preload("res://modules/flight/scripts/audio/proximity_audio.gd")
+## Hull left (a fraction of the most) under which the low-health warning sounds.
+const LOW_HEALTH_FRACTION := 0.3
+## Radius (m) of a thing bumped into past which the bump is a big-ship impact.
+const BIG_BUMP_RADIUS := 25.0
 const MOTE_SPACING := 70.0
 ## Motes per axis. 9^3 is about seven hundred specks — enough that a few are
 ## always near enough to stream past, cheap enough for one MultiMesh draw.
@@ -186,6 +191,9 @@ var _big_notice: BigNotice = null
 ## The campaign level being flown, its map button and end card; null in free
 ## flight. See [CampaignLevelOverlay].
 var campaign_overlay: CampaignLevelOverlay = null
+## Points this life: 100 per ship the player wrecks, times the combo chain.
+## The sandbox's wreck card counts them up into coins.
+var score := 0
 ## The flight test's bug hunt — see [BugHunt] and the 🐞 panel.
 var bug_hunt: BugHunt = null
 ## The player's team for AI targeting (0 = everyone's target).
@@ -307,6 +315,10 @@ func _enter_tree() -> void:
 	audio = SpaceAudio.new()
 	audio.name = "SpaceAudio"
 	add_child(audio)
+	var proximity: Node = PROXIMITY_AUDIO.new()
+	proximity.name = "ProximityAudio"
+	proximity.setup(self)
+	add_child(proximity)
 
 	# A scene restart reloads this node; land back in the location we were in.
 	location = Session.flight_location
@@ -333,6 +345,10 @@ func _enter_tree() -> void:
 ## after [method _enter_tree] has run.
 func _ready() -> void:
 	_assemble()
+	# SOUND / MUSIC from Settings, and the flight playlist (music carries on
+	# from the menu's host and crossfades).
+	GameAudio.apply_volumes()
+	GameAudio.music("gameplay")
 	# Deferred: gravity, the HUD, the rear view and the weapon systems all need
 	# to exist before their saved state can be put back.
 	_restore_prefs.call_deferred()
@@ -437,14 +453,19 @@ func _ready() -> void:
 	_coach = %Coach as CoachOverlay
 	_coach.steps = FLIGHT_STEPS
 	_coach.walkthrough_id = "flight_walkthrough"
-	_coach.start()
+	# The dev walkthrough (throttle lever, assist modes...) is not the game's:
+	# players get the interactive tutorial instead.
+	if Session.debug_mode:
+		_coach.start()
 	power_ups = PowerUps.new()
 	power_ups.setup(self)
 	power_ups.picked.connect(func(_k: int) -> void: tutorial_note("powerup"))
 	add_child(power_ups)
 	GameDefaults.auto_bake = bool(Session.pref("auto_bake", true))
 	# The interactive tutorial runs once, on a real (windowed) first flight.
-	if JuiceSettings.tutorial_on and not bool(Session.pref("tutorial_done", false)) 			and Session.pending_level.is_empty()			and DisplayServer.get_name() != "headless":
+	# The campaign's TUTORIAL level runs it every time.
+	var tutorial_level := bool(Session.pending_level.get("tutorial", false))
+	if tutorial_level or (JuiceSettings.tutorial_on and not bool(Session.pref("tutorial_done", false)) 			and Session.pending_level.is_empty() and DisplayServer.get_name() != "headless"):
 		start_tutorial.call_deferred()
 
 	systems.state_changed.connect(_on_systems_state)
@@ -458,6 +479,7 @@ func _ready() -> void:
 	model.out_of_control_changed.connect(_on_model_ooc_changed)
 	model.boost_changed.connect(_on_model_boost_changed)
 	_build_incident_director()
+	_schedule_setup_events()
 
 	BuilderTheme.apply_density_scale(get_window())
 	get_viewport().size_changed.connect(
@@ -647,15 +669,15 @@ func _build_gravity() -> void:
 	# gravity stays comparable) and the moon's orbit stays stable when scaled.
 	var mass_scale := Session.planet_scale * Session.planet_scale
 	gravity.register_body(
-		space.planet_centre, _gravity_mass("tarn_iv", 10000000.0) * mass_scale, space.planet_radius,
+		space.planet_centre, _gravity_mass("tarn_iv", 10000000.0) * mass_scale * space.mass_mult(0), space.planet_radius,
 		"Tarn IV", true
 	)
 	gravity.register_body(
-		space.planet2_centre, _gravity_mass("ashara", 2000000.0) * mass_scale, space.planet2_radius,
+		space.planet2_centre, _gravity_mass("ashara", 2000000.0) * mass_scale * space.mass_mult(1), space.planet2_radius,
 		"Ashara", true
 	)
 	gravity.register_body(
-		space.planet3_centre, _gravity_mass("glacius", 500000.0) * mass_scale, space.planet3_radius,
+		space.planet3_centre, _gravity_mass("glacius", 500000.0) * mass_scale * space.mass_mult(2), space.planet3_radius,
 		"Glacius", true
 	)
 	# Moon — orbits Tarn IV, and is heavy enough to hold *its own* orbiters. A
@@ -759,6 +781,21 @@ func _teardown_phys_world() -> void:
 	_live_rock_bodies.clear()
 
 
+## A sandbox recipe's incidents ([member Session.space_setup] "events"), set
+## off one by one after the start so the system has things going on.
+func _schedule_setup_events() -> void:
+	var events: Array = Session.space_setup.get("events", [])
+	if events.is_empty() or not Session.pending_level.is_empty() or incident_director == null:
+		return
+	for i in events.size():
+		get_tree().create_timer(10.0 + i * 35.0, false).timeout.connect(_trigger_setup_event.bind(String(events[i])))
+
+
+func _trigger_setup_event(id: String) -> void:
+	if incident_director != null and is_instance_valid(incident_director):
+		incident_director.trigger_incident(id)
+
+
 func _build_incident_director() -> void:
 	if incident_director != null:
 		incident_director.queue_free()
@@ -772,6 +809,8 @@ func _build_incident_director() -> void:
 	ctx.reputation = rep_store
 	incident_director.context = ctx
 	incident_director.world_parent = self
+	# Wordy incident banners are a debug read-out; players get a short one.
+	incident_director.quiet = not Session.debug_mode
 	if _hud != null:
 		incident_director.hud_container = _hud.get_event_container()
 	add_child(incident_director)
@@ -1344,7 +1383,7 @@ func _assemble() -> void:
 	_player_dead = false
 	var stats := view.resolution.stats
 	var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
-	player_max_hp = base_hp * JuiceSettings.player_durability_mult
+	player_max_hp = base_hp * JuiceSettings.player_durability_mult * Difficulty.v("player_hull")
 	player_hp = player_max_hp
 	player_max_shield = _design_shield()
 	player_shield = player_max_shield
@@ -1558,6 +1597,10 @@ func _notification(what: int) -> void:
 func _on_back(from_phone: bool) -> void:
 	if _hud != null and _hud.close_top_panel():
 		return
+	# Flown from the game's menu: Back (and Escape) pause.
+	if campaign_overlay != null:
+		campaign_overlay.toggle_pause()
+		return
 	if from_phone:
 		if _hud != null:
 			_hud.toggle_debug_panel()
@@ -1568,6 +1611,7 @@ func _on_back(from_phone: bool) -> void:
 func _process(delta: float) -> void:
 	_update_blast_outline(delta)
 	_update_knocked_planets(delta)
+	_tick_tutorial_guard()
 	if _pilot != null:
 		_pilot.frame_tick(delta)
 	if Time.get_ticks_msec() >= _next_session_sync_ms:
@@ -1594,6 +1638,8 @@ func _process(delta: float) -> void:
 	# _kill_cam_factor]).
 	Engine.time_scale = _time_scale * _slowmo * Juice.hitstop_factor() * _kill_cam_factor()
 	_regen_player(delta)
+	if audio != null:
+		audio.set_low_health(not _player_dead and player_hp > 0.0 and player_hp < player_max_hp * LOW_HEALTH_FRACTION)
 	# Update rear camera: position behind the ship, looking backward.
 	if _rear_view_on and _rear_camera != null and model != null:
 		var ship_xform := model.global_transform
@@ -2039,6 +2085,12 @@ func _on_model_assist_changed(_on: bool) -> void:
 ## small fixed pull-back left it clipped inside the object's own geometry,
 ## which read as the game breaking rather than as a crash.
 func _on_model_collided(closing: float, other_radius: float, other_kinematic: bool) -> void:
+	# The bump itself: a click for a nudge, the heavy impact for a real knock
+	# or anything big. Rate-limited, a scrape is one sound, not a buzz.
+	var now_ms := Time.get_ticks_msec()
+	if audio != null and closing > 4.0 and now_ms >= _next_bump_sound_ms and model != null:
+		_next_bump_sound_ms = now_ms + 180
+		audio.play_collision_sound(model.global_position, closing, true, other_radius > BIG_BUMP_RADIUS)
 	if not JuiceSettings.collision_bump_zoom or camera_rig == null:
 		return
 	var massive := other_kinematic and other_radius > FlightCamera.MASSIVE_HIT_RADIUS
@@ -2176,6 +2228,12 @@ func _hint_free_view() -> void:
 
 ## The planet and the station in [constant Location.SPACE]; nothing to navigate
 ## to in the empty test volume.
+## True once a sensor part has been knocked off the player's ship: the radar
+## is dark until the next ship.
+func sensors_lost() -> bool:
+	return damage != null and damage.has_effect(DamageSystem.EffectType.SENSORS_LOST)
+
+
 func landmarks() -> Array[Dictionary]:
 	if space != null:
 		return space.landmarks
@@ -2219,7 +2277,7 @@ func respawn() -> void:
 	if view != null:
 		var stats := view.resolution.stats
 		var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
-		player_max_hp = base_hp * JuiceSettings.player_durability_mult
+		player_max_hp = base_hp * JuiceSettings.player_durability_mult * Difficulty.v("player_hull")
 		player_hp = player_max_hp
 		if power_ups != null:
 			power_ups.clear_effects()
@@ -2519,6 +2577,11 @@ func _show_game_over_if_dead() -> void:
 	if not _player_dead:
 		return
 	_slowmo = 1.0
+	# Flights from the menu have their own cards (the level's end card, the
+	# sandbox's points card): no builder button there.
+	if campaign_overlay != null and is_instance_valid(campaign_overlay):
+		campaign_overlay.player_wrecked()
+		return
 	if _hud != null and _hud.has_method("show_game_over"):
 		_hud.show_game_over()
 
@@ -2722,10 +2785,34 @@ func start_tutorial() -> void:
 	_hud.add_banner(tutorial)
 
 
-## Tell the tutorial the player just did [param event] (see [method FlightTutorial.note]).
-func tutorial_note(event: String) -> void:
+## Tell the tutorial the player just did [param event] (see [method
+## FlightTutorial.note]); [param amount] is how much of it, for the gestures
+## that have to add up (looking round, zooming).
+func tutorial_note(event: String, amount := 1.0) -> void:
 	if tutorial != null and is_instance_valid(tutorial):
-		tutorial.note(event)
+		tutorial.note(event, amount)
+
+
+## Keep every AI ship unhurtable while the tutorial is still teaching (see
+## [method FlightTutorial.guards_enemies]), and let them go when it is time
+## to wreck one or the tutorial ends. Also holds its power-up orbs in place.
+func _tick_tutorial_guard() -> void:
+	var on := tutorial != null and is_instance_valid(tutorial) and tutorial.guards_enemies()
+	var live := tutorial != null and is_instance_valid(tutorial)
+	if power_ups != null:
+		power_ups.hold = live
+	if not on and not _tutorial_guard:
+		return
+	_tutorial_guard = on
+	for ship in live_enemies():
+		ship.invulnerable = on
+		# The wreck step: the drones can be beaten now, so they wear the red
+		# target an enemy does (they never shoot, so it would not show itself).
+		if not on and live:
+			pin_marker(ship, InteractionMarkers.COLORS[AiShip.Attitude.HOSTILE])
+
+
+var _tutorial_guard := false
 
 
 ## A ship popped "!" or "?" ([signal AiShip.marked]): a comic speech bubble
@@ -2770,6 +2857,7 @@ func _on_ai_ship_destroyed(ship: AiShip) -> void:
 		power_ups.maybe_drop(ship.global_position)
 	tutorial_note("kill")
 	var chain := combo.note_kill(ship.global_position)
+	score += 100 * maxi(chain, 1)
 	if chain >= 2 and JuiceSettings.combo_counter:
 		hit_word("x%d!" % chain, ship.global_position, Color("ffe23d"), 1.0 + minf(float(chain) * 0.12, 0.8))
 	if not JuiceSettings.kill_cam or JuiceSettings.reduce_motion or _player_dead:
@@ -2777,7 +2865,12 @@ func _on_ai_ship_destroyed(ship: AiShip) -> void:
 	if camera_rig == null or controlled_ai == ship:
 		return
 	var now := Time.get_ticks_msec()
-	if now < _next_kill_cam_ms or randf() > JuiceSettings.kill_cam_chance:
+	if now < _next_kill_cam_ms or randf() > JuiceSettings.kill_cam_odds:
+		return
+	# Only for a blast the player can see: in view and near enough to read.
+	var cam := camera_node()
+	if cam == null or not cam.is_position_in_frustum(ship.global_position) \
+			or cam.global_position.distance_to(ship.global_position) > KILL_CAM_SEE_RANGE:
 		return
 	var radius := 4.0
 	if ship._view != null:
@@ -2786,8 +2879,13 @@ func _on_ai_ship_destroyed(ship: AiShip) -> void:
 	# drifts on after its parts scatter, and following it swooped onto loose
 	# wreckage instead of the blast.
 	if camera_rig.start_kill_cam(null, ship.global_position, radius):
-		var total := JuiceSettings.kill_cam_blend * (1.0 + JuiceSettings.kill_cam_ease_in) + JuiceSettings.kill_cam_hold
+		var total := (JuiceSettings.kill_cam_blend * (1.0 + JuiceSettings.kill_cam_ease_in) + JuiceSettings.kill_cam_hold) * JuiceSettings.kill_cam_length
 		_next_kill_cam_ms = now + int((total + JuiceSettings.kill_cam_cooldown) * 1000.0)
+
+
+## A kill cam only swoops onto a wreck this close (m): further off, the blast
+## is a speck and the stop just reads as lag.
+const KILL_CAM_SEE_RANGE := 900.0
 
 
 ## The kill cam's share of [member Engine.time_scale]: eases down to [member
@@ -2827,7 +2925,7 @@ func refresh_player_max_stats() -> void:
 	var hp_frac := player_hp / maxf(player_max_hp, 1.0)
 	var sh_frac := player_shield / maxf(player_max_shield, 1.0) if player_max_shield > 0.0 else 1.0
 	player_max_hp = maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult \
-		* JuiceSettings.player_durability_mult
+		* JuiceSettings.player_durability_mult * Difficulty.v("player_hull")
 	if power_ups != null and power_ups.shield_active():
 		# The power-up's bubble owns the shield while it lasts.
 		if not _player_dead:
@@ -3068,8 +3166,24 @@ func take_enemy_fire(amount: float, hit_point: Vector3, shooter: SystemsSim) -> 
 		return false
 	if ship != null:
 		ship.note_hit_player()
-	take_damage(amount * JuiceSettings.enemy_damage_mult, hit_point)
+	take_damage(_enemy_hit(amount, ship), hit_point)
 	return true
+
+
+## An enemy hit on the player at its level's strength: [Difficulty]'s bite
+## and — for real shots, which never went through the shooter — the ship's
+## own damage dial (the level climb), capped so no one hit takes more than
+## [code]max_hit_share[/code] of the hull (a railgun is a big dent, not death).
+func _enemy_hit(amount: float, ship: AiShip) -> float:
+	amount *= JuiceSettings.enemy_damage_mult * Difficulty.v("enemy_bite")
+	if ship != null and JuiceSettings.ai_real_projectiles:
+		amount *= ship._weapon_mult
+	var taken := JuiceSettings.player_damage_taken_mult / maxf(JuiceSettings.player_toughness, 0.05) \
+		/ maxf(upgrade("hull"), 0.05)
+	var cap := player_max_hp * Difficulty.v("max_hit_share")
+	if cap > 0.0 and taken > 0.0:
+		amount = minf(amount, cap / taken)
+	return amount
 
 
 ## A ship the player is flying ([member AiShip.pilot_host]) is hit: how much
@@ -3088,7 +3202,9 @@ func pilot_damage(ship: AiShip, amount: float, source: Object) -> float:
 			if _player_team != 0 and s_ship.team_id == _player_team:
 				return 0.0
 			s_ship.note_hit_player()
-		amount *= JuiceSettings.enemy_shot_damage_scale
+		amount *= JuiceSettings.enemy_shot_damage_scale * Difficulty.v("enemy_bite")
+		if JuiceSettings.ai_real_projectiles:
+			amount *= s_ship._weapon_mult if s_ship != null else 1.0
 	_last_hit_ms = Time.get_ticks_msec()
 	return amount * JuiceSettings.enemy_damage_mult * JuiceSettings.player_damage_taken_mult 		/ maxf(JuiceSettings.player_toughness, 0.05) / maxf(upgrade("hull"), 0.05)
 
@@ -3096,6 +3212,13 @@ func pilot_damage(ship: AiShip, amount: float, source: Object) -> float:
 # --- Interaction markers ---------------------------------------------------------
 
 var _interaction_markers: InteractionMarkers = null
+
+
+## Keep a sprayed target in [param col] on [param ship] at all times (held at
+## the screen edge when it is out of view) — a mission's ship to guard.
+func pin_marker(ship: AiShip, col: Color) -> void:
+	if _interaction_markers != null:
+		_interaction_markers.pin(ship, col)
 
 
 func _marker_ships() -> Array[AiShip]:
@@ -3159,7 +3282,17 @@ func delete_satellites() -> void:
 ## depends on [SolarSystemGenerator]: large_craft_gen never reaches back into
 ## flight.
 var _large_craft: Array[LargeCraftGenerator] = []
+## Earliest tick (ms) the next bump may sound (see [method _on_model_collided]).
+var _next_bump_sound_ms := 0
+
+
+## The big craft in the scene (see [member _large_craft]), for whoever needs
+## to know where the megaships are.
+func large_craft() -> Array[LargeCraftGenerator]:
+	return _large_craft
 const LARGE_CRAFT_SPAWN_DIST := 300.0
+## A backdrop craft's distance, in spawn distances (see [method spawn_large_craft]).
+const BACKDROP_DISTANCE := 1.8
 
 ## One spawned large craft's circular orbit around whichever [GravityBody]
 ## dominates the spot it was dropped at — computed once at spawn from the
@@ -3228,10 +3361,12 @@ const CRAFT_SIZE_FLOOR := {
 ## stays the lab's job; this is a quick "drop one in and go fly around it"
 ## test spawn, the same scope as [method spawn_satellite]. Orbits the nearest
 ## gravitating body if one dominates the spawn point (see [_CraftOrbit]).
-func spawn_large_craft(archetype: int) -> void:
+## [param bearing] (not zero): a backdrop instead — set well off along that
+## direction from the ship, no hint (a level's scenery, see [FlightScenarios]).
+func spawn_large_craft(archetype: int, bearing := Vector3.ZERO) -> LargeCraftGenerator:
 	var ship := active_ship_node()
 	if ship == null:
-		return
+		return null
 	var gen := LargeCraftGenerator.new()
 	gen.name = "LargeCraft_%d" % _large_craft.size()
 	gen.archetype = archetype
@@ -3273,6 +3408,8 @@ func spawn_large_craft(archetype: int) -> void:
 	# (testing archetypes back to back) doesn't stack them on top of each other.
 	var fan := side * float(_large_craft.size()) * spawn_dist * 0.9
 	gen.global_position = ship.global_position + fwd * spawn_dist + fan
+	if bearing != Vector3.ZERO:
+		gen.global_position = ship.global_position + bearing.normalized() * spawn_dist * BACKDROP_DISTANCE
 	_large_craft.append(gen)
 	_register_large_craft_collision(gen)
 	# Ships move under their own power; everything else (stations, gates,
@@ -3281,9 +3418,10 @@ func spawn_large_craft(archetype: int) -> void:
 		_place_large_craft_patrol(gen)
 	else:
 		_place_large_craft_orbit(gen)
-	if _hud != null:
+	if _hud != null and bearing == Vector3.ZERO:
 		var label: String = LargeCraftGenerator.ARCHETYPE_NAMES.get(archetype, "Large craft")
 		_hud.show_hint("Spawned %s — %d parts, %d dock pads" % [label, gen.part_count(), gen.dock_pad_count()])
+	return gen
 
 
 ## Debug bulk-spawn: drops [param count] large craft of random archetypes at
@@ -3552,7 +3690,7 @@ func _update_large_craft_docking(delta: float) -> void:
 			model.velocity = pad.pull_point(model.global_position, model.velocity, delta, model)
 
 
-func clear_large_craft() -> void:
+func clear_large_craft(quiet := false) -> void:
 	for gen in _large_craft:
 		if phys_world != null and _craft_collision_bodies.has(gen):
 			for body: PhysBody in _craft_collision_bodies[gen]:
@@ -3571,7 +3709,7 @@ func clear_large_craft() -> void:
 		if is_instance_valid(node):
 			node.queue_free()
 	_turret_bolts.clear()
-	if _hud != null:
+	if _hud != null and not quiet:
 		_hud.show_hint("Large craft cleared")
 
 
@@ -3777,7 +3915,10 @@ func _find_first_mesh(n: Node) -> MeshInstance3D:
 ## Called by the damage system when a part breaks off. The damage system
 ## already moved the actual part node to world space as debris_node. We
 ## track that node, add a transparency fade, and spawn particle bursts.
-func _on_part_broken(broken: DamageSystem.BrokenPart, _effects: Array) -> void:
+func _on_part_broken(broken: DamageSystem.BrokenPart, effects: Array) -> void:
+	# Something came off the player's own ship (not every part of a wreck).
+	if audio != null and not _player_dead:
+		audio.play_eject()
 	var node := broken.debris_node
 	if node == null or not is_instance_valid(node):
 		# No real node provided — skip the fallback box; a burst and a small
@@ -3856,8 +3997,16 @@ func _on_part_broken(broken: DamageSystem.BrokenPart, _effects: Array) -> void:
 
 	# Show loss hint (suppressed during total break-up to avoid 10 simultaneous hints)
 	if not _player_dead:
-		# A shout, not a sentence: the part's first word ("WING LOST!").
-		player_callout("%s LOST!" % String(broken.part_name).get_slice(" ", 0))
+		# A shout, not a sentence: what it costs when that shows ("RADAR
+		# DOWN!"), else the part's first word ("WING LOST!").
+		var radar_hit := false
+		for e in effects:
+			if e is DamageSystem.DamageEffect and e.effect_type == DamageSystem.EffectType.SENSORS_LOST:
+				radar_hit = true
+		if radar_hit:
+			player_callout("RADAR DOWN!", Color("ff5a3c"))
+		else:
+			player_callout("%s LOST!" % String(broken.part_name).get_slice(" ", 0))
 
 
 func toggle_help() -> void:
@@ -4520,6 +4669,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if vp != null:
 			vp.set_input_as_handled()
 		return
+	# Without debug mode only the player's own keys work; the rest (D, K, G,
+	# the F-keys...) are developer tools (Settings > DEBUG).
+	if not Session.debug_mode and not key.keycode in PLAYER_KEYS:
+		return
 	match key.keycode:
 		KEY_F:
 			cycle_weapon()
@@ -4710,6 +4863,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if vp != null:
 		vp.set_input_as_handled()
 
+## Keys that work with debug mode off: guns, view, quick turn, back.
+const PLAYER_KEYS: Array[int] = [KEY_F, KEY_V, KEY_C, KEY_ESCAPE]
+
 ## Manual player-ship respawn (F4): rebuild the vessel into a fresh circular
 ## orbit around the current dominant body, without reloading the whole scene.
 @export var enable_manual_spawn: bool = true
@@ -4759,7 +4915,7 @@ func is_player_dead() -> bool:
 
 func announce(text: String) -> void:
 	if _hud != null:
-		_hud.show_hint(text)
+		_hud.show_hint(text, true)
 
 
 func respawn_player_ship() -> void:
@@ -4870,6 +5026,9 @@ func on_planet_destroyed(planet: Planet) -> void:
 	if not planet.has_meta("shattered"):
 		planet.set_meta("shattered", true)
 		PlanetDebrisBuilder.shatter_planet(planet, p_pos, self, 420.0, Session.planet_break_fineness, phys_world)
+	if audio != null and not planet.has_meta("boom_sounded"):
+		planet.set_meta("boom_sounded", true)
+		audio.play_planet_destruction(p_pos)
 	
 	# Hide and disable planet
 	planet.visible = false

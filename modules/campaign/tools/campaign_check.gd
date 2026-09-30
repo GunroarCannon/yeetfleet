@@ -24,6 +24,7 @@ func _initialize() -> void:
 	_check_garage()
 	_check_save_roundtrip()
 	_check_handoff()
+	_check_systems_and_next()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
 	if _failures.is_empty():
 		print("PASS campaign_check")
@@ -98,7 +99,16 @@ func _check_progress_and_pay() -> void:
 	var l0: Dictionary = secs[0]["levels"][0]
 	var l1: Dictionary = secs[0]["levels"][1]
 	_check(Campaign.is_unlocked(l0), "level 1 locked on a fresh save")
-	_check(not Campaign.is_unlocked(l1), "level 2 open before level 1 is won")
+	# Stars, not wins, open levels: the first few are free, later ones are not.
+	_check(Campaign.is_unlocked(l1), "level 2 (free) is locked")
+	var l4: Dictionary = secs[0]["levels"][3]
+	_check(not Campaign.is_unlocked(l4), "level 4 open with no stars")
+	var prev := 0
+	for n in range(1, 61):
+		var need := LevelGen.stars_needed(n)
+		_check(need >= prev and need <= 3 * (n - 1), "star gate %d for level %d is not climbable" % [need, n])
+		prev = need
+	_check(LevelGen.stars_needed(3) == 0 and LevelGen.stars_needed(10) >= 8 and LevelGen.stars_needed(10) <= 16, "star curve off (level 10 wants %d)" % LevelGen.stars_needed(10))
 	var coins := Campaign.coins()
 	var lost := Campaign.apply_result(l0, {"won": false, "time": 30.0, "kills": 1, "attempts": 2})
 	_check(int(lost["coins"]) == 0 and Campaign.coins() == coins, "a loss paid out")
@@ -106,9 +116,7 @@ func _check_progress_and_pay() -> void:
 	var win := Campaign.apply_result(l0, {"won": true, "time": 1.0, "kills": 4, "hull": 0.9})
 	_check(int(win["stars"]) == 3, "a fast full-hull win is not 3 stars (%d)" % int(win["stars"]))
 	_check(Campaign.coins() == coins + int(l0["reward"]) + 3 * Campaign.STAR_BONUS, "first win paid the wrong amount")
-	_check(Campaign.is_unlocked(l1), "winning level 1 did not open level 2")
-	# The first sector's entry opens two levels at once.
-	_check(Campaign.is_unlocked(secs[0]["levels"][2]), "level 1 does not branch into two")
+	_check(Campaign.is_unlocked(l4), "3 stars did not open level 4")
 	_check(Campaign.total_stars() == 3, "total stars not counted (%d)" % Campaign.total_stars())
 	var again := Campaign.apply_result(l0, {"won": true, "time": 1.0, "kills": 0, "hull": 0.9})
 	_check(int(again["coins"]) == int(float(l0["reward"]) * Campaign.REPLAY_PAY), "replay paid the wrong amount")
@@ -179,3 +187,41 @@ func _check_handoff() -> void:
 	Session.pending_level = {}
 	Session.pending_ship = {}
 	_done("menu → flight → menu handoff")
+
+
+## Every level has its own system (the same every time), the sandbox rolls a
+## new one with incidents, guard levels bring wingmen, and a launch lists
+## what NEXT can go to.
+func _check_systems_and_next() -> void:
+	Campaign.reset()
+	var r := [LevelGen.Turf.WILDS, LevelGen.Turf.PIRATE]
+	var a := LevelGen.level(r, 2)
+	_check(a["space"] == LevelGen.level(r, 2)["space"], "a level's system is not the same every time")
+	_check(a["space"] != LevelGen.level(r, 3)["space"], "two levels share one system")
+	_check(String((a["space"]["looks"] as Array)[0]) in LevelGen.THEME_LOOKS[LevelGen.Turf.PIRATE], "the main world ignores the theme")
+	var s1 := LevelGen.random_space(1)
+	_check(s1 != LevelGen.random_space(2) and not (s1["events"] as Array).is_empty(), "the sandbox system does not vary or has no incidents")
+	var guards := 0
+	var with_allies := 0
+	for i in 200:
+		var l := LevelGen.level([LevelGen.Turf.PIRATE, LevelGen.Turf.TRADE, i % 5], i % LevelGen.LEVELS_PER_SECTOR)
+		if String(l["kind"]) in ["escort", "capital"]:
+			guards += 1
+			if int((l["overrides"] as Dictionary).get("allies", 0)) > 0:
+				with_allies += 1
+	_check(guards > 0 and with_allies * 10 >= guards * 6, "guard levels rarely bring wingmen (%d/%d)" % [with_allies, guards])
+	var l0: Dictionary = Campaign.sectors()[0]["levels"][0]
+	Campaign.launch(l0)
+	var nxt: Array = Session.pending_level["next"]
+	_check(not nxt.is_empty() and String(nxt[0]["key"]) == String(Campaign.sectors()[0]["levels"][1]["key"]), "NEXT does not offer the level this win opens")
+	_check(not Session.space_setup.is_empty(), "a launch does not hand over its system")
+	Campaign.launch_sandbox()
+	_check(Session.pending_level.is_empty() and not Session.space_setup.is_empty(), "the sandbox has no system of its own")
+	var coins := Campaign.coins()
+	Session.level_result = {"key": "sandbox", "coins": 12}
+	Campaign.take_result()
+	_check(Campaign.coins() == coins + 12, "sandbox points did not pay out")
+	Session.pending_level = {}
+	Session.pending_ship = {}
+	Session.space_setup = {}
+	_done("level systems, sandbox systems, guard wingmen, NEXT")
