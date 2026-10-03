@@ -115,11 +115,11 @@ func _check_progress_and_pay() -> void:
 	_check(Campaign.record(l0["key"])["attempts"] == 2, "attempts not counted")
 	var win := Campaign.apply_result(l0, {"won": true, "time": 1.0, "kills": 4, "hull": 0.9})
 	_check(int(win["stars"]) == 3, "a fast full-hull win is not 3 stars (%d)" % int(win["stars"]))
-	_check(Campaign.coins() == coins + int(l0["reward"]) + 3 * Campaign.STAR_BONUS, "first win paid the wrong amount")
+	_check(Campaign.coins() == coins + int(l0["reward"]) + 3 * Campaign.star_bonus(), "first win paid the wrong amount")
 	_check(Campaign.is_unlocked(l4), "3 stars did not open level 4")
 	_check(Campaign.total_stars() == 3, "total stars not counted (%d)" % Campaign.total_stars())
 	var again := Campaign.apply_result(l0, {"won": true, "time": 1.0, "kills": 0, "hull": 0.9})
-	_check(int(again["coins"]) == int(float(l0["reward"]) * Campaign.REPLAY_PAY), "replay paid the wrong amount")
+	_check(int(again["coins"]) == int(float(l0["reward"]) * Campaign.replay_pay()), "replay paid the wrong amount")
 	# Finish the sector: the fork appears and choosing it extends the road.
 	_check(not Campaign.at_fork(), "fork before the sector is done")
 	for lvl in secs[0]["levels"]:

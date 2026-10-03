@@ -264,6 +264,14 @@ class _Paper:
 		draw_string(f, Vector2(x0, y), String(lvl["word"]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, tcol.darkened(0.25))
 		var danger: String = ["EASY", "OK", "HARD", "NASTY", "INSANE"][clampi(int(lvl["danger"]) - 1, 0, 4)]
 		draw_string(f, Vector2(x1, y), danger, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, GraffitiStyle.HOT)
+		# Who flies with you, and who against.
+		var ov: Dictionary = lvl.get("overrides", {})
+		var allies := int(ov.get("allies", 0))
+		var foes := int(ov.get("enemies", 0))
+		var crew := ("ALLIES %d" % allies) if allies > 0 else "NO ALLIES"
+		if foes > 0:
+			crew += "   FOES %d" % foes
+		draw_string(f, Vector2(w * 0.06, y), crew, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.88, lab, dimc)
 		y += row_h
 		# Tries · wins.
 		draw_string(f, Vector2(x0, y), "TRIES", HORIZONTAL_ALIGNMENT_LEFT, -1, lab, dimc)
@@ -281,7 +289,7 @@ class _Paper:
 		# Par · pay.
 		draw_string(f, Vector2(x0, y), "PAR", HORIZONTAL_ALIGNMENT_LEFT, -1, lab, dimc)
 		draw_string(nf, Vector2(x0 + fs * 2.4, y), _clock(float(lvl["par"])), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
-		var pay := int(lvl["reward"]) if int(rec["wins"]) == 0 else int(float(lvl["reward"]) * Campaign.REPLAY_PAY)
+		var pay := int(lvl["reward"]) if int(rec["wins"]) == 0 else int(float(lvl["reward"]) * Campaign.replay_pay())
 		GraffitiIcons.draw(self, "coin", Vector2(x1 + fs * 0.5, y - fs * 0.35), fs)
 		draw_string(nf, Vector2(x1 + fs * 1.3, y), "+%d" % pay, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 		# The ship.
@@ -309,9 +317,13 @@ class _Paper:
 		var chip := Rect2(Vector2(nx, sbox.position.y + sbox.size.y * 0.56), Vector2(tw + 14, nfs * 0.95))
 		GraffitiStyle.draw_slab(self, chip, ShipCatalog.type_color(t), 4.0, 2.0, Vector2.ZERO)
 		GraffitiStyle.draw_text(self, tname, chip.get_center(), int(nfs * 0.7), ink, 0)
-		if int(lvl["ship_type"]) >= 0:
-			var need := "NEEDS " + ShipCatalog.type_name(int(lvl["ship_type"]))
-			draw_string(f, Vector2(chip.end.x + 12, chip.get_center().y + nfs * 0.25), need, HORIZONTAL_ALIGNMENT_LEFT, -1, int(nfs * 0.7), GraffitiStyle.SUN)
+		# A forced type is a rule; otherwise the level only says what suits it.
+		# It sits on top of the ship box, in black.
+		var rec_t := Campaign.recommended_type(lvl)
+		if rec_t >= 0:
+			var rname := ShipCatalog.type_name(rec_t)
+			var need := ("NEEDS " + rname) if Campaign.required_type(lvl) >= 0 else Difficulty.ship_hint(rname)
+			draw_string(f, Vector2(sbox.position.x + 4.0, box_y - 8.0), need, HORIZONTAL_ALIGNMENT_LEFT, sbox.size.x, int(fs * 0.85), ink)
 		if bool(pick["loaner"]):
 			draw_set_transform(sbox.end - Vector2(w * 0.14, sbox.size.y * 0.55), -0.22)
 			var lfs := int(fs * 1.05)
@@ -327,14 +339,16 @@ class _Paper:
 		var fs := int(minf(w * 0.1, h * 0.09))
 		draw_string_outline(tf, Vector2(w * 0.1, h * 0.2), LevelGen.THEME_NAMES[fork], HORIZONTAL_ALIGNMENT_LEFT, w * 0.85, fs, 8, GraffitiStyle.INK)
 		draw_string(tf, Vector2(w * 0.1, h * 0.2), LevelGen.THEME_NAMES[fork], HORIZONTAL_ALIGNMENT_LEFT, w * 0.85, fs, col)
+		var bfs := int(clampf(fs * 0.4, 11.0, 26.0))
+		draw_multiline_string(f, Vector2(w * 0.1, h * 0.2 + bfs * 2.6), LevelGen.fork_blurb(fork, Campaign.route()), HORIZONTAL_ALIGNMENT_LEFT, w * 0.8, bfs, 3, GraffitiStyle.INK)
 		# The list shares what is left above the button (a short pad squeezes it).
 		var kinds: Dictionary = LevelGen.THEME_KINDS[fork]
 		var list_end := h - ReportPanel.fly_height(h, 1.0) - 44.0
-		var sfs := int(clampf(minf(w * 0.05, (list_end - h * 0.36) / (kinds.size() * 1.8 + 1.6)), 10.0, 40.0))
+		var sfs := int(clampf(minf(w * 0.05, (list_end - h * 0.5) / (kinds.size() * 1.8 + 1.6)), 10.0, 40.0))
 		var why := ("YOU PLAY " + Campaign.style_word()) if styled else "UNCHARTED"
-		draw_string(f, Vector2(w * 0.12, h * 0.3), why, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, GraffitiStyle.INK)
+		draw_string(f, Vector2(w * 0.12, h * 0.43), why, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, GraffitiStyle.INK)
 		# What the sector holds: the kinds of job, as words.
-		var y := h * 0.36 + sfs * 1.4
+		var y := h * 0.5 + sfs * 1.4
 		for k in kinds:
 			var info: Dictionary = LevelGen.KIND_INFO[k]
 			draw_string(f, Vector2(w * 0.14, y), String(info["word"]), HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, GraffitiStyle.INK)

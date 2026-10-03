@@ -50,8 +50,8 @@ const UI := {
 	## Something that cannot be had yet: the negative box.
 	&"locked": ["res://assets/sounds/mixit-sounds/mixkit-open-special-box-3190.mp3"],
 	&"coin": ["res://assets/sounds/mixit-sounds/mixkit-game-experience-level-increased-2062.mp3"],
-	## A single upgrade pip bought: a small, plain rising chime.
-	&"upgrade": ["res://assets/sounds/Tone1C_MajorTriadUp.ogg"],
+	## A single upgrade pip bought: a bright, lively "built it!" jingle.
+	&"upgrade": ["res://assets/sounds/mixit-sounds/mixkit-sci-fi-construction-complete-811.ogg"],
 	## A ship bought.
 	&"buy": ["res://assets/sounds/mixit-sounds/mixkit-game-experience-level-increased-2062.mp3"],
 	&"win": ["res://assets/sounds/mixit-sounds/mixkit-medieval-show-fanfare-announcement-226.ogg"],
@@ -66,11 +66,11 @@ const UI := {
 ## Loudness per id, dB, where a file is mastered louder or quieter than the rest.
 const UI_DB := {
 	&"tap": -10.0, &"back": -6.0, &"open": -4.0, &"close": -4.0, &"coin": -3.0,
-	&"launch": -5.0, &"garage": -4.0, &"upgrade": -4.0, &"win": -2.0, &"lose": -2.0, &"ship": -5.0,
+	&"launch": -5.0, &"garage": -4.0, &"upgrade": -2.0, &"win": -2.0, &"lose": -2.0, &"ship": -5.0,
 }
 ## Per id, the pitch it plays at (before the jitter): the click is pitched up
 ## to stay small.
-const UI_PITCH := {&"tap": 1.35, &"upgrade": 1.2}
+const UI_PITCH := {&"tap": 1.35, &"upgrade": 1.1}
 const UI_POOL := 6
 
 static var _host: Node = null

@@ -43,16 +43,10 @@ const SECTOR_GRAPHS: Array = [
 ## about 56 — near two stars a level in the long run, so a pilot who scrapes
 ## through everything has to go back for better runs, and one who plays well
 ## can skip ahead.
-const FREE_LEVELS := 3
-## Eras: from level [constant ERA_START], every [constant ERA_LEVELS] levels
-## the enemies step up at once — hull ×[constant ERA_HP_STEP] and damage
-## ×[constant ERA_DAMAGE_STEP] per era, on top of the slow climb — so a
-## starter ship with every pip bought starts to feel thin around level 20 and
-## outclassed by 30, and the garage's bigger hulls earn their price.
-const ERA_START := 20
-const ERA_LEVELS := 10
-const ERA_HP_STEP := 1.22
-const ERA_DAMAGE_STEP := 1.12
+const FREE_LEVELS := 1
+## Eras: see [method Difficulty.era_of] — every few levels the enemies step up at
+## once (each growth stat has its own ERA step), so a starter ship with every pip
+## bought feels thin around level 20 and the garage's bigger hulls earn their price.
 const STAR_SHARE_MAX := 0.65
 const STAR_SHARE_RAMP := 6.0
 
@@ -60,6 +54,70 @@ enum Turf { WILDS, PIRATE, TRADE, MILITARY, SWARM }
 
 ## One letter per theme: the route string is these letters joined by ".".
 const THEME_CODES: Array[String] = ["W", "P", "T", "M", "S"]
+## Ten funny one-liners per branch (indexed by theme); the fork card shows one,
+## picked once per road (see [method fork_blurb]).
+const THEME_BLURBS: Array = [
+	[
+		"So empty even the space dust asked for a day off.",
+		"Wide open lanes, zero traffic cops, and nobody to blame.",
+		"Great views, terrible snacks, one very confused rock.",
+		"The wilds: where 'are we lost?' is a lifestyle.",
+		"Peaceful, until a lone ace shows up to ruin your nap.",
+		"No signs, no maps, just vibes and a suspicious comet.",
+		"Races and cargo, plus the occasional cosmic jump-scare.",
+		"Nature is healing. Mostly by hitting you with rocks.",
+		"Bring a friend. Or at least a very good playlist.",
+		"Fresh air! Technically none, but the thought counts.",
+	],
+	[
+		"Pirates here have eyepatches, bad manners and worse aim.",
+		"Every rock hides a raider with something to prove.",
+		"Yo-ho-ho and a bottle of rocket fuel.",
+		"They'll take your cargo, your coins and your snacks.",
+		"Warning: 'pirate discount' is not an actual discount.",
+		"Ambushes at breakfast, ambushes at lunch, ambushes at dinner.",
+		"Expect a fight around every asteroid. Wear comfy pants.",
+		"Someone stole a moon here once. They're still bragging.",
+		"Loud, rude and heavily armed. So, a normal Tuesday.",
+		"The locals are friendly. The locals' guns are not.",
+	],
+	[
+		"Traffic jams in space, but with lasers.",
+		"Everyone's hauling something, and everyone's late.",
+		"Escort the convoy and try not to sneeze on the freight.",
+		"Freight lanes: glamorous as watching a truck, but explosive.",
+		"Protect the haulers! They're slow, round and very smooshable.",
+		"Please keep arms and engines inside the convoy at all times.",
+		"Honking is not allowed. Shooting, however...",
+		"A thousand crates, one tiny escort. That's you!",
+		"Delivery guaranteed or your coins back. (They won't be.)",
+		"Biggest danger: a very rude, very large cargo ship.",
+	],
+	[
+		"Two fleets, one battlefield, and absolutely no manners.",
+		"Capital ships the size of small countries. Say hi!",
+		"The war zone: now with 40% more things exploding.",
+		"Bring your A-game, your B-game and a backup game.",
+		"Sieges, big guns, and someone yelling 'incoming!'.",
+		"Fun fact: nobody here is having fun.",
+		"Medals are handed out. Mostly posthumously.",
+		"The sky is full of lasers and bad decisions.",
+		"A very loud place to take a very quiet nap.",
+		"Both sides claim to be winning. Both are wrong.",
+	],
+	[
+		"Bugs. Lots of bugs. Please don't look at the legs.",
+		"The nest hums with 10,000 tiny, extremely angry opinions.",
+		"They're small, fast, and weirdly good at teamwork.",
+		"Squish first, ask questions never.",
+		"If it skitters, shoot it. If it doesn't, shoot it anyway.",
+		"Warning: contains buzzing, clicking and mild existential dread.",
+		"They outnumber you a thousand to one. Odds are for cowards.",
+		"Free insect-themed bonus: a thousand new friends!",
+		"The nest smells like old cheese and doom.",
+		"Think of it as a very aggressive pest-control job.",
+	],
+]
 const THEME_NAMES: Array[String] = ["THE WILDS", "PIRATE TURF", "TRADE LANES", "WAR ZONE", "BUG NEST"]
 const THEME_COLORS: Array[Color] = [
 	Color("7dff3a"), Color("ff3a6e"), Color("ffc61a"), Color("35a8ff"), Color("c65bff"),
@@ -232,6 +290,15 @@ static func parse_route(code: String) -> Array[int]:
 
 ## Stars the whole campaign must hold before level [param number] (1-based)
 ## opens. Never falls as the number rises (see [constant FREE_LEVELS]).
+## The funny line for branch [param theme] on the road [param route]. Picked from
+## ten by a hash of the road and the branch, so it is the same every time the
+## card is opened (and across sessions) until the road changes.
+static func fork_blurb(theme: int, route: Array) -> String:
+	var lines: Array = THEME_BLURBS[clampi(theme, 0, THEME_BLURBS.size() - 1)]
+	var h := hash("%s/%d" % [str(route), theme])
+	return String(lines[absi(h) % lines.size()])
+
+
 static func stars_needed(number: int) -> int:
 	if number <= FREE_LEVELS:
 		return 0
@@ -243,9 +310,7 @@ static func stars_needed(number: int) -> int:
 ## Which era level [param number] is in: 0 before [constant ERA_START], then
 ## one more every [constant ERA_LEVELS] levels.
 static func era_of(number: int) -> int:
-	if number < ERA_START:
-		return 0
-	return 1 + (number - ERA_START) / ERA_LEVELS
+	return Difficulty.era_of(number)
 
 
 ## A level's key: the route that reaches its sector, then its index there.
@@ -367,25 +432,25 @@ static func level(route: Array, index: int) -> Dictionary:
 	# size, aggression, gun class, how many may shoot at once, dreadnoughts.
 	# Its own roll, so the level's other numbers are what they always were.
 	var climb := Difficulty.for_level(number, kind, _rng("climb/" + key).randf())
-	o["enemy_hp"] = snappedf(float(o["enemy_hp"]) * float(climb["hp_mult"]), 0.05)
-	o["enemy_damage"] = snappedf(float(o["enemy_damage"]) * float(climb["damage_mult"]), 0.05)
+	# The growth formulas ([method Difficulty.stat]) own the whole climb now,
+	# eras included: hull and damage are their values, not multiples of a base.
+	o["enemy_hp"] = snappedf(float(climb["hp_mult"]), 0.05)
+	o["enemy_damage"] = snappedf(float(climb["damage_mult"]), 0.05)
 	if int(o.get("enemies", 0)) > 0 and kind != "duel" and kind != "practice":
 		o["enemies"] = int(o["enemies"]) + int(climb["extra_enemies"])
 	for k: String in climb:
 		if not k in ["hp_mult", "damage_mult", "extra_enemies"]:
 			o[k] = climb[k]
 	if climb.has("ace_hp"):
-		o["enemy_hp"] = snappedf(float(o["enemy_hp"]) / 1.4 * float(climb["ace_hp"]), 0.05)
+		o["enemy_hp"] = snappedf(float(climb["hp_mult"]) * float(climb["ace_hp"]), 0.05)
 	var era := era_of(number)
-	if era > 0:
-		o["enemy_hp"] = snappedf(float(o["enemy_hp"]) * pow(ERA_HP_STEP, era), 0.05)
-		o["enemy_damage"] = snappedf(float(o["enemy_damage"]) * pow(ERA_DAMAGE_STEP, era), 0.05)
-		if o.has("boss_hp"):
-			o["boss_hp"] = snappedf(float(o["boss_hp"]) * pow(ERA_HP_STEP, era), 0.05)
 	# Guard missions come with wingmen most of the time. Its own roll, so
 	# the level's other numbers are what they always were.
 	if kind in ["escort", "capital"] and _rng("allies/" + key).randf() < 0.8:
 		o["allies"] = maxi(int(o.get("allies", 0)), 2)
+	# Never past the roster cap (enemies + allies <= 24).
+	if int(o.get("enemies", 0)) + int(o.get("allies", 0)) > 24:
+		o["enemies"] = maxi(24 - int(o.get("allies", 0)), 0)
 	# A fight is never just the fight: other kinds of foe, neutral giants
 	# drifting through, a megastructure out in the distance. Their own roll.
 	if kind in FIGHT_KINDS:
@@ -393,13 +458,14 @@ static func level(route: Array, index: int) -> Dictionary:
 			o["enemy_mix"] = FOE_MIX.get(arch, [])
 		# No neutral giants drifting through: a big ship on screen should be
 		# part of the job (the boss, the ship to guard), never scenery that
-		# reads as a target. The far-off megastructure only frames a boss.
+		# reads as a target. Nor is there a far-off megastructure: nothing on
+		# screen may out-size a boss, cosmetic or not.
 		o["bystanders"] = 0
-		if kind == "boss":
-			o["backdrop"] = 1
-	# Some levels insist on a type of ship; never in the first sector.
+		o["backdrop"] = 0
+	# Some levels name a type of ship (forced, or only recommended: see
+	# Difficulty.forces_ship); never in the first sector.
 	var ship_type := -1
-	if depth > 0 and r.randf() < 0.3 and KIND_SHIP.has(kind):
+	if depth > 0 and r.randf() < Difficulty.v("force_chance") and KIND_SHIP.has(kind):
 		ship_type = int(KIND_SHIP[kind])
 	var adj: Array = WORDS_ADJ[theme]
 	var noun: Array = WORDS_NOUN[theme]
@@ -415,6 +481,8 @@ static func level(route: Array, index: int) -> Dictionary:
 		"danger": clampi(1 + int(d * 3.0) + era + (1 if kind in ["ambush", "assault", "capital", "boss"] else 0), 1, 5),
 		"era": era,
 		"ship_type": ship_type,
+		# What suits the job, whether or not it is forced.
+		"rec_type": int(KIND_SHIP.get(kind, -1)),
 		"stars_req": stars_needed(number),
 		"unlocks": (sector_graph(route)[index] as Array).duplicate(),
 		"par": _par_time(kind, o),
@@ -422,7 +490,7 @@ static func level(route: Array, index: int) -> Dictionary:
 		# per level, with bars that rise with difficulty (see StarRating).
 		"grade": StarRating.grade_for(kind, d, seed_of("grade/" + key),
 			Difficulty.v("fight_weight") if kind in Difficulty.KILL_GRADED else 0.0, Difficulty.v("star_bar_bonus")),
-		"reward": 40 + number * 12,
+		"reward": Difficulty.level_reward(number),
 		"preset": kind,
 		"overrides": o,
 		"pic": {

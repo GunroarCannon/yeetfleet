@@ -375,6 +375,7 @@ func _check_sling_tap_fire(sp: AiSpawner) -> void:
 	# The tap's ray, from the camera at the moment of the tap.
 	var want := (cam.project_position(tap, 500.0) - cam.global_position).normalized()
 	var eye := cam.global_position
+	JuiceSettings.sling_auto_shoot = 2.0  # taps in flight only fire in Always mode
 	await _tap(tap)
 	await physics_frame
 	await physics_frame

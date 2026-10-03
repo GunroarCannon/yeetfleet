@@ -72,21 +72,45 @@ func rebuild() -> void:
 	if Campaign.at_fork():
 		_fork = Campaign.fork_options()
 	_next_key = ""
+	var past_played := Campaign.last_played_key == ""
+	var first_after := ""
 	for s in _sectors:
 		for l in s["levels"]:
-			if _next_key == "" and Campaign.is_unlocked(l) and int(Campaign.record(String(l["key"]))["wins"]) == 0:
-				_next_key = String(l["key"])
+			var k := String(l["key"])
+			var open := Campaign.is_unlocked(l) and int(Campaign.record(k)["wins"]) == 0
+			if open:
+				# The most recently opened level the pilot has not won yet...
+				_next_key = k
+				# ...unless a level was just played: then the first one open past it.
+				if past_played and first_after == "" and k != Campaign.last_played_key:
+					first_after = k
+			if k == Campaign.last_played_key:
+				past_played = true
+	if first_after != "" and Campaign.last_played_key != "":
+		_next_key = first_after
 	_layout()
 	queue_redraw()
 
 
-## Pan so the next level to play (or the fork) is in view.
+## Pan so the newest unlocked level (or the fork, when it is the newest) is in view.
 func focus_next(instant := false) -> void:
+	focus_level(_next_key, instant)
+
+
+## Pan so level [param key] is in view (the newest unlocked one when the key is
+## empty or not on the board; the fork always counts as newest).
+func focus_level(key: String, instant := false) -> void:
 	var target := Vector2.ZERO
-	for c in _cards:
-		if c.has("fork") or (c.has("lvl") and String(c["lvl"]["key"]) == _next_key):
-			target = (c["rect"] as Rect2).get_center()
-			break
+	var found := false
+	if key != "" and key != _next_key:
+		for c in _cards:
+			if c.has("lvl") and String(c["lvl"]["key"]) == key:
+				target = (c["rect"] as Rect2).get_center()
+				found = true
+	if not found:
+		for c in _cards:
+			if c.has("fork") or (c.has("lvl") and String(c["lvl"]["key"]) == _next_key):
+				target = (c["rect"] as Rect2).get_center()
 	var want := Vector2(size.x * 0.5, top_inset + (size.y - top_inset) * 0.5) - target
 	_offset = _clamp(want) if instant else _offset
 	if not instant:
@@ -423,6 +447,8 @@ func _draw_fork(c: Dictionary) -> void:
 	var fs := int(r.size.x * 0.13)
 	GraffitiStyle.draw_text(self, LevelGen.THEME_NAMES[theme], Vector2(0, -r.size.y * 0.12), fs, GraffitiStyle.INK, 0)
 	var sub := "THEY HEARD OF YOU" if bool(c["styled"]) else "UNCHARTED"
+	if not Campaign.fork_open():
+		sub = "NEEDS %d STARS" % Campaign.fork_stars_needed()
 	GraffitiStyle.draw_text(self, sub, Vector2(0, r.size.y * 0.16), int(fs * 0.62), Color.WHITE, 4)
 	draw_set_transform(_offset)
 

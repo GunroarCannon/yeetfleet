@@ -45,8 +45,9 @@ func _levels() -> void:
 		bosses = bosses and String(last["kind"]) == "boss"
 		for lvl: Dictionary in sec["levels"]:
 			var o: Dictionary = lvl["overrides"]
-			# Big scenery only where it is the job: a boss's backdrop.
-			if (int(o.get("bystanders", 0)) > 0 or o.has("backdrop")) and String(lvl["kind"]) != "boss":
+			# No big scenery anywhere: nothing may out-size a boss, and a big ship
+			# on screen elsewhere should be part of the job.
+			if int(o.get("bystanders", 0)) > 0 or int(o.get("backdrop", 0)) > 0:
 				dressed += 1
 	_report("every sector's last level is a boss fight", bosses)
 	_report("no big ships unless the level needs them", dressed == 0)
@@ -61,15 +62,15 @@ func _boss() -> void:
 	sc.start(cfg)
 	await _frames(5)
 	var boss := sc.boss
-	_report("the boss spawns, big and tough", boss != null and boss.scale_multiplier >= 3.0 and boss.max_hp >= 2000.0)
+	_report("the boss spawns, big and tough", boss != null and boss.scale_multiplier >= 6.0 and boss.max_hp >= 2000.0)
 	_report("the boss is on the enemy side", boss != null and boss.team_id == FlightScenarios.ENEMY_TEAM)
 	_report("the status line shows the boss", sc.status_line().contains("BOSS"))
 	var neutral := 0
 	for s in _root._ai_spawner.ships():
 		if is_instance_valid(s) and s.team_id == 0 and s.scale_multiplier >= 5.0:
 			neutral += 1
-	_report("neutral giants drift through", neutral == 2)
-	_report("a megastructure sits in the distance", _root.large_craft().size() == 1)
+	_report("a boss level shows no neutral giants, even when asked", neutral == 0)
+	_report("a boss level shows no megastructure, even when asked", _root.large_craft().is_empty())
 	var before := sc._enemies.size()
 	sc._boss_clock = float(cfg["boss_reinforce"]) - 0.05
 	await _seconds(0.3)
@@ -82,6 +83,20 @@ func _boss() -> void:
 	sc.stop()
 	await _frames(5)
 	_report("stop clears the scenery", _root.large_craft().is_empty())
+	# Scenery still works on levels that are not a boss fight.
+	var sk := FlightScenarios.preset("skirmish")
+	sk["bystanders"] = 2
+	sk["backdrop"] = 1
+	sc.start(sk)
+	await _frames(5)
+	var giants := 0
+	for s in _root._ai_spawner.ships():
+		if is_instance_valid(s) and s.team_id == 0 and s.scale_multiplier >= 5.0:
+			giants += 1
+	_report("neutral giants drift through a skirmish", giants == 2)
+	_report("a megastructure sits in a skirmish's distance", _root.large_craft().size() == 1)
+	sc.stop()
+	await _frames(5)
 
 
 ## A graze (reach ram) no longer pops a popcorn ship; a hard ram still does.

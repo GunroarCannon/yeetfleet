@@ -84,6 +84,8 @@ var _spawner: AiSpawner
 var _config: Dictionary
 var _markers: Array[Node3D] = []
 var _arrow: GoalPointer3D
+## Edge-of-screen chevrons for pods and packages out of view.
+var _pod_marks: CargoIndicators = null
 var _dock_hold := 0.0
 var _escort_speed := 50.0
 var _gate_axis: Array[Vector3] = []
@@ -209,6 +211,11 @@ func begin(k: int, config: Dictionary, root: FlightRoot, spawner: AiSpawner) -> 
 				# The bay: off the carrier's stern, big enough to fly into.
 				destination = pos + fwd * r * 1.1
 				_markers.append(_beacon(destination, BLUE, maxf(r * 0.3, 60.0)))
+	if kind in [Kind.DELIVER, Kind.SALVAGE] and root._hud != null:
+		_pod_marks = CargoIndicators.new()
+		_pod_marks.camera = root.camera_node()
+		_pod_marks.targets = _markers.duplicate()
+		root._hud.add_child(_pod_marks)
 	_arrow = GoalPointer3D.new()
 	var cam := root.camera_node()
 	if cam != null:
@@ -521,6 +528,9 @@ func clear() -> void:
 	if _arrow != null and is_instance_valid(_arrow):
 		_arrow.queue_free()
 	_arrow = null
+	if _pod_marks != null and is_instance_valid(_pod_marks):
+		_pod_marks.queue_free()
+	_pod_marks = null
 	for m in _markers:
 		if is_instance_valid(m):
 			m.queue_free()

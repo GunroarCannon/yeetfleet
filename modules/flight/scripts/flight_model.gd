@@ -1235,9 +1235,21 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 					p.yeet_clash(won, point)
 				if won:
 					return
+			# Like a gunshot, no single crash takes more than a share of the hull.
+			if "player_max_hp" in p:
+				dmg = minf(dmg, float(p.player_max_hp) * Difficulty.v("max_hit_share"))
 			p.take_damage(dmg, point)
 		elif p is AiShip:
 			var ai := p as AiShip
+			# One ram per gap, and never more than a share of the hull: a fast
+			# launch bruises an ace, it does not delete it.
+			var ram_now := Time.get_ticks_msec()
+			if ram_now < int(ai.get_meta("ram_until_ms", 0)):
+				return
+			var is_popcorn := ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled
+			if not is_popcorn:
+				ai.set_meta("ram_until_ms", ram_now + int(Difficulty.v("ram_gap") * 1000.0))
+				dmg = minf(dmg, ai.max_hp * Difficulty.v("ram_max_share"))
 			# Popcorn enemies (see AiFactions.ArchetypeData.popcorn): a real,
 			# hard ram pops them outright. It used to be any contact over
 			# 10 m/s, grazes included, so a brush in passing killed them.

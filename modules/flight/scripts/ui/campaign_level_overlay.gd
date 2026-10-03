@@ -424,10 +424,18 @@ func _show_card(run: Dictionary) -> void:
 	again.pressed.connect(_retry)
 	var map := _slab("MAP", GraffitiStyle.HOT)
 	map.pressed.connect(_leave)
-	row.add_child(again)
-	row.add_child(map)
-	var next_key := _next_key(run) if won else ""
+	# A win that leaves a branch to pick: NEXT is the map, where it is picked.
+	var branch_pending := won and bool(_level.get("ends_road", false))
+	var next_key := _next_key(run) if won and not branch_pending else ""
 	var next: SlabButton = null
+	if branch_pending:
+		next = _slab("NEXT", GraffitiStyle.LIME)
+		next.text_color = GraffitiStyle.INK
+		next.pressed.connect(_leave)
+		row.add_child(next)
+	else:
+		row.add_child(again)
+		row.add_child(map)
 	if next_key != "":
 		next = _slab("NEXT", GraffitiStyle.LIME)
 		next.text_color = GraffitiStyle.INK

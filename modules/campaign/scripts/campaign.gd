@@ -17,10 +17,16 @@ const SAVE_PATH := "user://campaign.json"
 const SAVE_VERSION := 1
 ## Coins a fresh pilot starts with — enough to feel rich, not to buy much.
 const START_COINS := 150
-## A replayed win pays this fraction of the level's reward.
-const REPLAY_PAY := 0.25
-## Coins per star earned for the first time.
-const STAR_BONUS := 25
+
+## A replayed win pays this fraction of the level's reward ([Difficulty]'s dial).
+static func replay_pay() -> float:
+	return Difficulty.v("replay_pay")
+
+
+## Coins per star earned for the first time ([Difficulty]'s dial).
+static func star_bonus() -> int:
+	return int(Difficulty.v("star_bonus"))
+
 
 ## Emitted after anything a screen shows changes (coins, ships, records).
 ## A static class cannot own a signal, so this lives on a tiny notifier.
@@ -207,6 +213,38 @@ static func next_pip_cost(id: String, stat: String) -> int:
 	return ShipCatalog.pip_cost(id, stat, have)
 
 
+## Losses in a row on campaign levels (a win resets it).
+static func loss_streak() -> int:
+	ensure_loaded()
+	return int((_data["stats"] as Dictionary).get("loss_streak", 0))
+
+
+## Whether the current ship has an upgrade the pilot can pay for right now.
+static func can_afford_upgrade() -> bool:
+	var id := current_ship()
+	for st: String in ShipCatalog.STATS:
+		var cost := next_pip_cost(id, st)
+		if cost >= 0 and cost <= coins():
+			return true
+	return false
+
+
+## One-time hints (kept in the saved prefs): has [param name] been shown?
+static func nudge_seen(nudge: String) -> bool:
+	return bool(Session.pref("nudge_" + nudge, false))
+
+
+static func mark_nudge(nudge: String) -> void:
+	Session.prefs["nudge_" + nudge] = true
+	Session.save_to_disk()
+
+
+## The rank step of ship [param id] with the upgrades bought so far.
+static func rank_tier(id: String) -> int:
+	ensure_loaded()
+	return ShipCatalog.rank_tier(id, (_data["pips"] as Dictionary).get(id, {}))
+
+
 static func buy_pip(id: String, stat: String) -> bool:
 	ensure_loaded()
 	var cost := next_pip_cost(id, stat)
@@ -222,11 +260,24 @@ static func buy_pip(id: String, stat: String) -> bool:
 	return true
 
 
+## The ship type [param lvl] makes the player fly (-1: any). Only when the
+## difficulty table lets levels force one ([method Difficulty.forces_ship]);
+## otherwise the level just recommends its `rec_type`/`ship_type`.
+static func required_type(lvl: Dictionary) -> int:
+	return int(lvl.get("ship_type", -1)) if Difficulty.forces_ship() else -1
+
+
+## The ship type a level suits, forced or not (-1: no leaning).
+static func recommended_type(lvl: Dictionary) -> int:
+	var t := int(lvl.get("ship_type", -1))
+	return t if t >= 0 else int(lvl.get("rec_type", -1))
+
+
 ## The ship a level will fly: the current ship when the level takes any type
 ## (or it is the right type), else the player's best owned ship of the type,
 ## else the type's loaner. `{"id", "loaner"}`.
 static func ship_for(lvl: Dictionary) -> Dictionary:
-	var want := int(lvl.get("ship_type", -1))
+	var want := required_type(lvl)
 	var cur := current_ship()
 	if want < 0 or ShipCatalog.type_of(cur) == want:
 		return {"id": cur, "loaner": false}
@@ -328,6 +379,16 @@ static func at_fork() -> bool:
 	return total_stars() >= LevelGen.stars_needed(r.size() * LevelGen.LEVELS_PER_SECTOR + 1)
 
 
+## Stars the next branch asks for: the first level of the sector it opens.
+static func fork_stars_needed() -> int:
+	return LevelGen.stars_needed(route().size() * LevelGen.LEVELS_PER_SECTOR + 1)
+
+
+## Whether the pilot holds the stars to take a branch.
+static func fork_open() -> bool:
+	return total_stars() >= fork_stars_needed()
+
+
 ## The two themes the road forks into next.
 static func fork_options() -> Array[int]:
 	return LevelGen.fork_options(route(), style_theme())
@@ -335,7 +396,7 @@ static func fork_options() -> Array[int]:
 
 ## Take the fork toward [param theme].
 static func choose_fork(theme: int) -> void:
-	if not at_fork() or not theme in fork_options():
+	if not at_fork() or not fork_open() or not theme in fork_options():
 		return
 	(_data["route"] as Array).append(LevelGen.THEME_CODES[theme])
 	save_to_disk()
@@ -368,9 +429,17 @@ static func style_word() -> String:
 
 # --- Flights ------------------------------------------------------------------
 
+## The level last flown, and whether the map has been shown yet this run (both
+## survive the menu <-> flight scene changes): the map re-opens on the level
+## just played, and on the newest unlocked one only the first time or after a
+## fresh unlock.
+static var last_played_key := ""
+static var map_seen := false
+
 ## Hand a level to the flight scene: the scenario, the ship, and the key the
 ## result will come back under. The caller changes scene afterwards.
 static func launch(lvl: Dictionary) -> void:
+	last_played_key = String(lvl["key"])
 	var pick := ship_for(lvl)
 	Session.pending_level = {
 		"key": String(lvl["key"]), "preset": String(lvl["preset"]),
@@ -383,6 +452,8 @@ static func launch(lvl: Dictionary) -> void:
 		# What NEXT on the win card can go to (see [method next_candidates]).
 		"next": next_candidates(lvl),
 		"stars_now": total_stars(),
+		# Winning the last level on the road leaves a branch to choose on the map.
+		"ends_road": String(lvl["key"]) == LevelGen.level_key(route(), LevelGen.LEVELS_PER_SECTOR - 1),
 		"stars_here": int(record(String(lvl["key"]))["stars"]),
 	}
 	Session.pending_ship = flight_ship(String(pick["id"]), bool(pick["loaner"]))
@@ -407,6 +478,11 @@ static func next_candidates(lvl: Dictionary) -> Array:
 			if k != here and record(k)["wins"] == 0 and is_unlocked(other) 					and not out.any(func(c: Dictionary) -> bool: return c["key"] == k):
 				out.append({"key": k, "stars_req": int(other["stars_req"])})
 	return out
+
+
+## True once the pilot has finished flight school (set by the flight tutorial).
+static func tutorial_done() -> bool:
+	return bool(Session.pref("tutorial_done", false))
 
 
 ## The tutorial as a level on the map: flight school against a few drones,
@@ -479,8 +555,8 @@ static func apply_result(lvl: Dictionary, res: Dictionary) -> Dictionary:
 		var best := float(rec.get("best", 0.0))
 		rec["best"] = time if best <= 0.0 else minf(best, time)
 		rec["stars"] = maxi(old_stars, stars)
-		pay = int(lvl["reward"]) if first_win else int(float(lvl["reward"]) * REPLAY_PAY)
-		pay += maxi(0, stars - old_stars) * STAR_BONUS
+		pay = int(lvl["reward"]) if first_win else int(float(lvl["reward"]) * replay_pay())
+		pay += maxi(0, stars - old_stars) * star_bonus()
 		st["wins"] = int(st.get("wins", 0)) + 1
 		var kind := String(lvl["kind"])
 		if kind in ["courier", "race", "salvage", "dock", "escort", "capital", "protect", "voyage"]:
@@ -488,6 +564,9 @@ static func apply_result(lvl: Dictionary, res: Dictionary) -> Dictionary:
 		else:
 			st["fight_wins"] = int(st.get("fight_wins", 0)) + 1
 	levels[key] = rec
+	# RETRY on the loss card re-runs the level without leaving it, so a visit
+	# can hold many losses: every try but a winning last one was a loss.
+	st["loss_streak"] = 0 if won else int(st.get("loss_streak", 0)) + tries
 	_data["coins"] = coins() + pay
 	save_to_disk()
 	notifier.changed.emit()

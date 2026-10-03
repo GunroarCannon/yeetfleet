@@ -83,7 +83,7 @@ const DEFAULTS := {
 	# (and the level's enemy_hp), calling [code]boss_guards[/code] fresh guards
 	# every [code]boss_reinforce[/code] seconds while it lives (0 = never).
 	"boss": false,
-	"boss_size": 3.5,
+	"boss_size": 6.5,
 	"boss_hp": 1.0,
 	"boss_reinforce": 0.0,
 	"boss_guards": 2,
@@ -109,7 +109,7 @@ const DEFAULTS := {
 	"boss_preset": "",
 	# Heavy dreadnoughts (the keel_dreadnought hull) in the first wave.
 	"dreadnoughts": 0,
-	"dreadnought_size": 2.4,
+	"dreadnought_size": 3.0,
 	"dreadnought_hp": 5.0,
 }
 
@@ -147,7 +147,7 @@ const PRESETS := {
 	"boss": {
 		"name": "Boss fight", "desc": "A huge warship and its guards block the road. Wreck the boss.",
 		"enemies": 3, "enemy_arch": "Military squad", "enemy_distance": 900.0, "allies": 2,
-		"boss": true, "boss_reinforce": 26.0, "enemy_mix": ["Strike team"], "backdrop": 1,
+		"boss": true, "boss_reinforce": 26.0, "enemy_mix": ["Strike team"], "backdrop": 0,
 	},
 }
 const OBJECTIVE_PRESETS := {
@@ -565,7 +565,7 @@ func _spawn_boss() -> void:
 	var ship_x := _root.model.global_transform
 	var fwd := -ship_x.basis.z
 	var up := ship_x.basis.y
-	var pos := ship_x.origin + fwd * (float(config["enemy_distance"]) + 250.0)
+	var pos := ship_x.origin + fwd * (float(config["enemy_distance"]) + 250.0 + maxf(float(config["boss_size"]) - 3.5, 0.0) * 40.0)
 	var arch := AiFactions.create(int(FIGHTER_ARCHETYPES.get(String(config["enemy_arch"]), AiFactions.Archetype.MILITARY_SQUAD)))
 	var xf := Transform3D(Basis.looking_at(-fwd, up), pos)
 	boss = _spawner.spawn_big(xf, float(config["boss_size"]), ENEMY_TEAM, arch, String(config.get("boss_preset", "")))
@@ -618,6 +618,9 @@ func _tick_boss(delta: float) -> void:
 ## megastructures out in the distance. They fight no one; they are there to
 ## make the place feel lived in (and to be flown past).
 func _spawn_scenery() -> void:
+	# Nothing on screen may out-size a boss, cosmetic or not.
+	if bool(config.get("boss", false)):
+		return
 	var ship_x := _root.model.global_transform
 	var fwd := -ship_x.basis.z
 	var right := ship_x.basis.x
@@ -698,7 +701,10 @@ func _spawn_dreadnought(i: int) -> void:
 	var pos := ship_x.origin + fwd * (float(config["enemy_distance"]) + 350.0) + ship_x.basis.x * side * 320.0
 	var xf := Transform3D(Basis.looking_at(-fwd, ship_x.basis.y), pos)
 	var arch := AiFactions.create(AiFactions.Archetype.MILITARY_SQUAD)
-	var d := _spawner.spawn_big(xf, float(config.get("dreadnought_size", 2.4)), ENEMY_TEAM, arch, Difficulty.DREADNOUGHT_PRESET)
+	var d_size := float(config.get("dreadnought_size", 3.0))
+	if bool(config.get("boss", false)):
+		d_size = minf(d_size, float(config["boss_size"]) * 0.6)
+	var d := _spawner.spawn_big(xf, d_size, ENEMY_TEAM, arch, Difficulty.DREADNOUGHT_PRESET)
 	if d == null:
 		return
 	_place(d, xf)

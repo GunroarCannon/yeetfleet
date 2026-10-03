@@ -701,6 +701,10 @@ func _turn_ref(target: Quaternion, step: float, dt: float) -> Quaternion:
 	if follow_dir.is_valid():
 		var ang := _ref_quat.angle_to(target)
 		var most := deg_to_rad(JuiceSettings.cam_max_turn_deg) * dt
+		# A launch (or a bounce) that sends the ship far off the view's line must
+		# not leave it showing the ship's front: wide turns swing up to 3x faster,
+		# narrow ones stay as gentle as before.
+		most *= 1.0 + 2.0 * smoothstep(0.5, 1.8, ang)
 		if ang > 1e-4 and ang * step > most:
 			step = most / ang
 	return _ref_quat.slerp(target, step)

@@ -17,13 +17,10 @@
 class_name StarRating
 extends RefCounted
 
-## At or under this share of par, speed scores full marks…
-const FAST := 0.7
-## …and at this share, none.
-const SLOW := 1.8
-## The bars at difficulty 0 and how much they rise at the top (d = 1.6).
-const BAR_TWO := Vector2(0.4, 0.2)
-const BAR_THREE := Vector2(0.66, 0.24)
+## Speed, the bars and how they rise are Difficulty dials (star_fast,
+## star_slow, star_two_*, star_three_*): speed scores full marks at or under
+## star_fast of par and nothing at star_slow; the bars rise from their base by
+## their rise at the top difficulty (d = 1.6).
 ## Kinds with a ship to guard.
 const GUARD_KINDS: Array[String] = ["escort", "capital", "protect"]
 ## Kinds that are about getting somewhere fast: speed is always weighted.
@@ -56,8 +53,8 @@ static func grade_for(kind: String, d: float, seed: int, fight_weight := 0.0, ba
 	var k2 := clampf(d / 1.6, 0.0, 1.0)
 	return {
 		"weights": w,
-		"bar": [snappedf(BAR_TWO.x + BAR_TWO.y * k2 + bar_bonus, 0.01),
-			snappedf(minf(BAR_THREE.x + BAR_THREE.y * k2 + bar_bonus, 0.94), 0.01)],
+		"bar": [snappedf(Difficulty.v("star_two_base") + Difficulty.v("star_two_rise") * k2 + bar_bonus, 0.01),
+			snappedf(minf(Difficulty.v("star_three_base") + Difficulty.v("star_three_rise") * k2 + bar_bonus, 0.94), 0.01)],
 		"focus": focus,
 	}
 
@@ -78,7 +75,9 @@ static func score(grade: Dictionary, par: float, run: Dictionary) -> float:
 				if par <= 0.0:
 					continue
 				var share := float(run.get("time", 0.0)) / par
-				v = clampf((SLOW - share) / (SLOW - FAST), 0.0, 1.0)
+				var fast := Difficulty.v("star_fast")
+				var slow := maxf(Difficulty.v("star_slow"), fast + 0.05)
+				v = clampf((slow - share) / (slow - fast), 0.0, 1.0)
 			"guard":
 				var g := float(run.get("guard", -1.0))
 				if g < 0.0:

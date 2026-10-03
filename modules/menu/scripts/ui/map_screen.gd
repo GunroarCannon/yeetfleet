@@ -69,7 +69,11 @@ func layout() -> void:
 func opened() -> void:
 	layout()
 	_map.rebuild()
-	_map.focus_next(true)
+	# The newest unlocked level on the first look this run, or when the flight
+	# just opened something new; otherwise the level that was just played.
+	var fresh := not Campaign.map_seen or bool(menu.last_result.get("first_win", false))
+	Campaign.map_seen = true
+	_map.focus_level("" if fresh else Campaign.last_played_key, true)
 	_map.grab_focus.call_deferred()
 	# Back from picking a ship for a level: its report again.
 	if not menu.reopen_level.is_empty():
@@ -79,7 +83,19 @@ func opened() -> void:
 	# flight, and a bail-out to the map wants the map, not "TRY AGAIN".
 	if bool(menu.last_result.get("won", false)):
 		_show_payout(menu.last_result)
+	elif not menu.last_result.is_empty() and Campaign.loss_streak() >= 2 			and not Campaign.nudge_seen("upgrade") and Campaign.can_afford_upgrade():
+		_nudge_upgrade()
 	menu.last_result = {}
+
+
+## Losing run + coins in hand, once: the only way on is the garage, hand pointing.
+func _nudge_upgrade() -> void:
+	Campaign.mark_nudge("upgrade")
+	var pop := NudgePopup.make("STUCK?",
+		"You have coins to spend. Upgrade your ship's hull, guns or speed and the fights get a lot easier.",
+		"TO THE GARAGE", true)
+	pop.chosen.connect(func() -> void: menu.go(MenuRoot.Screen.GARAGE))
+	add_child(pop)
 
 
 func back() -> bool:
@@ -145,6 +161,11 @@ func _on_level(lvl: Dictionary) -> void:
 
 
 func _on_fork(theme: int) -> void:
+	if not Campaign.fork_open():
+		GameAudio.ui(&"locked")
+		var more := Campaign.fork_stars_needed() - Campaign.total_stars()
+		_show_toast("GET %d MORE STAR%s" % [more, "" if more == 1 else "S"])
+		return
 	_report.show_fork(theme, theme == Campaign.fork_options()[1])
 
 

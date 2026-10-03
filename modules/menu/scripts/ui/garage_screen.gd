@@ -103,6 +103,12 @@ func opened() -> void:
 	_rebuild_list(start)
 	layout()
 	_action.grab_focus.call_deferred()
+	# Right after the upgrade hint: other ships can be bought too.
+	if Campaign.nudge_seen("upgrade") and not Campaign.nudge_seen("ships") and not _picking():
+		Campaign.mark_nudge("ships")
+		add_child(NudgePopup.make("MORE SHIPS",
+			"You can also buy other ships here. Tap the SHOP tab to see what each one does.",
+			"GOT IT", false))
 
 
 func back() -> bool:
@@ -125,7 +131,7 @@ func _picking() -> bool:
 func _allowed(id: String) -> bool:
 	if not _picking():
 		return true
-	var want := int(menu.ship_pick_level.get("ship_type", -1))
+	var want := Campaign.required_type(menu.ship_pick_level)
 	return want < 0 or ShipCatalog.type_of(id) == want
 
 
@@ -192,6 +198,7 @@ func _refresh() -> void:
 	_prev.visible = many
 	_next.visible = many
 	_panel.ship_id = id
+	_panel.set_rank(Campaign.rank_tier(id) if id != "" else -1)
 	var owned := id != "" and Campaign.owns(id)
 	# Hangar teasers are shadows; the shop shows the paint it is selling (and
 	# a picker's loaner is shown in full: it is the ship flown).
@@ -222,7 +229,7 @@ func _refresh() -> void:
 		_action.text_color = GraffitiStyle.INK if ok else Color.WHITE
 		_action.disabled = not ok
 		if not ok:
-			_action.sub = "NEEDS " + ShipCatalog.type_name(int(menu.ship_pick_level.get("ship_type", -1)))
+			_action.sub = "NEEDS " + ShipCatalog.type_name(Campaign.required_type(menu.ship_pick_level))
 	elif owned:
 		var flying := Campaign.current_ship() == id
 		_action.text = "FLYING" if flying else "FLY THIS"
@@ -268,8 +275,24 @@ func _on_action() -> void:
 
 
 func _on_buy_pip(stat: String) -> void:
-	if Campaign.buy_pip(current_id(), stat):
-		GameAudio.ui(&"upgrade")
+	var id := current_id()
+	var before := Campaign.rank_tier(id)
+	if Campaign.buy_pip(id, stat):
+		GameAudio.ui(&"upgrade", 0.08)
+		var after := Campaign.rank_tier(id)
+		if after != before:
+			_panel.rank_up(before, after)
+			GameAudio.ui(&"power_up", 0.02)
+			_shake(0.3, 9.0)
+
+
+## A short screen shake: the whole garage jolts and settles.
+func _shake(time: float, power: float) -> void:
+	var tw := create_tween()
+	tw.tween_method(func(v: float) -> void:
+		var k := (1.0 - v) * power
+		position = Vector2(randf_range(-k, k), randf_range(-k, k)), 0.0, 1.0, time)
+	tw.tween_callback(func() -> void: position = Vector2.ZERO)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -366,6 +389,8 @@ class _Panel:
 		var name := String(row["name"]).to_upper()
 		draw_string_outline(tf, Vector2(24, size.y * 0.13), name, HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.62, fs, 8, Color.BLACK)
 		draw_string(tf, Vector2(24, size.y * 0.13), name, HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.62, fs, GraffitiStyle.LIME)
+		var name_w := minf(tf.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, size.x * 0.62)
+		_draw_rank(Vector2(24.0 + name_w + fs * 1.1, size.y * 0.13 - fs * 0.32), fs)
 		var f := GraffitiStyle.head_font()
 		var cfs := int(size.y * 0.042)
 		var tname := ShipCatalog.type_name(t)
@@ -382,6 +407,66 @@ class _Panel:
 			status = "LOCKED"
 			col = GraffitiStyle.HOT
 		GraffitiStyle.draw_text(self, status, Vector2(size.x - 70, size.y * 0.1), cfs, col, 4)
+
+	# --- Rank stamp ---
+	## The rank step shown now, the one it replaces, and how far the swap is
+	## (0 = just started, 1 = done).
+	var rank := -1
+	var _old_rank := -1
+	var _swap := 1.0
+	## The stamp's tilt: a new rank lands at a random angle.
+	var _rot := -0.16
+
+	## Show [param tier] straight away (a ship change or a refresh).
+	func set_rank(tier: int) -> void:
+		if _swap < 1.0:
+			rank = tier
+			return
+		if tier != rank:
+			_rot = -0.16
+		rank = tier
+		_old_rank = tier
+		queue_redraw()
+
+	## Swap [param from] for [param to]: the old stamp swells and fades while the
+	## new one drops in from bigger and fades in.
+	func rank_up(from: int, to: int) -> void:
+		_old_rank = from
+		rank = to
+		_rot = randf_range(-0.5, 0.5)
+		_swap = 0.0
+		var tw := create_tween()
+		tw.tween_method(func(v: float) -> void:
+			_swap = v
+			queue_redraw(), 0.0, 1.0, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	func _draw_rank(at: Vector2, fs: int) -> void:
+		if rank < 0:
+			return
+		if _swap < 1.0 and _old_rank != rank:
+			_stamp(at, fs, _old_rank, 1.0 + _swap * 1.4, 1.0 - _swap)
+			_stamp(at, fs, rank, lerpf(2.2, 1.0, _swap), clampf(_swap * 1.6, 0.0, 1.0))
+		else:
+			_stamp(at, fs, rank, 1.0, 1.0)
+
+	func _stamp(at: Vector2, fs: int, tier: int, k: float, alpha: float) -> void:
+		var text := ShipCatalog.rank_name(tier)
+		var cols: Array[Color] = [Color("a49cbc"), Color("7fa8ff"), GraffitiStyle.LIME, GraffitiStyle.CYAN,
+			GraffitiStyle.SUN, GraffitiStyle.ORANGE, GraffitiStyle.HOT, GraffitiStyle.VIOLET, Color("fff3a8")]
+		var col := cols[ShipCatalog.rank_family(tier)]
+		col.a = alpha
+		var ink := GraffitiStyle.INK
+		ink.a = alpha
+		var f := GraffitiStyle.title_font()
+		var sfs := int(fs * 0.8 * k)
+		var tw := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs).x
+		draw_set_transform(at, _rot if tier == rank else -0.16)
+		var box := Rect2(Vector2(-tw * 0.5 - sfs * 0.28, -sfs * 0.9), Vector2(tw + sfs * 0.56, sfs * 1.15))
+		draw_rect(box, Color(ink, alpha * 0.55))
+		draw_rect(box, col, false, maxf(3.0, sfs * 0.09))
+		draw_string_outline(f, Vector2(-tw * 0.5, 0.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, 6, ink)
+		draw_string(f, Vector2(-tw * 0.5, 0.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs, col)
+		draw_set_transform(Vector2.ZERO)
 
 
 ## One upgrade track: its name, the ship's own rating as grey blocks, the
@@ -444,18 +529,23 @@ class _StatRow:
 		var pips := Campaign.pips(ship_id, stat)
 		var x := size.x * 0.28
 		var avail := size.x - x - clampf(size.x * 0.3, 92.0, 150.0) - 20.0
-		var cell := minf(avail / 10.5, h * 0.5)
-		# Only the cells this hull can ever fill: its own rating plus every pip
-		# it can buy. A maxed track is then a full bar, beside its MAX.
-		for i in mini(base + ShipCatalog.MAX_PIPS, 10):
+		# One scale for every ship: ten cells, always. A ship's own rating plus the
+		# pips it can buy fills some of them; the rest stay empty (and the ones it
+		# can never reach are drawn fainter), so a full bar on a small ship is never
+		# mistaken for a full bar on a big one. The total is written under it.
+		var cells := 10
+		var cell := minf(avail / (float(cells) + 2.4), h * 0.5)
+		var reach := mini(base + ShipCatalog.MAX_PIPS, cells)
+		for i in cells:
 			var r := Rect2(Vector2(x + i * cell * 1.05, h * 0.5 - cell * 0.5), Vector2(cell * 0.86, cell))
-			var col := Color(1, 1, 1, 0.18)
+			var col := Color(1, 1, 1, 0.18) if i < reach else Color(1, 1, 1, 0.05)
 			if i < base:
 				col = Color("8f86a8")
 			elif i < base + pips:
 				col = GraffitiStyle.LIME
-			draw_rect(r.grow(1.5), GraffitiStyle.INK)
+			draw_rect(r.grow(1.5), GraffitiStyle.INK if i < reach else Color(0, 0, 0, 0.35))
 			draw_rect(r, col)
-		# What a pip is worth on this hull, as a percentage.
-		var gain := int(round((ShipCatalog.stat_mult(ship_id, stat, 1) - 1.0) * 100.0))
-		f.draw_string(get_canvas_item(), Vector2(x, h * 0.98), "+%d%% EACH" % gain, HORIZONTAL_ALIGNMENT_LEFT, -1, int(h * 0.2), GraffitiStyle.DIM)
+		# The total, x50 so a strong hull reads as heavy, under the bar in the
+		# small dim type the upgrade gain used to use.
+		var total := mini(base + pips, cells)
+		f.draw_string(get_canvas_item(), Vector2(x, h * 0.98), str(total * 50), HORIZONTAL_ALIGNMENT_LEFT, -1, int(h * 0.2), GraffitiStyle.DIM)

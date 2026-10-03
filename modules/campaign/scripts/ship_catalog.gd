@@ -163,3 +163,36 @@ static func stat_mult(id: String, stat: String, pips: int) -> float:
 ## fraction per pip, out of [constant MAX_PIPS] + its base.
 static func rating(id: String, stat: String) -> int:
 	return int((get_ship(id).get("base", {}) as Dictionary).get(stat, 1))
+
+
+# --- Rank --------------------------------------------------------------------
+
+## The rank letters, worst to best; each has a plain, + and ++ step.
+const RANK_LETTERS: Array[String] = ["F", "E", "D", "C", "B", "A", "AA", "S", "SSS"]
+## How much each track counts toward the rank: hull and guns matter most.
+const RANK_WEIGHTS := {"hull": 1.3, "guns": 1.3, "speed": 1.0, "yeet": 0.8}
+
+
+## The rank step (0 = F … 26 = SSS++) of ship [param id] with [param pips]
+## ({stat: bought pips}). The weighted total of its tracks (rating + pips, out
+## of ten) spread across every step, so a pip is worth a step or less.
+static func rank_tier(id: String, pips: Dictionary) -> int:
+	var sum := 0.0
+	var weight := 0.0
+	for st: String in STATS:
+		var w := float(RANK_WEIGHTS.get(st, 1.0))
+		sum += w * minf(float(rating(id, st) + int(pips.get(st, 0))), 10.0) / 10.0
+		weight += w
+	var steps := RANK_LETTERS.size() * 3
+	return clampi(int(sum / maxf(weight, 0.001) * steps), 0, steps - 1)
+
+
+## "B+", "SSS++" … for a rank step.
+static func rank_name(tier: int) -> String:
+	var t := clampi(tier, 0, RANK_LETTERS.size() * 3 - 1)
+	return RANK_LETTERS[t / 3] + ["", "+", "++"][t % 3]
+
+
+## The letter family's index (0 = F … 8 = SSS), for colouring.
+static func rank_family(tier: int) -> int:
+	return clampi(tier, 0, RANK_LETTERS.size() * 3 - 1) / 3

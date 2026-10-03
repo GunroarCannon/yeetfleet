@@ -25,7 +25,7 @@ const DEFAULTS_DIR := "res://data/game_defaults/"
 
 ## Session [member Session.prefs] keys that are debug/testing state, not
 ## tuning: never baked into what ships.
-const SKIP_PREFS: Array[String] = ["time_scale", "warp", "mobile_layout", "tutorial_done", "welcomed"]
+const SKIP_PREFS: Array[String] = ["time_scale", "warp", "mobile_layout", "tutorial_done", "welcomed", "nudge_upgrade", "nudge_ships"]
 ## Top-level keys that are the developer's own state, never baked: debug
 ## mode is on in the editor but must ship off.
 const SKIP_KEYS: Array[String] = ["debug_mode"]

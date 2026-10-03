@@ -84,6 +84,12 @@ const MODULES: Array[Dictionary] = [
 		"tagline": "Explosion & destruction testbed — spawn targets, click & trigger blast waves, impacts, shatter.",
 	},
 	{
+		"id": "difficulty",
+		"name": "Difficulty Lab",
+		"scene": "res://modules/difficulty/difficulty_lab.tscn",
+		"tagline": "Edit the one JSON the whole game plays: dials, Easy/Normal/Hard, level curves, rewards, ship picks.",
+	},
+	{
 		"id": "font_lab",
 		"name": "Font Lab",
 		"scene": "res://modules/font_lab/font_lab.tscn",

@@ -811,6 +811,8 @@ func _build_incident_director() -> void:
 	incident_director.world_parent = self
 	# Wordy incident banners are a debug read-out; players get a short one.
 	incident_director.quiet = not Session.debug_mode
+	# Random incidents (meteors, factions, distress calls…) are a debug read-out too.
+	incident_director.auto_spawn = Session.debug_mode
 	if _hud != null:
 		incident_director.hud_container = _hud.get_event_container()
 	add_child(incident_director)
@@ -2052,12 +2054,17 @@ func _read_keyboard(delta: float) -> void:
 		pass
 
 	if _player_dead:
+		# A wreck does not shoot: let go of every trigger, whoever pulled it.
+		_button_firing = false
+		var dead_sys := active_systems()
+		if dead_sys != null:
+			dead_sys.set_firing(false)
 		return
 
 	flight.command.boost = Input.is_action_pressed("flight_boost") or _button_boost
 	var sys_active := active_systems()
 	if sys_active != null:
-		sys_active.set_firing(Input.is_action_pressed("flight_fire") or _button_firing)
+		sys_active.set_firing(not _player_dead and (Input.is_action_pressed("flight_fire") or _button_firing))
 
 
 func _on_systems_state(energy: float, heat: float, _notes: String) -> void:
@@ -2119,6 +2126,8 @@ func set_roll(value: float) -> void:
 
 
 func set_firing(value: bool) -> void:
+	if _player_dead:
+		value = false
 	if value and not _button_firing:
 		tutorial_note("fire")
 	_button_firing = value
@@ -2390,7 +2399,7 @@ func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 		return
 	# The debugger's god mode and damage-taken dial (see CombatStatsPanel), over
 	# the player's own toughness (the hero's hull is sturdier than the AI's).
-	amount *= JuiceSettings.player_damage_taken_mult / maxf(JuiceSettings.player_toughness, 0.05)
+	amount *= JuiceSettings.player_damage_taken_mult * Difficulty.v("damage_taken") / maxf(JuiceSettings.player_toughness, 0.05)
 	amount /= maxf(upgrade("hull"), 0.05)
 	if JuiceSettings.player_invulnerable or amount <= 0.0 or in_respawn_grace():
 		return
@@ -3178,7 +3187,7 @@ func _enemy_hit(amount: float, ship: AiShip) -> float:
 	amount *= JuiceSettings.enemy_damage_mult * Difficulty.v("enemy_bite")
 	if ship != null and JuiceSettings.ai_real_projectiles:
 		amount *= ship._weapon_mult
-	var taken := JuiceSettings.player_damage_taken_mult / maxf(JuiceSettings.player_toughness, 0.05) \
+	var taken := JuiceSettings.player_damage_taken_mult * Difficulty.v("damage_taken") / maxf(JuiceSettings.player_toughness, 0.05) \
 		/ maxf(upgrade("hull"), 0.05)
 	var cap := player_max_hp * Difficulty.v("max_hit_share")
 	if cap > 0.0 and taken > 0.0:
@@ -3206,7 +3215,7 @@ func pilot_damage(ship: AiShip, amount: float, source: Object) -> float:
 		if JuiceSettings.ai_real_projectiles:
 			amount *= s_ship._weapon_mult if s_ship != null else 1.0
 	_last_hit_ms = Time.get_ticks_msec()
-	return amount * JuiceSettings.enemy_damage_mult * JuiceSettings.player_damage_taken_mult 		/ maxf(JuiceSettings.player_toughness, 0.05) / maxf(upgrade("hull"), 0.05)
+	return amount * JuiceSettings.enemy_damage_mult * JuiceSettings.player_damage_taken_mult * Difficulty.v("damage_taken") 		/ maxf(JuiceSettings.player_toughness, 0.05) / maxf(upgrade("hull"), 0.05)
 
 
 # --- Interaction markers ---------------------------------------------------------

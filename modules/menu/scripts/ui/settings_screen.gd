@@ -17,9 +17,7 @@ const VOLUMES: Array[float] = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
 const SLIDE_TIME := 0.42
 const GRAPHICS: Array[String] = ["Smoothest", "Balanced", "Best quality"]
 const GRAPHICS_WORDS: Array[String] = ["SMOOTH", "BALANCED", "BEST"]
-## Difficulty: [damage the player takes, enemy hull].
-## NORMAL used to be 1.0 / 1.0, which played too easy.
-const DIFFICULTY := [[0.7, 0.85], [1.25, 1.2], [1.9, 1.6]]
+## Difficulty: the presets of [Difficulty] (its table is edited in the workbench).
 const DIFFICULTY_WORDS: Array[String] = ["EASY", "NORMAL", "HARD"]
 ## [member JuiceSettings.sling_aim_style]: opposite the pull, round the dome, smart.
 const AIM_STYLE_WORDS: Array[String] = ["CLASSIC", "DOME", "SMART"]
@@ -61,6 +59,60 @@ func _ready() -> void:
 	layout()
 
 
+## Hover/long-press help for each row, keyed by its label.
+const TIPS := {
+	"CONTROLS": "How you steer: swipe, slingshot or first-person. Tap to cycle.",
+	"SOUND": "Effects volume.",
+	"MUSIC": "Music volume.",
+	"SHAKE": "FULL shakes the screen on hits; LESS tones the camera shake down.",
+	"GAMEPLAY": "Camera distances, fling feel, kill cam and control details.",
+	"PERFORMANCE": "Graphics quality and battery settings.",
+	"DIFFICULTY": "How hard the fights are: Easy, Normal or Hard.",
+	"ACCESSIBILITY": "Flashes, slow-motion, freeze frames and callouts.",
+	"RESET PROGRESS": "Wipes coins, ships and level records. Asks twice.",
+	"WORKBENCH": "Developer builder and labs.",
+	"SHIP FACES": "Little faces on ships that react to the fight.",
+	"GRAPHICS": "Overall look: higher is prettier, lower is faster.",
+	"BATTERY SAVER": "Caps the frame rate and trims effects to save battery.",
+	"SHADOWS": "Off, sun only, or all lights casting shadows.",
+	"GLOW": "Bloom glow on bright things like engines and shots.",
+	"RESOLUTION": "Render scale. Lower is faster but softer.",
+	"MAX SHIPS": "Most AI ships alive at once.",
+	"EFFECTS": "How many particle effects can play at once.",
+	"WRECKAGE": "How many wreck pieces stay around.",
+	"CAMERA AT REST": "How far back the camera sits while you are aiming.",
+	"CAMERA CLOSEST": "How close the camera can get to your ship.",
+	"FLING ZOOM OUT": "How far the camera pulls out as you stretch the sling.",
+	"CAMERA FURTHEST": "Farthest the camera drifts out at speed.",
+	"LOOK AHEAD": "Camera leans toward where you are heading.",
+	"LOOK AHEAD TIME": "How many seconds ahead the camera looks.",
+	"AIM LOOK AHEAD": "Camera leans along your aim while you pull back.",
+	"AIM ZOOM OUT": "Extra zoom out while aiming.",
+	"EASE IN NEAR SHIPS": "Camera eases in when other ships are close.",
+	"FLING POWER": "How hard a full pull launches your ship.",
+	"FLING AIM": "Aim style: classic, dome or smart.",
+	"AIM INTO SCREEN": "How much of your aim goes into the screen (depth).",
+	"GRAB AREA": "How big the touch area around your ship is.",
+	"LAUNCH MAGNET": "Pulls your launch toward the nearest enemy.",
+	"CAMERA SWING SPEED": "How quickly camera gestures turn the view.",
+	"CAMERA BEHIND IN FLIGHT": "Keeps the camera behind your ship while you fly.",
+	"CAMERA TURN SPEED": "Fastest the camera may rotate, in degrees per second.",
+	"KILL CAM": "Slow-motion replay of big kills.",
+	"KILL CAM CHANCE": "How often a kill gets the kill cam.",
+	"KILL CAM LENGTH": "How long the kill cam lasts.",
+	"KILL CAM SLOW-MO": "How slow time runs during the kill cam.",
+	"PINCH ZOOM": "Pinch with two fingers to zoom the camera.",
+	"DRAG TO LOOK": "Drag away from your ship to turn the camera.",
+	"AIM ASSIST": "Nudges your shots toward targets.",
+	"AUTO AIM": "Tapping the sling picks a target for you.",
+	"AUTO FIRE": "Guns fire by themselves: off, when aimed, or always.",
+	"POWER-UPS": "Pickups that drop from wrecks.",
+	"FLASHES": "Screen flashes on kills and hits.",
+	"SLOW-MO": "Brief slow-motion on near misses.",
+	"FREEZE FRAMES": "A split-second freeze on kills.",
+	"CALLOUTS": "Spoken-style text callouts during the fight.",
+}
+
 # --- Pages ------------------------------------------------------------------------
 
 func _main_rows() -> Array:
@@ -85,8 +137,6 @@ func _main_rows() -> Array:
 	if Session.debug_mode:
 		rows.append(_spec("WORKBENCH", Color("3a3150"), func() -> String: return "BUILDER & LABS",
 			func() -> void: menu.open_workbench()))
-	rows.append(_spec("DEBUG", Color("3a3150"), func() -> String: return "ON" if Session.debug_mode else "OFF",
-		_toggle_debug))
 	rows.append(_spec("SHIP FACES", GraffitiStyle.SUN, func() -> String:
 		return "ON" if JuiceSettings.player_emotes or JuiceSettings.enemy_emotes else "OFF", _toggle_faces))
 	return rows
@@ -184,6 +234,7 @@ func _page(specs: Array) -> ScrollContainer:
 	for spec: Dictionary in specs:
 		var b := SlabButton.new()
 		b.text = spec["text"]
+		b.tooltip_text = String(TIPS.get(b.text, ""))
 		b.fill = spec["color"]
 		b.pass_drag = true
 		b.text_color = Color.WHITE
@@ -379,18 +430,6 @@ func _cycle_music() -> void:
 	MenuRoot.apply_volume()
 
 
-func _toggle_debug() -> void:
-	Session.debug_mode = not Session.debug_mode
-	Session.save_to_disk()
-	# WORKBENCH comes and goes with it: rebuild the main page.
-	for b in _main.get_child(0).get_children():
-		_rows.erase(b)
-	_main.queue_free()
-	_main = _page(_main_rows())
-	_clip.add_child(_main)
-	_clip.move_child(_main, 0)
-	layout()
-
 
 func _toggle_faces() -> void:
 	var on := not (JuiceSettings.player_emotes or JuiceSettings.enemy_emotes)
@@ -480,20 +519,13 @@ func _cycle_flashes() -> void:
 
 
 func _difficulty() -> int:
-	var best := 1
-	var bd := INF
-	for i in DIFFICULTY.size():
-		var d := absf(float(DIFFICULTY[i][0]) - JuiceSettings.player_damage_taken_mult)
-		if d < bd:
-			bd = d
-			best = i
-	return best
+	Difficulty.v("player_hull")
+	return Difficulty.preset
 
 
+## Easy / Normal / Hard: which preset of the shipped difficulty table is played.
 func _cycle_difficulty() -> void:
-	var nxt: Array = DIFFICULTY[(_difficulty() + 1) % DIFFICULTY.size()]
-	JuiceSettings.set_float("player_damage_taken_mult", float(nxt[0]))
-	JuiceSettings.set_float("enemy_hp_mult", float(nxt[1]))
+	Difficulty.set_preset((Difficulty.preset + 1) % Difficulty.PRESET_NAMES.size())
 
 
 func _cycle_aim_assist() -> void:

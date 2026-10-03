@@ -353,7 +353,7 @@ func initialise(library: PartLibrary, spawn_xform: Transform3D, ai_player: Node3
 	# is not assigned until [method set_group_context] runs (after spawn), so
 	# the popcorn cap is applied there instead of here.
 	max_hp = maxf(_view.resolution.stats.get_stat("hull_hp"), 50.0) * JuiceSettings.hull_hp_mult \
-		* JuiceSettings.enemy_hp_mult
+		* JuiceSettings.enemy_hp_mult * Difficulty.v("enemy_hp")
 	hp = max_hp
 	_roll_shield()
 
@@ -930,9 +930,16 @@ func _update_combat(delta: float, target: Node3D) -> void:
 	# Debugger: passive enemies still fly and lock, but never shoot the player.
 	if JuiceSettings.enemies_passive and not (target is AiShip):
 		should_fire = false
-	if should_fire and JuiceSettings.ai_attack_pacing:
-		should_fire = _paced_fire_allowed(delta, target)
-	should_fire = _telegraph_gate(delta, target, should_fire)
+	# Yeeting, a ship fires once as it launches and then holds fire.
+	var yeeting := _yeet != null and _yeet.state != YeetDash.State.IDLE
+	if yeeting:
+		should_fire = should_fire and _yeet.take_volley()
+		if should_fire:
+			_fire_timer = 0.0
+	else:
+		if should_fire and JuiceSettings.ai_attack_pacing:
+			should_fire = _paced_fire_allowed(delta, target)
+		should_fire = _telegraph_gate(delta, target, should_fire)
 	# Evasive break countermeasure deployment (defensive flak & chaff)
 	if behaviour != null and behaviour.state == AiBehaviour.State.EVASIVE_BREAK:
 		if _fire_timer <= 0.0:

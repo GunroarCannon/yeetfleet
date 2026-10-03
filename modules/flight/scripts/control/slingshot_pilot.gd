@@ -80,6 +80,8 @@ var run: SlingRun = null
 ## Finger → ship screen offset while aiming (pixels), and the launch it gives.
 var pull := Vector2.ZERO
 var aim_dir := Vector3.ZERO
+## A pull shorter than this share of a full one cancels the sling on release.
+const CANCEL_PULL := 0.3
 var aim_power := 0.0
 ## A finger that caught the flying ship: it turns into the next aim once the
 ## ship has stopped.
@@ -303,7 +305,10 @@ func _on_released(_pos: Vector2) -> void:
 	_looked = false
 	if run == null or run.state != SlingRun.State.AIMING:
 		return
-	if aim_power > 0.08 and aim_dir != Vector3.ZERO:
+	# A feeble pull (under a third of a full one) is a let-go, not a launch: they
+	# most likely meant to cancel it.
+	var raw_pull := pull.length() / (short_edge() * 0.38)
+	if aim_power >= CANCEL_PULL and raw_pull >= CANCEL_PULL and aim_dir != Vector3.ZERO:
 		run.launch(aim_dir, aim_power)
 		_auto_volleys = 1
 		_launch_dir = aim_dir
@@ -326,6 +331,9 @@ func _on_tap(pos: Vector2) -> void:
 	if run == null or not JuiceSettings.sling_tap_fire:
 		return
 	var flying := run.state == SlingRun.State.FLYING
+	# Mid-launch the guns only fire on their own (Settings > Difficulty > Auto fire).
+	if flying and roundi(JuiceSettings.sling_auto_shoot) < 2:
+		return
 	# Resting between launches, only an auto-aim tap shoots.
 	if not flying and not (JuiceSettings.sling_tap_auto_aim and run.state == SlingRun.State.READY):
 		return
@@ -513,7 +521,9 @@ func _update_camera() -> void:
 			# The camera stays put and turns to look where the pull will throw
 			# the ship — toward the ship the launch magnet will bend onto, if
 			# any — following the aim as the thumb moves (eased).
-			if _cam_lock != Vector3.ZERO and aim_dir != Vector3.ZERO:
+			# On a touchscreen the view stays put: the thumb pulls, a second finger
+			# looks around (and two fingers off the ship pinch and pan freely).
+			if not DisplayServer.is_touchscreen_available() and _cam_lock != Vector3.ZERO and aim_dir != Vector3.ZERO:
 				zoom = JuiceSettings.sling_aim_zoom
 				var aim_look := aim_dir
 				var r := reach * JuiceSettings.sling_aim_look
@@ -608,6 +618,9 @@ func draw(canvas: Control) -> void:
 func _draw_pull_band(canvas: Control, s: Vector2, band: Vector2, gr: float, t: float) -> void:
 	var power := clampf(aim_power, 0.0, 1.0)
 	var col := Color("ffd23f").lerp(Color("ff3b3b"), power)
+	# Too weak to launch: the band greys out, so letting go reads as a cancel.
+	if power < CANCEL_PULL:
+		col = Color(0.7, 0.7, 0.75, 0.6)
 	var ink := Color(0.05, 0.02, 0.08, 0.85)
 	var pouch := s + band
 	var along := band.normalized()

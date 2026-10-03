@@ -191,7 +191,7 @@ func _draw() -> void:
 	GraffitiStyle.draw_halftone(self, inner, col.lightened(0.18), 8.0, true, lean)
 	var h := size.y
 	var x0 := size.x * 0.5
-	if GraffitiIcons.baked(icon) != null:
+	if icon == "coin" or GraffitiIcons.baked(icon) != null:
 		GraffitiIcons.draw(self, icon, Vector2(h * 0.55, h * 0.5), h * 0.5)
 		if not centered:
 			x0 = h * 1.05 + (size.x - h * 1.05) * 0.5

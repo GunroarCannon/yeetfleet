@@ -40,6 +40,8 @@ var _dir := Vector3.ZERO
 var _speed := 0.0
 var _max_t := MAX_DASH
 var _hit := false
+## The one volley a dash fires, at the moment it launches.
+var _volley := true
 
 
 func _init(owner_ship: AiShip) -> void:
@@ -120,6 +122,14 @@ func tick(delta: float, target: Node3D, target_velocity: Vector3) -> bool:
 	return false
 
 
+## True once per dash: the volley fired as it launches (never while it flies).
+func take_volley() -> bool:
+	if state != State.DASH or not _volley:
+		return false
+	_volley = false
+	return true
+
+
 ## Stop at once (the ship died, was taken over, or the toggle went off).
 func release() -> void:
 	if state == State.DASH or state == State.RECOVER:
@@ -181,6 +191,7 @@ func _launch(target: Node3D, target_velocity: Vector3) -> void:
 	# Long enough to reach the player and carry on past a bit.
 	_max_t = clampf(to.length() / _speed * 1.4 + 0.3, 0.5, MAX_DASH)
 	_hit = false
+	_volley = true
 	if not model.impacted.is_connected(_on_impacted):
 		model.impacted.connect(_on_impacted)
 	model.external_drive = true

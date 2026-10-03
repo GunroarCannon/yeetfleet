@@ -612,7 +612,8 @@ func _draw_live() -> void:
 	if _root.player_max_shield > 0.0:
 		_icon_tab(c, Rect2(x, y2, ib, ib), "shield", P, _sh_flash)
 		_bar(c, Rect2(x + ib + gap, y2 + ib * 0.14, bar_w, ib * 0.72), sh, _sh_ghost, P["shield"], P, _sh_flash, comic)
-	var low := hp < 0.25 and hp > 0.0
+	# The same line as the low-health alarm sound.
+	var low := hp < FlightRoot.LOW_HEALTH_FRACTION and hp > 0.0
 	if low:
 		var pulse := 0.5 + 0.5 * sin(_t * 12.0)
 		var quad := _mpoly(_skew_quad(_panel, float(P["skew"]) * -1.0))
@@ -628,7 +629,7 @@ func _draw_live() -> void:
 	var title_col: Color = P["title"]
 	var wobble := 0.0
 	if low:
-		title_col = title_col.lerp(Color("ff3b3b"), 0.5 + 0.5 * sin(_t * 12.0))
+		title_col = Color.WHITE.lerp(Color("ff2a2a"), 0.5 + 0.5 * sin(_t * 12.0))
 		wobble = sin(_t * 9.0) * 0.06
 	# Centred under the bars rather than hard against the panel's edge.
 	var title_x := x + (ib + gap + bar_w) * 0.5

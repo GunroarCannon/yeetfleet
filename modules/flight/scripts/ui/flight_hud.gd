@@ -95,6 +95,7 @@ var _scenario_panel: ScenarioPanel = null
 var _bug_hunt_panel: BugHuntPanel = null
 var _fly_as_panel: FlyAsPanel = null
 var _log_census_panel: LogCensusPanel = null
+var _difficulty_panel: DifficultyPanel = null
 ## The real phone layout (see [method set_mobile_layout]) and whether it is up.
 var _mobile_hud: MobileHud = null
 var _mobile_layout := false
@@ -236,6 +237,7 @@ func _build_debug_panel() -> void:
 	_add_debug_button("🛩 Fly as…", func() -> void: toggle_fly_as_panel())
 	_add_debug_button("🐞 Bug hunt", func() -> void: toggle_bug_hunt_panel())
 	_add_debug_button("Log census", func() -> void: toggle_log_census_panel())
+	_add_debug_button("🎚 Difficulty", func() -> void: toggle_difficulty_panel())
 
 	_add_debug_toggle("Plumes", true)
 	_add_debug_toggle("Halos", true)
@@ -889,6 +891,15 @@ func toggle_log_census_panel() -> void:
 		_log_census_panel.name = "LogCensusPanel"
 		_center_panel(_log_census_panel)
 	_log_census_panel.visible = not _log_census_panel.visible
+
+
+## The 🎚 Difficulty panel: the shipped difficulty table, editable while flying.
+func toggle_difficulty_panel() -> void:
+	if _difficulty_panel == null:
+		_difficulty_panel = DifficultyPanel.new()
+		_difficulty_panel.name = "DifficultyPanel"
+		_center_panel(_difficulty_panel)
+	_difficulty_panel.visible = not _difficulty_panel.visible
 
 
 func toggle_fly_as_panel() -> void:
@@ -1618,6 +1629,10 @@ func _build_controls() -> void:
 	_weapon_button.add_theme_font_size_override("font_size", 11)
 	_weapon_button.add_theme_color_override("font_color", BuilderTheme.accent())
 	_weapon_button.pressed.connect(func() -> void:
+		# Players have no weapon swapping: the bar is a pause button for them.
+		if not Session.debug_mode and _root != null and _root.campaign_overlay != null:
+			_root.campaign_overlay.toggle_pause()
+			return
 		if _root != null and _root.has_method("cycle_weapon"):
 			_root.cycle_weapon()
 	)
@@ -2596,9 +2611,13 @@ func _draw_ghost_bar(rect: Rect2, fraction: float, ghost: float, color: Color, l
 		color, true
 	)
 	_overlay.draw_rect(rect, BuilderTheme.border(), false, 1.0)
+	var label_col := BuilderTheme.text_dim()
+	# The hull label pulses white and red while the low-health alarm sounds.
+	if label == "HULL" and fraction > 0.0 and fraction < FlightRoot.LOW_HEALTH_FRACTION:
+		label_col = Color.WHITE.lerp(Color("ff2a2a"), 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012))
 	_overlay.draw_string(
 		get_theme_default_font(), rect.position + Vector2(0.0, -3.0), label,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, BuilderTheme.text_dim()
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, label_col
 	)
 
 
@@ -2650,7 +2669,7 @@ func _draw_bar(rect: Rect2, fraction: float, color: Color, label: String) -> voi
 const PLAYER_INDICATOR_SIZE := 26.0
 
 func _draw_player_indicator(camera: Camera3D) -> void:
-	if not player_indicator_active():
+	if not player_indicator_active() or _root.is_player_dead():
 		return
 	var ship := _root.active_ship_node()
 	if ship == null or not is_instance_valid(ship):

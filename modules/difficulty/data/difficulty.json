@@ -1,35 +1,188 @@
 {
-	"player_hull": 0.6,
-	"enemy_bite": 2.2,
-	"max_hit_share": 0.25,
-	"enemy_hp_growth": 0.06,
-	"enemy_damage_growth": 0.045,
-	"enemy_size_growth": 0.015,
-	"enemy_size_max": 1.8,
-	"extra_enemy_every": 5.0,
-	"threat_growth": 0.04,
-	"threat_max": 2.5,
-	"attackers_start": 2.0,
-	"attackers_every": 6.0,
-	"attackers_max": 5.0,
-	"corvette_from": 3.0,
-	"hauler_from": 9.0,
-	"capital_from": 20.0,
-	"heavy_share": 0.3,
-	"boss_capital_from": 6.0,
-	"player_focus": 0.6,
-	"ally_damage": 0.4,
-	"escort_max_attackers": 2.0,
-	"escort_player_range": 450.0,
-	"protect_escort_share": 0.5,
-	"ace_hp": 2.6,
-	"ace_threat": 1.8,
-	"ace_gun_bonus": 1.0,
-	"fight_weight": 2.0,
-	"star_bar_bonus": 0.08,
-	"boss_dreadnought": 1.0,
-	"dreadnought_from": 8.0,
-	"dreadnought_chance": 0.4,
-	"dreadnought_size": 2.4,
-	"dreadnought_hp": 5.0
+	"curves": {
+		"ace_hp": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"ace_threat": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"boss_hp": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"boss_size": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"damage": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"hp": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"reward": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"size": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		],
+		"threat": [
+			[
+				1,
+				1.0
+			],
+			[
+				40,
+				1.0
+			]
+		]
+	},
+	"dials": {
+		"ace_gun_bonus": 1.0,
+		"ace_hp_end": 3.2,
+		"ace_hp_era": 1.0,
+		"ace_hp_shape": 1.0,
+		"ace_hp_start": 2.6,
+		"ace_threat_end": 2.2,
+		"ace_threat_era": 1.0,
+		"ace_threat_shape": 1.0,
+		"ace_threat_start": 1.8,
+		"ally_damage": 0.4,
+		"attackers_every": 4.0,
+		"attackers_max": 4.04,
+		"attackers_start": 1.0,
+		"boss_capital_from": 6.0,
+		"boss_dreadnought": 0.98,
+		"boss_hp_end": 1.9,
+		"boss_hp_era": 1.1,
+		"boss_hp_shape": 1.0,
+		"boss_hp_start": 0.7,
+		"boss_size_end": 10.0,
+		"boss_size_era": 1.0,
+		"boss_size_shape": 1.0,
+		"boss_size_start": 6.5,
+		"capital_from": 20.0,
+		"corvette_from": 3.0,
+		"damage_end": 3.6,
+		"damage_era": 1.075,
+		"damage_shape": 1.05,
+		"damage_start": 0.85,
+		"damage_taken": 1.0,
+		"dreadnought_chance": 0.385,
+		"dreadnought_from": 8.0,
+		"dreadnought_hp": 5.0,
+		"dreadnought_size": 3.0,
+		"enemy_bite": 2.2,
+		"enemy_hp": 1.0,
+		"enemy_size_max": 1.49,
+		"era_levels": 11.0,
+		"era_start": 20.0,
+		"escort_max_attackers": 2.0,
+		"escort_player_range": 450.0,
+		"extra_enemy_every": 5.0,
+		"fight_weight": 2.0,
+		"force_chance": 0.3,
+		"force_ship": 0.0,
+		"growth_span": 41.0,
+		"hauler_from": 9.0,
+		"heavy_share": 0.3,
+		"hp_end": 5.0,
+		"hp_era": 1.12,
+		"hp_shape": 1.1,
+		"hp_start": 1.0,
+		"max_hit_share": 0.25,
+		"player_focus": 0.6,
+		"player_hull": 0.6,
+		"protect_escort_share": 0.5,
+		"replay_pay": 0.25,
+		"reward_base": 40.0,
+		"reward_mult": 1.0,
+		"reward_per_level": 12.0,
+		"size_end": 1.6,
+		"size_era": 1.0,
+		"size_shape": 1.0,
+		"size_start": 1.0,
+		"star_bar_bonus": 0.08,
+		"star_bonus": 25.0,
+		"threat_end": 2.5,
+		"threat_era": 1.0,
+		"threat_max": 2.5,
+		"threat_shape": 1.0,
+		"threat_start": 1.0
+	},
+	"presets": {
+		"EASY": {
+			"damage_taken": 0.56,
+			"enemy_hp": 0.71
+		},
+		"HARD": {
+			"damage_taken": 1.52,
+			"enemy_hp": 1.33
+		},
+		"NORMAL": {}
+	},
+	"text": {
+		"hints": {
+			"FIGHTER": "GUNS & AGILITY",
+			"HAULER": "ROOM & STEADY HANDS",
+			"SCOUT": "SPEED",
+			"TANK": "A TOUGH HULL",
+			"TITAN": "BRUTE FORCE"
+		},
+		"prefix": "RECOMMEND:"
+	}
 }

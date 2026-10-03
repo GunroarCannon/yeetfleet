@@ -93,9 +93,9 @@ static var ship_scale := 1.0
 static var debug_orbit_log := false
 ## Developer mode: the home screen's DEBUG chip, the flight scene's debug
 ## keys (D, K, G, F-keys...), its dev hints ("ORBIT: stable around...") and
-## wordy incident banners. Off: the game as a player sees it. Settings >
-## DEBUG flips it; release builds start with it off.
-static var debug_mode := false#OS.is_debug_build()
+## wordy incident banners. Off: the game as a player sees it. Set it here
+## and only here (never saved, so an old save can't switch it).
+static var debug_mode := true#OS.is_debug_build()
 ## High-res: render at a higher internal viewport resolution (supersampling).
 ## Formerly `FlightRoot._high_res_on`. Planet mesh density is its own separate
 ## dial — [member planet_quality] — since supersampling and geometry
@@ -417,7 +417,6 @@ static func _build_cfg() -> ConfigFile:
 	cfg.set_value(SECTION, "orbit_speed_scale", orbit_speed_scale)
 	cfg.set_value(SECTION, "arcade_pivot", arcade_pivot)
 	cfg.set_value(SECTION, "debug_orbit_log", debug_orbit_log)
-	cfg.set_value(SECTION, "debug_mode", debug_mode)
 	cfg.set_value(SECTION, "solar_time_scale", solar_time_scale)
 	cfg.set_value(SECTION, "solar_distance_scale", solar_distance_scale)
 	cfg.set_value(SECTION, "control_mode", control_mode)
@@ -475,7 +474,6 @@ static func load_from_disk() -> void:
 	orbit_speed_scale = float(cfg.get_value(SECTION, "orbit_speed_scale", orbit_speed_scale))
 	arcade_pivot = float(cfg.get_value(SECTION, "arcade_pivot", arcade_pivot))
 	debug_orbit_log = bool(cfg.get_value(SECTION, "debug_orbit_log", debug_orbit_log))
-	debug_mode = bool(cfg.get_value(SECTION, "debug_mode", debug_mode))
 	solar_time_scale = float(cfg.get_value(SECTION, "solar_time_scale", solar_time_scale))
 	solar_distance_scale = float(cfg.get_value(SECTION, "solar_distance_scale", solar_distance_scale))
 	control_mode = int(cfg.get_value(SECTION, "control_mode", control_mode))

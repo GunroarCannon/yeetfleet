@@ -34,7 +34,11 @@ func _ready() -> void:
 	_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_column)
 	_campaign = _panel("CAMPAIGN", GraffitiStyle.HOT, _on_campaign)
-	_panel("SANDBOX", GraffitiStyle.CYAN, _on_sandbox)
+	var sandbox := _panel("SANDBOX", GraffitiStyle.CYAN, _on_sandbox)
+	# A brand-new pilot starts in flight school; the rest unlocks after it.
+	if not Campaign.tutorial_done():
+		sandbox.disabled = true
+		sandbox.tooltip_text = "Finish flight school first."
 	_panel("GARAGE", GraffitiStyle.SUN, func() -> void: menu.go(MenuRoot.Screen.GARAGE))
 	_panel("SETTINGS", GraffitiStyle.VIOLET, func() -> void: menu.go(MenuRoot.Screen.SETTINGS))
 	# Web and iOS have no "quit"; the browser tab or the home swipe is the exit.
@@ -219,6 +223,9 @@ func _close_quit() -> void:
 
 
 func _on_campaign() -> void:
+	if not Campaign.tutorial_done():
+		menu.launch_tutorial()
+		return
 	menu.go(MenuRoot.Screen.MAP)
 
 
