@@ -39,6 +39,12 @@ var active_incidents: Array[Incident] = []
 var context: NebulaContext = null
 var world_parent: Node3D = null
 var hud_container: Control = null
+## () -> Node3D: the ship the player is flying (has a `velocity`). Without it
+## the director looks for a "Model" or "Ship" child of [member world_parent].
+## (It used to look for "Model" only; the flight scene's ship is "Ship", so
+## the player read as sitting at the origin and every incident out there
+## resolved as out of range the frame it began.)
+var player_source := Callable()
 
 var _time_since_bubble := 999.0
 var _eval_timer := 0.0
@@ -225,18 +231,27 @@ func route_impact(body_a: PhysBody, body_b: PhysBody, impulse: float) -> void:
 
 # --- Queries & Helpers ------------------------------------------------------
 
+func _player() -> Node3D:
+	if player_source.is_valid():
+		var p: Variant = player_source.call()
+		if p is Node3D and is_instance_valid(p):
+			return p
+	if world_parent != null:
+		for n in ["Model", "Ship"]:
+			if world_parent.has_node(n):
+				return world_parent.get_node(n) as Node3D
+	return null
+
+
 func _get_player_pos() -> Vector3:
-	if world_parent != null and world_parent.has_node("Model"):
-		var m: Node3D = world_parent.get_node("Model")
-		return m.global_position
-	return Vector3.ZERO
+	var m := _player()
+	return m.global_position if m != null else Vector3.ZERO
 
 
 func _get_player_vel() -> Vector3:
-	if world_parent != null and world_parent.has_node("Model"):
-		var m: Object = world_parent.get_node("Model")
-		if "velocity" in m:
-			return m.velocity
+	var m := _player()
+	if m != null and "velocity" in m:
+		return m.velocity
 	return Vector3.ZERO
 
 

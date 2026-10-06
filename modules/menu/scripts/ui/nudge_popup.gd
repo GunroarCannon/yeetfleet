@@ -69,15 +69,11 @@ func _process(delta: float) -> void:
 		_hand.queue_redraw()
 
 
-## A chunky cartoon glove, index finger up, in the game's ink-and-white style.
+## The pointing hand: assets/hand.png with its fingertip at the control's origin.
 func _draw_hand() -> void:
-	var ink := GraffitiStyle.INK
-	var white := Color.WHITE
-	# Finger, palm, thumb: ink first (fatter), then the white over it.
-	for pass_i in 2:
-		var g := 5.0 if pass_i == 0 else 0.0
-		var col := ink if pass_i == 0 else white
-		_hand.draw_rect(Rect2(22.0 - g, 0.0 - g, 16.0 + g * 2.0, 46.0 + g * 2.0), col)
-		_hand.draw_circle(Vector2(30.0, 0.0), 8.0 + g, col)
-		_hand.draw_rect(Rect2(6.0 - g, 36.0 - g, 48.0 + g * 2.0, 40.0 + g * 2.0), col)
-		_hand.draw_circle(Vector2(8.0, 52.0), 10.0 + g, col)
+	var tex := load("res://assets/hand.png") as Texture2D
+	if tex == null:
+		return
+	var h := 96.0
+	var w := h * float(tex.get_width()) / float(tex.get_height())
+	_hand.draw_texture_rect(tex, Rect2(-Vector2(w, h) * Vector2(0.2, 0.02), Vector2(w, h)), false)

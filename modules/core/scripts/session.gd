@@ -95,7 +95,7 @@ static var debug_orbit_log := false
 ## keys (D, K, G, F-keys...), its dev hints ("ORBIT: stable around...") and
 ## wordy incident banners. Off: the game as a player sees it. Set it here
 ## and only here (never saved, so an old save can't switch it).
-static var debug_mode := true#OS.is_debug_build()
+static var debug_mode := false#OS.is_debug_build()
 ## High-res: render at a higher internal viewport resolution (supersampling).
 ## Formerly `FlightRoot._high_res_on`. Planet mesh density is its own separate
 ## dial — [member planet_quality] — since supersampling and geometry
@@ -250,9 +250,10 @@ static var space_setup := {}
 ## player's FlightModel instance, so a restart always fell back to Arcade.
 static var control_mode := -1
 ## Movement profile ([enum FlightRoot.MoveProfile]): 0 classic stick & buttons,
-## 1 swipe, 2 slingshot. A separate axis from [member control_mode], which
+## 1 swipe, 2 slingshot (the default). Without [member debug_mode] only those two
+## are reachable. A separate axis from [member control_mode], which
 ## tunes the flight numbers underneath whichever profile is flying.
-static var move_profile := 0
+static var move_profile := 2
 ## Flight-assist mode (0 manual, 1 damping, 2 full), or -1 for the default.
 static var assist_mode := -1
 ## The chase/cockpit/rear view the player last picked, or -1 for the default.
@@ -534,7 +535,7 @@ static func reset_to_defaults() -> void:
 	orbit_speed_scale = 4.0
 	arcade_pivot = 3.0
 	control_mode = -1
-	move_profile = 0
+	move_profile = 2
 	assist_mode = -1
 	camera_view = -1
 	far_clip = -1.0

@@ -111,7 +111,10 @@ func _check_progress_and_pay() -> void:
 	_check(LevelGen.stars_needed(3) == 0 and LevelGen.stars_needed(10) >= 8 and LevelGen.stars_needed(10) <= 16, "star curve off (level 10 wants %d)" % LevelGen.stars_needed(10))
 	var coins := Campaign.coins()
 	var lost := Campaign.apply_result(l0, {"won": false, "time": 30.0, "kills": 1, "attempts": 2})
-	_check(int(lost["coins"]) == 0 and Campaign.coins() == coins, "a loss paid out")
+	# A loss pays only a few coins for its wrecks, capped well under a win.
+	var loss_pay := StarRating.loss_coins(int(l0["reward"]), 1)
+	_check(int(lost["coins"]) == loss_pay and loss_pay < int(l0["reward"]) and Campaign.coins() == coins + loss_pay, "a loss paid the wrong amount")
+	coins = Campaign.coins()
 	_check(Campaign.record(l0["key"])["attempts"] == 2, "attempts not counted")
 	var win := Campaign.apply_result(l0, {"won": true, "time": 1.0, "kills": 4, "hull": 0.9})
 	_check(int(win["stars"]) == 3, "a fast full-hull win is not 3 stars (%d)" % int(win["stars"]))

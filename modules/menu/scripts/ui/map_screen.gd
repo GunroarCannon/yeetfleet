@@ -71,7 +71,7 @@ func opened() -> void:
 	_map.rebuild()
 	# The newest unlocked level on the first look this run, or when the flight
 	# just opened something new; otherwise the level that was just played.
-	var fresh := not Campaign.map_seen or bool(menu.last_result.get("first_win", false))
+	var fresh := not Campaign.map_seen or bool(menu.last_result.get("first_win", false)) or bool(menu.last_result.get("won", false))
 	Campaign.map_seen = true
 	_map.focus_level("" if fresh else Campaign.last_played_key, true)
 	_map.grab_focus.call_deferred()
@@ -79,11 +79,9 @@ func opened() -> void:
 	if not menu.reopen_level.is_empty():
 		_report.show_level(menu.reopen_level)
 		menu.reopen_level = {}
-	# Only a win gets the pay-out card: a loss already had its WRECKED card in
-	# flight, and a bail-out to the map wants the map, not "TRY AGAIN".
-	if bool(menu.last_result.get("won", false)):
-		_show_payout(menu.last_result)
-	elif not menu.last_result.is_empty() and Campaign.loss_streak() >= 2 			and not Campaign.nudge_seen("upgrade") and Campaign.can_afford_upgrade():
+	# No pay-out card here: the coins are on the flight's win / fail card, and
+	# the way back to the map is just the map.
+	if not menu.last_result.is_empty() and not bool(menu.last_result.get("won", false)) and Campaign.loss_streak() >= 2 			and not Campaign.nudge_seen("upgrade") and Campaign.can_afford_upgrade():
 		_nudge_upgrade()
 	menu.last_result = {}
 

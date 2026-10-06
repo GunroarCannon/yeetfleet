@@ -128,6 +128,7 @@ func _start_level() -> void:
 	_root.scenarios.start(cfg)
 	if _attempts == 1:
 		_show_guarded.call_deferred()
+		_show_threat.call_deferred()
 
 
 ## [param ship]'s size as the kill cam reads a wreck's (its view's box is
@@ -138,8 +139,10 @@ static func ship_radius(ship: AiShip) -> float:
 	return maxf(ship._view.aabb.size.length() * 0.5 * maxf(ship.scale_multiplier, 1.0), 12.0)
 
 
-## An escort: a short look at the ship to guard, so the player knows which
-## one it is, then back to their own ship. First try only.
+## An escort or a guard job: a short look at the ship to look after, so the
+## player knows which one it is, then back to their own ship. First try only.
+## The line says which job it is: a guard job holds still for a time, an
+## escort flies somewhere.
 func _show_guarded() -> void:
 	await get_tree().process_frame
 	if not is_instance_valid(_root) or _root.camera_rig == null:
@@ -148,7 +151,38 @@ func _show_guarded() -> void:
 	if guarded == null:
 		return
 	if _root.camera_rig.show_ship(guarded, ship_radius(guarded), 1.6, 1.0, 1.0):
-		_root.announce("PROTECT THIS SHIP!")
+		var hold := roundi(float(_root.scenarios.config.get("hold_time", 0.0)))
+		if hold > 0:
+			_root.announce("KEEP IT SAFE FOR %s!" % FlightScenarios.hold_words(hold))
+		else:
+			_root.announce("ESCORT IT TO THE BEACON!")
+
+
+## A boss level, or a duel with its ace: a look at the one to beat, with every
+## ship held still, then back to the player and on. First try only.
+func _show_threat() -> void:
+	await get_tree().process_frame
+	if not is_instance_valid(_root) or _root.camera_rig == null or _root.scenarios == null:
+		return
+	var sc := _root.scenarios
+	var target: AiShip = null
+	var line := ""
+	if sc.mega_alive():
+		# A megastructure: framed on its middle, from well out.
+		var gen := sc.mega_boss.gen
+		if _root.camera_rig.spotlight(gen, sc.mega_boss.radius(), 1.8, 1.1, 1.0):
+			_root.announce("BOSS AHEAD!")
+		return
+	if sc.boss != null and is_instance_valid(sc.boss) and sc.boss._alive:
+		target = sc.boss
+		line = "BOSS AHEAD!"
+	elif String(_level.get("preset", "")) == "duel":
+		target = sc.first_enemy()
+		line = "ACE AHEAD!"
+	if target == null:
+		return
+	if _root.camera_rig.spotlight(target, ship_radius(target), 1.6, 0.9, 0.9):
+		_root.announce(line)
 
 
 func _on_scenario_changed() -> void:
@@ -240,7 +274,11 @@ func _leave(open := "", next_key := "") -> void:
 		if next_key != "":
 			Session.level_result["go_next"] = next_key
 	else:
-		Session.level_result = {"key": "sandbox", "coins": _bank, "open": open}
+		# Leaving alive banks this life's points too (a wreck already did).
+		var life := 0
+		if _card == null and not _root.is_player_dead():
+			life = (_root.score + int(_life_t * POINTS_PER_SEC)) / POINTS_PER_COIN
+		Session.level_result = {"key": "sandbox", "coins": _bank + life, "open": open}
 	Session.pending_level = {}
 	if _root.scenarios != null:
 		_root.scenarios.stop(false)
@@ -411,6 +449,13 @@ func _show_card(run: Dictionary) -> void:
 	facts.add_theme_font_override("font", GraffitiStyle.number_font())
 	facts.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(facts)
+	# The pay-out: coins for the win, or for the wrecks of a loss.
+	var coins := _coins_for(run, won)
+	if coins > 0:
+		var pay := GraffitiStyle.label("+%d COINS" % coins, 36, GraffitiStyle.SUN)
+		pay.add_theme_font_override("font", GraffitiStyle.number_font())
+		pay.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		box.add_child(pay)
 	# What this level's stars were for, so the next try knows what to chase.
 	var focus := StarRating.focus_words(_level.get("grade", {}))
 	if focus != "":
@@ -445,6 +490,15 @@ func _show_card(run: Dictionary) -> void:
 	_center(_card, box)
 	_pop_in(box)
 	(next if next != null else (map if won else again)).grab_focus()
+
+
+## Coins this run pays, as the campaign will pay them (see [StarRating.loss_coins]):
+## a win's base plus the bonus for new stars; a loss's share for the wrecks so far.
+func _coins_for(run: Dictionary, won: bool) -> int:
+	if won:
+		var fresh := maxi(0, _stars_for(run) - int(_level.get("stars_here", 0)))
+		return int(_level.get("pay_base", 0)) + fresh * int(_level.get("star_bonus", 0))
+	return StarRating.loss_coins(int(_level.get("reward", 0)), int(_best.get("kills", run["kills"])))
 
 
 ## The level NEXT goes to after this win: the first not-yet-won level that

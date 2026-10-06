@@ -72,6 +72,7 @@ var _pinch_angle := 0.0
 var _pinch_mid := Vector2.ZERO
 ## A real touchscreen: the mouse events it emulates are ignored.
 var _touch_device := false
+var _last_touch_ms := 0
 var _alt_drag := false
 ## The looking-around finger while [member keep_primary] holds (-1 = none).
 var _look_index := -1
@@ -92,10 +93,17 @@ func start_position() -> Vector2:
 
 ## Returns true when the event was a gesture event this reader consumed.
 func feed(event: InputEvent) -> bool:
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		_last_touch_ms = Time.get_ticks_msec()
 	if event is InputEventScreenTouch:
 		_touch_device = true
 		var st := event as InputEventScreenTouch
 		if st.pressed:
+			# With nothing in progress, any finger still on the books is a stray
+			# (its release was eaten by a HUD control): it made this touch look
+			# like the second of a pinch, so the first touch did nothing.
+			if _pointer == -1 and not _two:
+				_touches.clear()
 			_touches[st.index] = st.position
 			if keep_primary and _pointer != -1 and _look_index == -1 and not _two:
 				_look_index = st.index
@@ -131,7 +139,11 @@ func feed(event: InputEvent) -> bool:
 			return true
 		return _move(sd.index, sd.position)
 	if _touch_device:
-		# Emulated from a touch that was already read above.
+		# Emulated from a touch that was already read above. Eaten while a finger
+		# is down (or just lifted), or the flight's mouse-look reads the first
+		# finger as a camera drag on top of the pull.
+		if event is InputEventMouseButton or event is InputEventMouseMotion:
+			return not _touches.is_empty() or Time.get_ticks_msec() - _last_touch_ms < 250
 		return false
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton

@@ -38,6 +38,11 @@ var _slide: Tween = null
 var _reset_armed := false
 ## Every row on screen → its spec {text, color, sub: Callable, press: Callable}.
 var _rows := {}
+## The help card for the row being hovered, focused or tapped: bottom right,
+## or along the bottom on a portrait screen.
+var _tip_card: PanelContainer
+var _tip_label: Label
+var _tip_tween: Tween = null
 
 
 func _ready() -> void:
@@ -56,6 +61,7 @@ func _ready() -> void:
 	add_child(_clip)
 	_main = _page(_main_rows())
 	_clip.add_child(_main)
+	_build_tip()
 	layout()
 
 
@@ -69,6 +75,7 @@ const TIPS := {
 	"PERFORMANCE": "Graphics quality and battery settings.",
 	"DIFFICULTY": "How hard the fights are: Easy, Normal or Hard.",
 	"ACCESSIBILITY": "Flashes, slow-motion, freeze frames and callouts.",
+	"STATS": "Time played, yeets, planets destroyed, ships bought and more.",
 	"RESET PROGRESS": "Wipes coins, ships and level records. Asks twice.",
 	"WORKBENCH": "Developer builder and labs.",
 	"SHIP FACES": "Little faces on ships that react to the fight.",
@@ -118,6 +125,7 @@ const TIPS := {
 func _main_rows() -> Array:
 	var rows := [
 		_spec("CONTROLS", GraffitiStyle.CYAN, _controls_word, _cycle_controls),
+		_spec("SCREEN", GraffitiStyle.SUN, _orientation_word, _cycle_orientation),
 		_spec("SOUND", GraffitiStyle.SUN, _sound_word, _cycle_sound),
 		_spec("MUSIC", GraffitiStyle.HOT, _music_word, _cycle_music),
 		_spec("SHAKE", GraffitiStyle.VIOLET, func() -> String:
@@ -131,6 +139,8 @@ func _main_rows() -> Array:
 			func() -> void: _open_sub("DIFFICULTY")),
 		_spec("ACCESSIBILITY", GraffitiStyle.CYAN, func() -> String: return "FLASHES, SLOW-MO  >",
 			func() -> void: _open_sub("ACCESSIBILITY")),
+		_spec("STATS", GraffitiStyle.LIME, func() -> String: return "YOUR RECORD  >",
+			func() -> void: _open_sub("STATS")),
 		_spec("RESET PROGRESS", GraffitiStyle.HOT, func() -> String:
 			return "SURE? TAP AGAIN" if _reset_armed else "WIPES COINS & SHIPS", _on_reset),
 	]
@@ -144,6 +154,18 @@ func _main_rows() -> Array:
 
 func _sub_rows(which: String) -> Array:
 	match which:
+		"STATS":
+			return [
+				_stat_row("TIME PLAYED", GraffitiStyle.SUN, "time_played", true),
+				_stat_row("FLIGHTS", GraffitiStyle.CYAN, "flights"),
+				_stat_row("LEVELS WON", GraffitiStyle.LIME, "wins"),
+				_stat_row("SHIPS WRECKED", GraffitiStyle.HOT, "kills"),
+				_stat_row("YEETS", GraffitiStyle.ORANGE, "yeets"),
+				_stat_row("PLANETS DESTROYED", GraffitiStyle.VIOLET, "planets_destroyed"),
+				_stat_row("SHIPS BOUGHT", GraffitiStyle.SUN, "ships_bought"),
+				_stat_row("UPGRADES BOUGHT", GraffitiStyle.CYAN, "upgrades_bought"),
+				_stat_row("TIMES WRECKED", GraffitiStyle.HOT, "deaths"),
+			]
 		"PERFORMANCE":
 			return [
 				_spec("GRAPHICS", GraffitiStyle.LIME, func() -> String: return GRAPHICS_WORDS[_graphics()], _cycle_graphics),
@@ -217,6 +239,16 @@ func _sub_rows(which: String) -> Array:
 	return []
 
 
+## A read-only slab on the STATS page.
+func _stat_row(text: String, col: Color, key: String, as_time := false) -> Dictionary:
+	return _spec(text, col, func() -> String:
+		var v := Campaign.stat_value(key)
+		if as_time:
+			var secs := int(v)
+			return "%dH %02dM" % [secs / 3600, (secs % 3600) / 60] if secs >= 3600 else "%dM %02dS" % [secs / 60, secs % 60]
+		return str(int(v)), func() -> void: pass)
+
+
 func _spec(text: String, col: Color, sub: Callable, press: Callable) -> Dictionary:
 	return {"text": text, "color": col, "sub": sub, "press": press}
 
@@ -234,7 +266,14 @@ func _page(specs: Array) -> ScrollContainer:
 	for spec: Dictionary in specs:
 		var b := SlabButton.new()
 		b.text = spec["text"]
-		b.tooltip_text = String(TIPS.get(b.text, ""))
+		var tip := String(TIPS.get(b.text, ""))
+		if tip != "":
+			b.mouse_entered.connect(_show_tip.bind(tip))
+			b.mouse_exited.connect(_hide_tip)
+			b.focus_entered.connect(_show_tip.bind(tip))
+			b.focus_exited.connect(_hide_tip)
+			# Touch has no hover: a tap shows the tip too.
+			b.pressed.connect(_show_tip.bind(tip))
 		b.fill = spec["color"]
 		b.pass_drag = true
 		b.text_color = Color.WHITE
@@ -242,6 +281,68 @@ func _page(specs: Array) -> ScrollContainer:
 		content.add_child(b)
 		_rows[b] = spec
 	return sc
+
+
+# --- Tip card -------------------------------------------------------------------
+
+func _build_tip() -> void:
+	_tip_card = PanelContainer.new()
+	_tip_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tip_card.modulate.a = 0.0
+	_tip_card.z_index = 10
+	var box := StyleBoxFlat.new()
+	box.bg_color = GraffitiStyle.INK
+	box.border_color = GraffitiStyle.SUN
+	box.set_border_width_all(4)
+	box.set_corner_radius_all(10)
+	box.set_content_margin_all(14)
+	box.shadow_color = GraffitiStyle.SHADOW
+	box.shadow_size = 8
+	box.shadow_offset = Vector2(4, 6)
+	_tip_card.add_theme_stylebox_override("panel", box)
+	_tip_label = GraffitiStyle.label("", 22, Color.WHITE, 0)
+	_tip_label.add_theme_font_override("font", GraffitiStyle.tip_font())
+	_tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tip_card.add_child(_tip_label)
+	add_child(_tip_card)
+
+
+func _show_tip(text: String) -> void:
+	if _tip_card == null:
+		return
+	_tip_label.text = text
+	_place_tip()
+	if _tip_tween != null:
+		_tip_tween.kill()
+	_tip_tween = create_tween()
+	_tip_tween.tween_property(_tip_card, "modulate:a", 1.0, 0.12)
+	# A tap leaves no mouse-exit behind, so the card lets go by itself.
+	_tip_tween.tween_interval(3.5)
+	_tip_tween.tween_property(_tip_card, "modulate:a", 0.0, 0.4)
+
+
+func _hide_tip() -> void:
+	if _tip_card == null:
+		return
+	if _tip_tween != null:
+		_tip_tween.kill()
+	_tip_tween = create_tween()
+	_tip_tween.tween_property(_tip_card, "modulate:a", 0.0, 0.2)
+
+
+func _place_tip() -> void:
+	var vp := viewport_size()
+	var u := unit()
+	var port := portrait()
+	var w := vp.x - 40.0 if port else clampf(vp.x * 0.34, 280.0, 520.0 * u)
+	_tip_label.add_theme_font_size_override("font_size", int(clampf(vp.y * (0.034 if port else 0.04), 18.0, 30.0 * u)))
+	_tip_label.custom_minimum_size.x = w - 28.0
+	_tip_card.custom_minimum_size = Vector2(w, 0)
+	_tip_card.reset_size()
+	_tip_card.pivot_offset = _tip_card.size * 0.5
+	_tip_card.rotation = 0.0 if port else -0.03
+	var margin := 20.0
+	_tip_card.position = Vector2(vp.x - _tip_card.size.x - margin, vp.y - _tip_card.size.y - margin)
 
 
 func _on_row(b: SlabButton) -> void:
@@ -300,6 +401,8 @@ func layout() -> void:
 	_clip.position = Vector2(0, top)
 	_clip.size = Vector2(clip_w, vp.y - top)
 	var bh := clampf(vp.y * (0.075 if port else 0.105), 56.0, 84.0 * u)
+	if _tip_card != null and _tip_card.modulate.a > 0.0:
+		_place_tip()
 	for page in [_main, _sub]:
 		if page != null:
 			_lay_page(page as ScrollContainer, bw, bh, port)
@@ -396,6 +499,16 @@ func _controls_word() -> String:
 func _cycle_controls() -> void:
 	Session.move_profile = PROFILE_SLING if Session.move_profile == PROFILE_SWIPE else PROFILE_SWIPE
 	Session.save_to_disk()
+
+
+func _orientation_word() -> String:
+	return "PORTRAIT" if bool(Session.pref("portrait", false)) else "LANDSCAPE (DEFAULT)"
+
+
+func _cycle_orientation() -> void:
+	Session.prefs["portrait"] = not bool(Session.pref("portrait", false))
+	Session.save_to_disk()
+	MenuRoot.apply_orientation()
 
 
 func _sound_word() -> String:

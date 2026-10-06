@@ -84,6 +84,9 @@ static var cam_aim_smooth := 9.0
 ## How far the view looks into a turn: 0 aims along the smoothed frame, 1 aims
 ## where the nose actually points.
 static var cam_turn_lead := 0.6
+## How hard the chase view leans at what matters in high motion: where a yeeted
+## ship is heading, or the foe that knocked it away (0 = never).
+static var cam_motion_focus := 1.0
 ## Extra degrees of FOV at top speed: the "going fast" stretch.
 static var cam_speed_fov := 9.0
 ## Multiplier on the chase view's roll into a turn.
@@ -766,6 +769,7 @@ const FLOAT_RANGES := {
 	"cam_position_smooth": Vector2(1.0, 15.0),
 	"cam_aim_smooth": Vector2(2.0, 25.0),
 	"cam_turn_lead": Vector2(0.0, 1.5),
+	"cam_motion_focus": Vector2(0.0, 1.5),
 	"cam_speed_fov": Vector2(0.0, 25.0),
 	"cam_bank_mult": Vector2(0.0, 2.5),
 	"cam_turn_swing": Vector2(0.0, 1.5),
@@ -930,6 +934,7 @@ static func get_float(field: String) -> float:
 		"cam_position_smooth": return cam_position_smooth
 		"cam_aim_smooth": return cam_aim_smooth
 		"cam_turn_lead": return cam_turn_lead
+		"cam_motion_focus": return cam_motion_focus
 		"cam_speed_fov": return cam_speed_fov
 		"cam_bank_mult": return cam_bank_mult
 		"cam_turn_swing": return cam_turn_swing
@@ -1164,6 +1169,7 @@ static func _load_float(field: String, value: float) -> void:
 		"cam_position_smooth": cam_position_smooth = v
 		"cam_aim_smooth": cam_aim_smooth = v
 		"cam_turn_lead": cam_turn_lead = v
+		"cam_motion_focus": cam_motion_focus = v
 		"cam_speed_fov": cam_speed_fov = v
 		"cam_bank_mult": cam_bank_mult = v
 		"cam_turn_swing": cam_turn_swing = v

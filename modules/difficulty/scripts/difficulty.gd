@@ -115,6 +115,14 @@ const SCHEMA := {
 	"dreadnought_chance": [0.4, 0.0, 1.0, "Dreadnought", "Chance a fight level brings one."],
 	"dreadnought_size": [3.0, 1.0, 12.0, "Dreadnought", "A heavy dreadnought's size, fighter sizes."],
 	"dreadnought_hp": [5.0, 1.0, 20.0, "Dreadnought", "Its hull, × a level enemy's."],
+	# --- Megastructures (LargeCraftGenerator warships: turrets, launch bays) ---
+	"mega_boss_from": [8.0, 1.0, 80.0, "Megastructures", "Level a sector boss may be a megastructure warship from."],
+	"mega_boss_chance": [0.5, 0.0, 1.0, "Megastructures", "Chance a boss from then on is one."],
+	"mega_assault_from": [5.0, 1.0, 80.0, "Megastructures", "Level an assault's carrier is a megastructure mothership from."],
+	"mega_planet_chance": [0.35, 0.0, 1.0, "Megastructures", "Chance a megastructure is planet-sized."],
+	"mega_sun_chance": [0.2, 0.0, 1.0, "Megastructures", "Chance a megastructure is sun-sized."],
+	"backdrop_chance": [0.4, 0.0, 1.0, "Megastructures", "Chance a level without a fight has a megastructure in the distance (often sun-sized)."],
+	"boss_size_spread": [2.6, 1.0, 6.0, "Megastructures", "Big-ship bosses vary from their level's size up to this many times it."],
 	# --- Rewards ---
 	"reward_base": [40.0, 0.0, 500.0, "Rewards", "Coins a level's first win pays before the climb."],
 	"reward_per_level": [12.0, 0.0, 100.0, "Rewards", "Coins added per level number."],
@@ -162,6 +170,18 @@ const TEXT_DEFAULTS := {
 		"HAULER": "ROOM & STEADY HANDS", "TITAN": "BRUTE FORCE",
 	},
 }
+## A megastructure's size ([enum FlightRoot.CraftSize]: 1 default, 2 planet,
+## 3 sun) for a 0..1 roll.
+static func mega_size(r: float) -> int:
+	if r < v("mega_sun_chance"):
+		return 3
+	if r < v("mega_sun_chance") + v("mega_planet_chance"):
+		return 2
+	return 1
+
+
+## The other big hulls a boss can fly (ship_families.json).
+const BOSS_PRESETS: Array[String] = ["segment_cruiser", "bulwark_warden", "mule_juggernaut", "keel_sovereign"]
 ## The hull preset the dreadnoughts fly (ship_families.json).
 const DREADNOUGHT_PRESET := "keel_dreadnought"
 ## Weapon classes, lowest first (SystemsSim.WEAPON_SIZE_TIERS).
@@ -514,12 +534,24 @@ static func for_level(number: int, kind: String, roll: float) -> Dictionary:
 		"max_attackers": mini(int(v("attackers_start")) + int(n / maxf(v("attackers_every"), 1.0)), int(v("attackers_max"))),
 		"extra_enemies": int(n / maxf(v("extra_enemy_every"), 1.0)),
 	}
+	# Two more rolls from the level's one, so the old numbers stay put.
+	var roll_b := fposmod(roll * 7.31 + 0.13, 1.0)
+	var roll_c := fposmod(roll * 13.7 + 0.41, 1.0)
 	if kind == "boss":
 		o["boss_gun_class"] = 3 if number >= int(v("boss_capital_from")) else maxi(gun_class(number), 2)
 		o["boss_hp"] = snappedf(stat("boss_hp", number), 0.05)
-		o["boss_size"] = snappedf(stat("boss_size", number), 0.1)
+		# Bosses come in every size: most near their level's, now and then
+		# several times it.
+		o["boss_size"] = snappedf(stat("boss_size", number) * lerpf(1.0, v("boss_size_spread"), pow(roll_b, 1.6)), 0.1)
 		if v("boss_dreadnought") >= 0.5:
-			o["boss_preset"] = DREADNOUGHT_PRESET
+			o["boss_preset"] = DREADNOUGHT_PRESET if roll_c < 0.55 else BOSS_PRESETS[int(roll_b * BOSS_PRESETS.size()) % BOSS_PRESETS.size()]
+		if number >= int(v("mega_boss_from")) and roll_c < v("mega_boss_chance"):
+			o["mega_boss"] = true
+			o["mega_kind"] = 0 if roll_b < 0.6 else 1
+			o["mega_size"] = mega_size(roll_b)
+	if kind == "assault" and number >= int(v("mega_assault_from")):
+		o["mega"] = true
+		o["mega_size"] = mega_size(roll_c)
 	if kind == "duel":
 		o["ace"] = true
 		o["ace_hp"] = stat("ace_hp", number)

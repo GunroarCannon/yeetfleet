@@ -79,6 +79,7 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_float_row(vbox, "Position smoothing (lower = floatier)", "cam_position_smooth", 0.25, "%.2f /s")
 	_float_row(vbox, "Aim smoothing (lower = floatier)", "cam_aim_smooth", 0.25, "%.2f /s")
 	_float_row(vbox, "Look into turns", "cam_turn_lead", 0.05, "%.0f%%", 100.0)
+	_float_row(vbox, "Look where it's going / at what hit you", "cam_motion_focus", 0.05, "%.0f%%", 100.0)
 	_float_row(vbox, "Swing wide in turns", "cam_turn_swing", 0.05, "×%.2f")
 	_float_row(vbox, "Bank into turns", "cam_bank_mult", 0.05, "×%.2f")
 	_float_row(vbox, "Speed FOV stretch", "cam_speed_fov", 0.5, "+%.1f°")

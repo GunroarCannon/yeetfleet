@@ -35,6 +35,8 @@ code must do the same. Decision records live in `docs/decisions/`.
     physics interpolation off. Also checks emotes ride along at speed, a
     twitchy-thumb weave against the old rigid follow, and that every view in
     `FlightCamera.CYCLE` keeps the ship in frame.
+  - sling launch along the view must not turn the camera: `... --fixed-fps 60
+    --script modules/flight/tools/launch_cam_check.gd` — run at 144 too.
   - profile cycle / rock promote / control modes: the matching `*_check.gd`.
   - scenarios (sides spawn, wingmen fight, locked guns kill, stop restores
     free roam): `... --script modules/flight/tools/scenario_check.gd`.

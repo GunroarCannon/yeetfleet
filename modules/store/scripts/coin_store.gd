@@ -90,6 +90,12 @@ static func available() -> bool:
 	return _rc != null or OS.is_debug_build()
 
 
+## Whether real-money buying is switched on: not yet in a shipped build, only
+## with debug mode (the packs are not live for now).
+static func purchases_enabled() -> bool:
+	return Session.debug_mode and available()
+
+
 ## True while a purchase is open (the buttons wait).
 static func busy() -> bool:
 	return _pending != ""
@@ -112,6 +118,9 @@ static func price_text(id: String) -> String:
 static func buy(id: String) -> void:
 	start()
 	if busy() or pack(id).is_empty():
+		return
+	if not Session.debug_mode:
+		notifier.failed.emit(id, "NOT AVAILABLE YET")
 		return
 	_pending = id
 	if _rc != null:

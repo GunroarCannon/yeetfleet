@@ -22,7 +22,7 @@ const COLORS := {
 	AiShip.Attitude.HOSTILE: Color("ff3b3b"),
 	AiShip.Attitude.WARY: Color("ff9a2e"),
 	AiShip.Attitude.FRIENDLY: Color("46e05a"),
-	AiShip.Attitude.HARMLESS: Color("ffe14a"),
+	AiShip.Attitude.HARMLESS: Color("a8adb5"),
 }
 ## Target radius on screen, in pixels (scaled with the HUD).
 const BASE_RADIUS := 30.0
@@ -114,6 +114,10 @@ func _shoots_on_sight(ship: AiShip, cam: Camera3D) -> bool:
 	if ship.attitude_to_player() != AiShip.Attitude.HOSTILE:
 		return false
 	if cam == null:
+		return true
+	# Whoever is going for a ship the mission has pinned (the hauler to guard)
+	# is red wherever it is, held at the screen edge when out of view.
+	if ship.locked_enemy != null and _pinned.has(ship.locked_enemy):
 		return true
 	if cam.global_position.distance_to(ship.global_position) > FAR_DIST:
 		return false
@@ -274,7 +278,8 @@ func _draw_graffiti(c: Vector2, r: float, col: Color, alpha: float, shape: Dicti
 
 func _draw_distance(at: Vector2, dist: float, col: Color, alpha: float, ui_scale: float) -> void:
 	var font := get_theme_default_font()
-	if font == null:
+	# Small print: the developer's read-out, never the player's.
+	if font == null or not Session.debug_mode:
 		return
 	var text := "%d m" % int(dist) if dist < 1000.0 else "%.1f km" % (dist / 1000.0)
 	var size := int(13.0 * ui_scale)

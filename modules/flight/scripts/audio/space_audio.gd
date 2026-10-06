@@ -63,7 +63,12 @@ var _spatial_beam_player: AudioStreamPlayer3D = null
 
 # 3D Spatial Audio Pool
 const POOL_SIZE := 16
+const BLAST_POOL_SIZE := 8
 var _spatial_pool: Array[AudioStreamPlayer3D] = []
+## Blasts have their own few voices: gunfire and hits cycle the main pool every
+## fraction of a second and used to cut an explosion off the moment it began.
+var _blast_pool: Array[AudioStreamPlayer3D] = []
+var _blast_idx := 0
 var _pool_idx := 0
 
 ## Simple leaky-bucket auto-duck for AI weapon fire: every non-player shot adds
@@ -729,6 +734,17 @@ func _setup_players() -> void:
 		p.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_PHYSICS_STEP
 		add_child(p)
 		_spatial_pool.append(p)
+	_blast_pool.clear()
+	for i in BLAST_POOL_SIZE:
+		var b := AudioStreamPlayer3D.new()
+		b.name = "BlastSFX_%d" % i
+		b.bus = BUS_EXTERIOR
+		b.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_SQUARE_DISTANCE
+		b.max_db = 6.0
+		b.attenuation_filter_cutoff_hz = DISTANT_CUTOFF_HZ
+		b.attenuation_filter_db = DISTANT_FILTER_DB
+		add_child(b)
+		_blast_pool.append(b)
 
 
 # --- 4. Spatial Playback Methods ---
@@ -783,12 +799,18 @@ func play_spatial(
 	unit_size: float = 18.0,
 	max_distance: float = 3200.0,
 	pitch_range: float = 0.12,
-	bus: StringName = BUS_EXTERIOR
+	bus: StringName = BUS_EXTERIOR,
+	blast := false
 ) -> AudioStreamPlayer3D:
 	if stream == null or _spatial_pool.is_empty():
 		return null
-	var player := _spatial_pool[_pool_idx]
-	_pool_idx = (_pool_idx + 1) % _spatial_pool.size()
+	var player: AudioStreamPlayer3D
+	if blast and not _blast_pool.is_empty():
+		player = _blast_pool[_blast_idx]
+		_blast_idx = (_blast_idx + 1) % _blast_pool.size()
+	else:
+		player = _spatial_pool[_pool_idx]
+		_pool_idx = (_pool_idx + 1) % _spatial_pool.size()
 
 	player.stop()
 	player.bus = bus
@@ -807,11 +829,11 @@ func play_spatial(
 ## variant, a random pitch), falling off with distance like the rest.
 func play_sfx(
 	id: StringName, pos: Vector3, volume_db := 0.0, pitch_range := 0.1,
-	unit_size := 22.0, max_distance := 3000.0
+	unit_size := 22.0, max_distance := 3000.0, blast := false
 ) -> AudioStreamPlayer3D:
 	if not FxSettings.library_sounds:
 		return null
-	var p := play_spatial(Sfx.random_stream(id), pos, unit_size, max_distance, pitch_range, BUS_EXTERIOR)
+	var p := play_spatial(Sfx.random_stream(id), pos, unit_size, max_distance, pitch_range, BUS_EXTERIOR, blast)
 	if p != null:
 		p.volume_db += volume_db
 	return p
@@ -1007,13 +1029,13 @@ func play_blast(pos: Vector3, kind: StringName = &"explosion") -> void:
 		# The synth bank: the old two sizes.
 		var heavy := kind in BIG_BLASTS
 		play_spatial(sound_explosion_heavy if heavy else sound_explosion_small, pos,
-			38.0 if heavy else 22.0, 4500.0 if heavy else 2800.0, 0.18, BUS_EXTERIOR)
+			38.0 if heavy else 22.0, 4500.0 if heavy else 2800.0, 0.18, BUS_EXTERIOR, true)
 		return
 	if kind in BIG_BLASTS and listener_distance(pos) > FAR_BLAST_DISTANCE:
 		play_pilot(&"explosion_far", -4.0, 1.0, 0.12)
 		return
 	var reach: Vector2 = BLAST_REACH.get(kind, Vector2(24.0, 3000.0))
-	play_sfx(kind, pos, 0.0, 0.16, reach.x, reach.y)
+	play_sfx(kind, pos, 0.0, 0.16, reach.x, reach.y, true)
 
 
 func play_planet_destruction(pos: Vector3) -> void:

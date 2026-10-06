@@ -85,6 +85,10 @@ var _env_ref: Environment = null
 ## This flight's system recipe ([member Session.space_setup]); {} = the
 ## hand-built default.
 var _setup := {}
+## A recipe's outer worlds ([member Session.space_setup] "outer"), beyond the
+## three fixed ones: {name, centre, radius, rings}. The sandbox rolls a few, so
+## a system is a real spread of planets to fly between.
+var outer_bodies: Array[Dictionary] = []
 
 ## Planet looks a recipe can ask for by id: colours, ice, sea, air, clouds,
 ## and "gas" for a banded giant. An unknown id keeps the saved planet.
@@ -129,6 +133,16 @@ func _enter_tree() -> void:
 		var need := planet_radius + moon_orbit_radius + BELT_OUTER + 1500.0
 		if planet_centre.length() < need:
 			planet_centre = planet_centre.normalized() * need
+		var outer: Array = _setup.get("outer", [])
+		for i in outer.size():
+			var o: Dictionary = outer[i]
+			var dir := Vector3(cos(float(o.get("yaw", 0.0))), float(o.get("rise", 0.0)), sin(float(o.get("yaw", 0.0)))).normalized()
+			outer_bodies.append({
+				"name": PlanetData.system_name(int(_setup.get("seed", 1)), 4 + i),
+				"centre": dir * float(o.get("dist", 14000.0)) * spacing,
+				"radius": PLANET_RADIUS * float(o.get("size", 1.0)) * size_scale,
+				"rings": bool(o.get("rings", false)),
+			})
 
 
 ## How much heavier than the default a body is under this flight's recipe
@@ -173,6 +187,8 @@ func _vary(data: PlanetData, role: int) -> PlanetData:
 	else:
 		data.band_count = rng.randf_range(5.0, 14.0)
 	data.ring_enabled = role == 0 and bool(_setup.get("rings", false))
+	if role >= 4 and role - 4 < outer_bodies.size():
+		data.ring_enabled = bool(outer_bodies[role - 4]["rings"])
 	if data.ring_enabled:
 		data.ring_color_a = data.secondary_color.lightened(0.3)
 		data.ring_color_b = data.primary_color
@@ -249,6 +265,7 @@ func _ready() -> void:
 	_build_planet()
 	_setup_moon_orbit()
 	_build_extra_planets()
+	_build_outer_planets()
 	_build_station()
 	_build_belt()
 	_build_floating_asteroids()
@@ -316,6 +333,10 @@ func collision_statics() -> Array[Dictionary]:
 	var station := get_node_or_null("Station")
 	if station != null:
 		out.append({"node": station, "radius": STATION_RADIUS, "layer": PhysBody.Layer.STATIC})
+	for i in outer_bodies.size():
+		var o := get_node_or_null("Outer%d" % i)
+		if o != null:
+			out.append({"node": o, "radius": float(outer_bodies[i]["radius"]), "layer": PhysBody.Layer.STATIC})
 	for rock in asteroid_data:
 		var node: Node3D = rock.get("node")
 		if node != null:
@@ -1239,6 +1260,8 @@ func _make_planet(node_name: String, id: String, radius: float, offset: Vector3,
 	if not _setup.is_empty():
 		# A private copy: the library's resource is shared with the editor.
 		var role: int = {"Body": 0, "Ashara": 1, "Glacius": 2, "Moon": 3}.get(node_name, 3)
+		if node_name.begins_with("Outer"):
+			role = 4 + node_name.substr(5).to_int()
 		data = _vary(data.duplicate(), role)
 	data.planet_radius = radius
 	if _detail() > 1:
@@ -1343,6 +1366,27 @@ func _build_extra_planets() -> void:
 		"radius": planet3_radius,
 		"color": Color("a0d4ff"),
 	})
+
+
+## The recipe's outer worlds (see [member outer_bodies]), each a planet on its
+## own with the recipe's look for its role.
+func _build_outer_planets() -> void:
+	var colors := [Color("ffb04a"), Color("7dff9a"), Color("ff7ad8"), Color("8ab4ff"), Color("ffe066")]
+	for i in outer_bodies.size():
+		var o: Dictionary = outer_bodies[i]
+		var pivot := Node3D.new()
+		pivot.name = "Outer%d" % i
+		pivot.position = o["centre"]
+		add_child(pivot)
+		var base_id: String = ["tarn_iv", "ashara", "glacius"][i % 3]
+		var fallback: PlanetData = [_fallback_planet(), _fallback_planet_ashara(), _fallback_planet_glacius()][i % 3]
+		pivot.add_child(_make_planet("Outer%d" % i, base_id, float(o["radius"]), Vector3.ZERO, fallback))
+		landmarks.append({
+			"name": String(o["name"]),
+			"position": o["centre"],
+			"radius": float(o["radius"]),
+			"color": colors[i % colors.size()],
+		})
 
 
 func _fallback_planet_ashara() -> PlanetData:

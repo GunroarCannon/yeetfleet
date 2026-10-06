@@ -35,6 +35,10 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	vbox.add_child(row)
 	var group := ButtonGroup.new()
 	for i in FlightRoot.MOVE_PROFILE_NAMES.size():
+		if not Session.debug_mode and i != FlightRoot.MoveProfile.SWIPE \
+				and i != FlightRoot.MoveProfile.SLINGSHOT:
+			_profile_buttons.append(null)
+			continue
 		var b := Button.new()
 		b.text = String(FlightRoot.MOVE_PROFILE_NAMES[i])
 		b.toggle_mode = true
@@ -164,7 +168,8 @@ func _sync_profile() -> void:
 	if _root == null:
 		return
 	for i in _profile_buttons.size():
-		_profile_buttons[i].set_pressed_no_signal(i == _root.move_profile)
+		if _profile_buttons[i] != null:
+			_profile_buttons[i].set_pressed_no_signal(i == _root.move_profile)
 
 
 func _note(vbox: VBoxContainer, text: String) -> void:

@@ -67,7 +67,7 @@ func layout() -> void:
 
 
 func _refresh() -> void:
-	var open := CoinStore.available()
+	var open := true
 	for c in _cards:
 		c.refresh(open)
 

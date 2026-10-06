@@ -127,6 +127,8 @@ var _debris: Array[Node3D] = []
 ## live nodes: a turret's barrel doesn't animate, so a stored transform is
 ## all a firing consumer (flight-side) needs.
 var _turrets: Array[Transform3D] = []
+## The part id of each [member _turrets] entry: a turret shot off stops firing.
+var _turret_ids: Array[int] = []
 var _rng := RandomNumberGenerator.new()
 
 @onready var _parts_root := Node3D.new()
@@ -159,6 +161,7 @@ func generate() -> void:
 	_pad_for_part.clear()
 	_debris.clear()
 	_turrets.clear()
+	_turret_ids.clear()
 	_inst_mat_hull = null
 	_inst_mat_greeble = null
 	_inst_mat_glow = null
@@ -299,6 +302,17 @@ func _generate_mothership() -> void:
 		var size := _rng.randf_range(0.4, 0.9)
 		_add_part(_random_greeble_kind(), {"sx": size, "sy": size, "sz": size},
 			Transform3D(Basis(), pos), true)
+
+	# 7. Point-defence turrets round the decks, above and below — a carrier
+	# guards itself while its fighters are out. Last, so every part above
+	# still lands where a saved recipe put it.
+	for i in maxi(spire_count / 3, 4):
+		var a := _rng.randf_range(0.0, TAU)
+		var r := _rng.randf_range(inner_r * 1.2, saucer_r * 0.92)
+		var below := i % 2 == 1
+		var up := Vector3.DOWN if below else Vector3.UP
+		var pos := Vector3(cos(a) * r, saucer_h * (-0.3 if below else 0.38), sin(a) * r)
+		_add_turret(Transform3D(_radial_basis(up), pos))
 
 
 ## {z: float, radius: float} per segment, hull-surface radius at that point
@@ -459,14 +473,20 @@ func _mount_turrets_on_spine(spine: Array[Dictionary]) -> void:
 		var radial := Vector3(cos(angle), sin(angle), 0.0)
 		var mount_r := float(section["radius"])
 		var mount_z := float(section["z"])
-		var xform := Transform3D(_radial_basis(radial), radial * mount_r + Vector3(0, 0, mount_z))
-		var j := 1.0 + _rng.randf_range(-part_scale_jitter, part_scale_jitter)
-		var part_id := _add_part("turret", {
-			"base": 1.2 * j, "barrel": 1.8 * j, "barrel_r": 0.22 * j,
-		}, xform, true)
-		var part: Part = _parts[part_id]
-		var muzzle: Transform3D = part.markers.get("muzzle", [Transform3D()])[0]
-		_turrets.append(xform * muzzle)
+		_add_turret(Transform3D(_radial_basis(radial), radial * mount_r + Vector3(0, 0, mount_z)))
+
+
+## One turret part at [param xform] (its barrel out along the basis), with
+## its muzzle remembered for [method get_turret_points].
+func _add_turret(xform: Transform3D) -> void:
+	var j := 1.0 + _rng.randf_range(-part_scale_jitter, part_scale_jitter)
+	var part_id := _add_part("turret", {
+		"base": 1.2 * j, "barrel": 1.8 * j, "barrel_r": 0.22 * j,
+	}, xform, true)
+	var part: Part = _parts[part_id]
+	var muzzle: Transform3D = part.markers.get("muzzle", [Transform3D()])[0]
+	_turrets.append(xform * muzzle)
+	_turret_ids.append(part_id)
 
 
 # --- Ring station (Archetype.RING_STATION) ---------------------------------
@@ -1265,16 +1285,19 @@ func get_dock_pads() -> Array[DockingPad]:
 	return out
 
 
-## World-space transforms of every [constant Archetype.DREADNOUGHT] turret
-## muzzle (forward = local -Z, this factory's aim convention) — empty for
-## every other archetype. Purely geometric; this module stays combat-
+## World-space transforms of every live turret muzzle (forward = local -Z,
+## this factory's aim convention) — a dreadnought's and a mothership's; empty
+## for the other archetypes, and a turret shot off drops out. Purely
+## geometric; this module stays combat-
 ## agnostic (see the class doc comment), so firing anything from these is
 ## entirely [FlightRoot]'s call, the same split [method get_dock_points] has
 ## with actual docking behaviour.
 func get_turret_points() -> Array[Transform3D]:
 	var out: Array[Transform3D] = []
-	for t in _turrets:
-		out.append(global_transform * t)
+	for i in _turrets.size():
+		if i < _turret_ids.size() and not _parts.has(_turret_ids[i]):
+			continue
+		out.append(global_transform * _turrets[i])
 	return out
 
 

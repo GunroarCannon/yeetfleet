@@ -129,6 +129,9 @@ const GUARD_SLOT_TTL_MS := 1500
 ## Enemies see the player this much nearer than they are (1 = as they are),
 ## so they come for the player rather than the nearest wingman.
 static var player_focus := 1.0
+## True while the player's ship is wrecked: nobody keeps shooting at the wreck.
+## Written by FlightRoot on death and on respawn.
+static var player_down := false
 ## Damage the player's wingmen deal, × (1 = full).
 static var ally_damage_mult := 1.0
 ## Attack slots on the player, overriding [member JuiceSettings.ai_max_attackers] (-1 = don't).
@@ -746,7 +749,10 @@ func attitude_to_player() -> int:
 		p_team = int(player_ref.get_meta("team", 0))
 	if p_team != 0 and team_id == p_team:
 		return Attitude.FRIENDLY
-	if not can_attack():
+	# Harmless by design (a civilian, a probe), not merely out of working guns: a
+	# fighter whose guns were shot off is still the enemy, and used to turn
+	# grey mid-fight.
+	if is_satellite or _weapon_mult < 0.05 or (archetype != null and archetype.aggression <= 0.05):
 		return Attitude.HARMLESS
 	var memory_ms := int(JuiceSettings.interaction_memory * 1000.0)
 	if Time.get_ticks_msec() - _hit_player_ms <= memory_ms or is_aggroed_to_player():
@@ -892,6 +898,8 @@ func _tick_offview(delta: float) -> void:
 func fire_gate() -> bool:
 	if is_frozen():
 		return false
+	if player_down and not (_combat_target is AiShip):
+		return false
 	if not JuiceSettings.cheat_offscreen_mercy or pilot_host != null:
 		return true
 	var t := _combat_target
@@ -913,6 +921,8 @@ func _update_combat(delta: float, target: Node3D) -> void:
 		systems.set_firing(false)
 		locked_enemy = null
 		return
+	if player_down and not (target is AiShip):
+		target = null
 	if target == null or not is_instance_valid(target) or not target.is_inside_tree():
 		systems.set_firing(false)
 		locked_enemy = null
@@ -1465,11 +1475,18 @@ func _apply_team_faction(t: int) -> void:
 		4: fid = "solar_raiders"     # Orange
 		5: fid = "emerald_warlords"  # Green
 		_: fid = ""
-	if fid != "":
-		_library.apply_faction(_design, fid)
-		faction_name = fid
-		if _view != null:
-			_view.restyle(false)
+	paint_as(fid)
+
+
+## Repaint the hull in faction [param fid]'s colours ("" does nothing): a
+## level named for a colour paints the ships it is about that colour.
+func paint_as(fid: String) -> void:
+	if fid == "" or _library == null or _design == null:
+		return
+	_library.apply_faction(_design, fid)
+	faction_name = fid
+	if _view != null:
+		_view.restyle(false)
 
 
 ## Build a completely random design for an AI ship: random chassis, parts for

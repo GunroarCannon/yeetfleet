@@ -373,22 +373,15 @@ func _band(from: Vector2, to: Vector2, col: Color) -> void:
 	draw_circle(from, 12.0, col)
 
 
-## The hand with its fingertip on [param tip]: a neon glow round the cut-out,
-## the hand tinted neon over it; [param pressed] squashes it a touch.
+## The hand with its fingertip on [param tip]; [param pressed] squashes it a touch.
 func _draw_hand(tip: Vector2, col: Color, alpha: float, pressed: bool) -> void:
 	if alpha <= 0.0:
 		return
 	var h := minf(size.x, size.y) * 0.2 * (0.92 if pressed else 1.0)
 	var w := h * float(_hand.get_width()) / float(_hand.get_height())
 	var at := tip - Vector2(w, h) * HAND_TIP
-	var glow := col
-	glow.a = 0.35 * alpha
-	for k in 8:
-		var a := TAU * k / 8.0
-		draw_texture_rect(_hand, Rect2(at + Vector2(cos(a), sin(a)) * h * 0.035, Vector2(w, h)), false, glow)
-	var tint := Color.WHITE.lerp(col, 0.55)
-	tint.a = alpha
-	draw_texture_rect(_hand, Rect2(at, Vector2(w, h)), false, tint)
+	# The picture as it is (assets/hand.png): no neon tint, no glow.
+	draw_texture_rect(_hand, Rect2(at, Vector2(w, h)), false, Color(1, 1, 1, alpha))
 
 
 func _ship_screen() -> Vector2:

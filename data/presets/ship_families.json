@@ -787,6 +787,583 @@
           }
         }
       }
+    },
+    {
+      "id": "kestrel_phantom",
+      "name": "Kestrel Phantom",
+      "faction": "cyber_teal",
+      "material": "gloss",
+      "palette": {
+        "primary": "1c2a3a",
+        "accent": "35e0ff",
+        "trim": "c8d4e0"
+      },
+      "root": {
+        "part": "hull_scout_kestrel",
+        "children": {
+          "cockpit": {
+            "part": "cockpit_bubble_light",
+            "children": {
+              "greeble_top": {
+                "part": "greeble_fin_blade"
+              }
+            }
+          },
+          "engine_l": {
+            "part": "thruster_vector_s"
+          },
+          "wing_l": {
+            "part": "wing_swept_s",
+            "children": {
+              "hardpoint_in": {
+                "part": "gun_pulse_s"
+              },
+              "hardpoint_out": {
+                "part": "gun_autocannon_s"
+              },
+              "tip": {
+                "part": "greeble_light_nav"
+              }
+            },
+            "pose": {
+              "roll": -8.0,
+              "scale": 1.15
+            }
+          },
+          "hardpoint_c": {
+            "part": "gun_autocannon_s"
+          },
+          "utility": {
+            "part": "reactor_compact_s",
+            "children": {
+              "radiator": {
+                "part": "radiator_fin_s"
+              }
+            }
+          },
+          "greeble_spine": {
+            "part": "greeble_sensor_cluster"
+          }
+        }
+      }
+    },
+    {
+      "id": "lance_ace",
+      "name": "Lance Ace",
+      "faction": "crimson_toybox",
+      "material": "gloss",
+      "palette": {
+        "primary": "5a1220",
+        "accent": "ffd23f",
+        "trim": "e8e0d0"
+      },
+      "root": {
+        "part": "hull_fighter_lance",
+        "children": {
+          "cockpit": {
+            "part": "cockpit_wedge_armored",
+            "children": {
+              "sensor_fwd": {
+                "part": "greeble_antenna_short"
+              },
+              "greeble_top": {
+                "part": "greeble_fin_blade"
+              }
+            }
+          },
+          "engine_l": {
+            "part": "thruster_burner_s",
+            "children": {
+              "fin_top": {
+                "part": "fin_canard_s"
+              },
+              "radiator": {
+                "part": "radiator_fin_s"
+              }
+            },
+            "pose": {
+              "scale": 1.2
+            }
+          },
+          "wing_l": {
+            "part": "wing_swept_s",
+            "children": {
+              "hardpoint_in": {
+                "part": "gun_autocannon_s"
+              },
+              "hardpoint_out": {
+                "part": "launcher_missile_s"
+              },
+              "tip": {
+                "part": "fin_canard_s"
+              }
+            },
+            "pose": {
+              "roll": -6.0,
+              "scale": 1.25
+            }
+          },
+          "hardpoint_c": {
+            "part": "gun_autocannon_s"
+          },
+          "dorsal_fin": {
+            "part": "greeble_fin_tall"
+          },
+          "armor_l": {
+            "part": "plate_reactive_s"
+          },
+          "utility": {
+            "part": "shield_gen_s"
+          },
+          "greeble_spine": {
+            "part": "greeble_vent_large"
+          }
+        }
+      }
+    },
+    {
+      "id": "bulwark_warden",
+      "name": "Bulwark Warden",
+      "faction": "cobalt_vanguard",
+      "material": "matte",
+      "palette": {
+        "primary": "22304a",
+        "accent": "ff5b3a",
+        "trim": "b8c2d0"
+      },
+      "root": {
+        "part": "hull_corvette_bulwark",
+        "children": {
+          "cockpit": {
+            "part": "cockpit_tandem_two",
+            "children": {
+              "turret_micro": {
+                "part": "gun_autocannon_s"
+              },
+              "greeble_top": {
+                "part": "greeble_sensor_cluster"
+              }
+            }
+          },
+          "engine_l": {
+            "part": "thruster_torch_m",
+            "children": {
+              "radiator": {
+                "part": "radiator_bank_m"
+              }
+            }
+          },
+          "engine_c": {
+            "part": "thruster_torch_m",
+            "children": {
+              "radiator": {
+                "part": "radiator_bank_m"
+              }
+            }
+          },
+          "wing_l": {
+            "part": "wing_gull_m",
+            "children": {
+              "hardpoint_in": {
+                "part": "gun_plasma_m"
+              },
+              "hardpoint_out": {
+                "part": "launcher_torpedo_m"
+              },
+              "tip": {
+                "part": "greeble_light_nav"
+              }
+            },
+            "pose": {
+              "roll": -4.0
+            }
+          },
+          "turret_dorsal": {
+            "part": "gun_plasma_m",
+            "pose": {
+              "pitch": 6.0
+            }
+          },
+          "turret_ventral": {
+            "part": "gun_multicannon_m"
+          },
+          "hardpoint_l": {
+            "part": "gun_autocannon_s"
+          },
+          "cargo_l": {
+            "part": "shield_gen_m"
+          },
+          "armor_l": {
+            "part": "plate_ablative_m"
+          },
+          "greeble_nose": {
+            "part": "greeble_dish_comms"
+          },
+          "greeble_tail": {
+            "part": "greeble_light_beacon"
+          }
+        }
+      }
+    },
+    {
+      "id": "mule_juggernaut",
+      "name": "Mule Juggernaut",
+      "faction": "solar_raiders",
+      "material": "weathered",
+      "palette": {
+        "primary": "4a3418",
+        "accent": "ffc61a",
+        "trim": "9a8a70"
+      },
+      "root": {
+        "part": "hull_hauler_mule",
+        "children": {
+          "cockpit": {
+            "part": "bridge_freight",
+            "children": {
+              "turret_roof": {
+                "part": "gun_multicannon_m"
+              },
+              "greeble_roof": {
+                "part": "greeble_antenna_tall"
+              }
+            }
+          },
+          "engine_l": {
+            "part": "drive_freight_l",
+            "children": {
+              "radiator": {
+                "part": "radiator_bank_l"
+              }
+            }
+          },
+          "engine_upper_l": {
+            "part": "thruster_torch_m"
+          },
+          "wing_l": {
+            "part": "wing_truss_l",
+            "children": {
+              "engine_mount": {
+                "part": "thruster_ion_m"
+              },
+              "hardpoint_top": {
+                "part": "gun_railgun_l"
+              },
+              "hardpoint_low": {
+                "part": "launcher_torpedo_m"
+              },
+              "tip": {
+                "part": "gun_multicannon_m"
+              }
+            }
+          },
+          "cargo_fwd_l": {
+            "part": "shield_gen_l"
+          },
+          "cargo_mid_l": {
+            "part": "reactor_fusion_l",
+            "children": {
+              "radiator": {
+                "part": "radiator_bank_l"
+              }
+            }
+          },
+          "cargo_spine": {
+            "part": "cargo_bay_l",
+            "children": {
+              "armor_face": {
+                "part": "plate_belt_l"
+              }
+            }
+          },
+          "turret_dorsal": {
+            "part": "gun_plasma_m"
+          },
+          "turret_ventral": {
+            "part": "gun_multicannon_m"
+          },
+          "armor_l": {
+            "part": "plate_belt_l",
+            "children": {
+              "hardpoint": {
+                "part": "gun_autocannon_s"
+              }
+            }
+          },
+          "greeble_tail": {
+            "part": "greeble_light_beacon"
+          }
+        }
+      }
+    },
+    {
+      "id": "segment_cruiser",
+      "name": "Segment Cruiser",
+      "faction": "emerald_warlords",
+      "material": "gloss",
+      "palette": {
+        "primary": "143a2a",
+        "accent": "7dff3a",
+        "trim": "a8c0b0"
+      },
+      "root": {
+        "part": "hull_capital_keel",
+        "children": {
+          "bridge": {
+            "part": "bridge_command_capital",
+            "children": {
+              "mast": {
+                "part": "greeble_antenna_tall"
+              },
+              "turret_l": {
+                "part": "gun_plasma_m"
+              },
+              "armor_face": {
+                "part": "plate_heavy_m"
+              }
+            }
+          },
+          "engine_l": {
+            "part": "drive_capital_xl",
+            "children": {
+              "radiator": {
+                "part": "radiator_capital_xl"
+              }
+            }
+          },
+          "turret_dorsal_fwd": {
+            "part": "gun_railgun_l"
+          },
+          "turret_ventral_fwd": {
+            "part": "gun_plasma_m"
+          },
+          "hangar": {
+            "part": "hangar_module_capital",
+            "children": {
+              "deck_gun_l": {
+                "part": "gun_multicannon_m"
+              },
+              "mast": {
+                "part": "greeble_antenna_short"
+              }
+            }
+          },
+          "armor_l": {
+            "part": "plate_capital_xl",
+            "children": {
+              "hardpoint_l": {
+                "part": "gun_plasma_m"
+              }
+            }
+          },
+          "greeble_mast": {
+            "part": "greeble_dish_wide"
+          },
+          "spine_aft": {
+            "part": "hull_capital_segment",
+            "children": {
+              "turret_dorsal": {
+                "part": "battery_beam_xl",
+                "children": {
+                  "turret_micro_l": {
+                    "part": "gun_pulse_s"
+                  }
+                }
+              },
+              "turret_ventral": {
+                "part": "gun_railgun_l"
+              },
+              "sponson_l": {
+                "part": "gun_plasma_m"
+              },
+              "engine_aux_l": {
+                "part": "thruster_torch_m"
+              },
+              "armor_l": {
+                "part": "plate_capital_xl"
+              },
+              "greeble_dorsal": {
+                "part": "greeble_fin_tall"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "keel_sovereign",
+      "name": "Keel Sovereign",
+      "faction": "amethyst_void",
+      "material": "gloss",
+      "palette": {
+        "primary": "24123a",
+        "accent": "ff3bd0",
+        "trim": "c0a8e0"
+      },
+      "root": {
+        "part": "hull_capital_keel",
+        "children": {
+          "bridge": {
+            "part": "bridge_command_capital",
+            "children": {
+              "mast": {
+                "part": "greeble_antenna_tall",
+                "children": {
+                  "tip": {
+                    "part": "greeble_light_beacon"
+                  }
+                }
+              },
+              "turret_l": {
+                "part": "gun_multicannon_m"
+              },
+              "armor_face": {
+                "part": "plate_heavy_m"
+              }
+            }
+          },
+          "engine_l": {
+            "part": "drive_capital_xl",
+            "children": {
+              "radiator": {
+                "part": "radiator_capital_xl",
+                "children": {
+                  "greeble": {
+                    "part": "greeble_vent_large"
+                  }
+                }
+              }
+            }
+          },
+          "turret_dorsal_fwd": {
+            "part": "battery_beam_xl",
+            "children": {
+              "turret_micro_l": {
+                "part": "gun_autocannon_s"
+              }
+            }
+          },
+          "turret_ventral_fwd": {
+            "part": "battery_beam_xl",
+            "children": {
+              "turret_micro_l": {
+                "part": "gun_pulse_s"
+              }
+            }
+          },
+          "hangar": {
+            "part": "hangar_module_capital",
+            "children": {
+              "deck_gun_l": {
+                "part": "gun_plasma_m"
+              },
+              "armor_face": {
+                "part": "plate_capital_xl"
+              },
+              "mast": {
+                "part": "greeble_antenna_tall"
+              }
+            }
+          },
+          "armor_l": {
+            "part": "plate_capital_xl",
+            "children": {
+              "hardpoint_l": {
+                "part": "gun_plasma_m"
+              },
+              "greeble": {
+                "part": "greeble_vent_large"
+              }
+            }
+          },
+          "greeble_mast": {
+            "part": "greeble_antenna_tall",
+            "children": {
+              "tip": {
+                "part": "greeble_dish_wide"
+              }
+            }
+          },
+          "spine_aft": {
+            "part": "hull_capital_segment",
+            "children": {
+              "turret_dorsal": {
+                "part": "battery_beam_xl",
+                "children": {
+                  "turret_micro_l": {
+                    "part": "gun_pulse_s"
+                  }
+                }
+              },
+              "turret_ventral": {
+                "part": "gun_railgun_l"
+              },
+              "sponson_l": {
+                "part": "launcher_torpedo_m"
+              },
+              "engine_aux_l": {
+                "part": "thruster_torch_m",
+                "children": {
+                  "radiator": {
+                    "part": "radiator_bank_m"
+                  }
+                }
+              },
+              "armor_l": {
+                "part": "plate_capital_xl"
+              },
+              "greeble_dorsal": {
+                "part": "greeble_fin_tall"
+              },
+              "spine_aft": {
+                "part": "hull_capital_segment",
+                "children": {
+                  "turret_dorsal": {
+                    "part": "battery_beam_xl"
+                  },
+                  "turret_ventral": {
+                    "part": "gun_railgun_l"
+                  },
+                  "sponson_l": {
+                    "part": "shield_gen_l"
+                  },
+                  "engine_aux_l": {
+                    "part": "thruster_torch_m"
+                  },
+                  "armor_l": {
+                    "part": "plate_capital_xl"
+                  },
+                  "greeble_dorsal": {
+                    "part": "greeble_antenna_tall"
+                  },
+                  "spine_aft": {
+                    "part": "hull_capital_segment",
+                    "children": {
+                      "turret_dorsal": {
+                        "part": "gun_railgun_l"
+                      },
+                      "sponson_l": {
+                        "part": "reactor_fusion_l",
+                        "children": {
+                          "radiator": {
+                            "part": "radiator_bank_l"
+                          }
+                        }
+                      },
+                      "engine_aux_l": {
+                        "part": "thruster_torch_m"
+                      },
+                      "armor_l": {
+                        "part": "radiator_capital_xl"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

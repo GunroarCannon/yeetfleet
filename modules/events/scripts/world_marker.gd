@@ -110,6 +110,8 @@ func _build_visuals() -> void:
 	_dist_label.modulate = marker_color.lightened(0.2)
 	_dist_label.position = Vector3(0.0, -1.8, 0.0)
 	_dist_label.text = ""
+	# The range is small print: the developer's read-out, not the player's.
+	_dist_label.visible = Session.debug_mode
 	add_child(_dist_label)
 
 

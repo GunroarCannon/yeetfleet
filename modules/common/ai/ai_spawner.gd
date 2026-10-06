@@ -756,6 +756,26 @@ static func _team_aggression(team: int) -> Array[int]:
 	return out
 
 
+## Free up to [param count] roster slots for something that matters more (a
+## sandbox incident's raiders) by clearing the ambient traffic furthest from
+## the player — never the ships in [param keep], a pilot vessel or a
+## satellite. Slots free at once, not at the next prune.
+func make_room(count: int, keep: Array = []) -> void:
+	var need := count - (_max_ships() - _ships.size())
+	if need <= 0:
+		return
+	var player_pos := _find_player_position()
+	var spare: Array[AiShip] = []
+	for s in _ships:
+		if is_instance_valid(s) and not s.is_pilot_vessel and not s.is_satellite and not s in keep:
+			spare.append(s)
+	spare.sort_custom(func(a: AiShip, b: AiShip) -> bool:
+		return a.global_position.distance_squared_to(player_pos) > b.global_position.distance_squared_to(player_pos))
+	for i in mini(need, spare.size()):
+		_ships.erase(spare[i])
+		spare[i].teardown()
+
+
 ## Public: spawn a group of AI ships near the player.
 ## Called from the flight menu to let the player request reinforcements.
 func spawn_near_player(count: int = 3) -> void:

@@ -259,6 +259,8 @@ var _kc_times := Vector3(-1.0, -1.0, -1.0)
 ## the modes' own smoothing never sees the intro's offset).
 var _intro_left := 0.0
 var _intro_total := 0.0
+## The running kill-cam shot is a [method spotlight] (the game is held under it).
+var _spot := false
 ## When the intro ends (ticks, ms). It runs on the wall clock and counts down
 ## even while a kill cam holds the view or there is no ship yet — it used to
 ## count only frames it was drawn in, and a kill cam in the opening seconds
@@ -595,6 +597,31 @@ var look_ahead_rate := 2.5
 ## right onto the hull.
 var distance_limits := Vector2.ZERO
 
+## Optional: () -> Vector3, where the nearest foe is ([constant Vector3.INF]:
+## none). The motion focus looks at it after a knock-back.
+var foe_focus := Callable()
+## Speed (× the hull's top speed) where the motion focus starts and where it is
+## full: a yeet or a hard shove, not cruising.
+const MOTION_START := 1.0
+const MOTION_FULL := 1.8
+## How far the motion focus may pull the aim point, × the camera's distance
+## (on top of [constant LOOK_AHEAD_MAX]'s room: the ship stays in the shot).
+const MOTION_REACH := 0.45
+## How fast the motion focus eases in and out, per second.
+const MOTION_IN_RATE := 1.6
+const MOTION_OUT_RATE := 2.4
+var _motion_focus := Vector3.ZERO
+## A [member follow_dir] flight within this many degrees of the view's own line
+## is already "behind the ship": the frame stays put (full swing by the far
+## angle) and the aim shifts below fade out, so a launch along the view never
+## turns the camera.
+const BEHIND_NEAR_DEG := 12.0
+const BEHIND_FAR_DEG := 35.0
+## 0..1: how much the followed flight is already along the view (see above).
+var _behind := 0.0
+## 0..1, how far the motion focus is pulling now (for the checks).
+var motion_focus_amount := 0.0
+
 var _user_yaw := 0.0
 var _user_pitch := 0.0
 var _user_distance := 1.0
@@ -647,6 +674,63 @@ func _update_user_view(dt: float) -> void:
 	# Never look so far ahead that the ship itself leaves the shot.
 	_look_ahead = _look_ahead.limit_length(maxf(_chase_offset.length(), 1.0) * LOOK_AHEAD_MAX)
 	_dir_blend = move_toward(_dir_blend, 1.0 if follow_dir.is_valid() else 0.0, dt / 0.4)
+	_update_motion_focus(dt)
+
+
+## Whether the player is turning the view by hand (a free-look drag, a swing
+## round the ship): the automatic focus then keeps out of the way.
+func _hands_on_view() -> bool:
+	return _looking or absf(user_yaw) > 2.0 or absf(user_pitch) > 2.0 		or absf(_user_yaw) > 2.0 or absf(_user_pitch) > 2.0 		or absf(look_yaw) > 2.0 or absf(look_pitch) > 2.0
+
+
+## In high motion the view leans where the action is: after a yeet (or any fast
+## run) at where the ship is heading; after a knock-back, at the foe that did it.
+## Never when the player is turning the view by hand, never a snap — it is one
+## more eased offset on the aim point, like [member look_ahead].
+##
+## A knock-back is the hull really tumbling ([member FlightModel.out_of_control])
+## and nothing else. It used to also count any fast run with the nose turned
+## away from the flight — but a sling launch flies before the hull has turned
+## onto it, and a dash can leave the nose behind, so mid-yeet the view swung
+## round to a foe behind the player and looked the wrong way.
+func _update_motion_focus(dt: float) -> void:
+	var want := Vector3.ZERO
+	motion_focus_amount = 0.0
+	var dial := JuiceSettings.cam_motion_focus
+	if model != null and dial > 0.0 and not _hands_on_view() and not _kc_active and _intro_left <= 0.0:
+		var vel := model.velocity
+		var sp := vel.length()
+		var high := smoothstep(MOTION_START, MOTION_FULL, sp / maxf(model.top_speed, 1.0))
+		var knocked := model.out_of_control
+		var vdir := vel / maxf(sp, 0.001)
+		var ship_x := _ship_xform()
+		if knocked:
+			high = maxf(high, 0.8)
+		var reach := maxf(_chase_offset.length(), 1.0) * MOTION_REACH * dial
+		if high > 0.0:
+			var dir := vdir
+			if knocked:
+				# Thrown back: look at what threw us. With nobody there, leave it be.
+				dir = Vector3.ZERO
+				if foe_focus.is_valid():
+					var foe: Variant = foe_focus.call()
+					if foe is Vector3 and (foe as Vector3).is_finite():
+						var to := (foe as Vector3) - ship_x.origin
+						if to.length() > 1.0:
+							dir = to.normalized()
+			want = dir * reach * high
+			motion_focus_amount = high if dir != Vector3.ZERO else 0.0
+	if _snap:
+		_motion_focus = want
+	else:
+		var rate := MOTION_IN_RATE if want.length_squared() > _motion_focus.length_squared() else MOTION_OUT_RATE
+		_motion_focus = _motion_focus.lerp(want, 1.0 - exp(-rate * dt))
+
+
+## The aim point's extra shift: a profile's look-ahead and the motion focus,
+## together never further than the ship can be and still stay in the shot.
+func _aim_extra() -> Vector3:
+	return (_look_ahead + _motion_focus).limit_length(maxf(_chase_offset.length(), 1.0) * (LOOK_AHEAD_MAX + MOTION_REACH)) * (1.0 - _behind)
 
 
 ## The gesture swing, as a rotation in the followed frame's local space.
@@ -682,6 +766,7 @@ func _limit_factor(zoom: float) -> float:
 ## [member follow_dir] frame when a profile supplies one.
 func _follow_quat(ship_q: Quaternion) -> Quaternion:
 	if not follow_dir.is_valid():
+		_behind = move_toward(_behind, 0.0, _dt / 0.3)
 		return ship_q
 	var fwd: Variant = follow_dir.call()
 	if not (fwd is Vector3) or (fwd as Vector3).length_squared() < 1e-6:
@@ -690,7 +775,13 @@ func _follow_quat(ship_q: Quaternion) -> Quaternion:
 	var f := (fwd as Vector3).normalized()
 	if absf(f.dot(up)) > 0.98:
 		up = Basis(_ref_quat).z
-	return Basis.looking_at(f, up).get_rotation_quaternion()
+	var target := Basis.looking_at(f, up).get_rotation_quaternion()
+	# Already behind the ship (the flight runs along the view): hold the frame
+	# instead of turning onto the exact line, and let the aim shifts fade.
+	var off := rad_to_deg((-Basis(_ref_quat).z).angle_to(f))
+	var swing := smoothstep(BEHIND_NEAR_DEG, BEHIND_FAR_DEG, off)
+	_behind = move_toward(_behind, 1.0 - swing, _dt / 0.3)
+	return _ref_quat.slerp(target, swing)
 
 
 ## The follow frame eased [param step] of the way to [param target] — but,
@@ -763,9 +854,25 @@ func show_ship(target: Node3D, target_radius: float, hold := 1.4, ease_in := 0.9
 	return true
 
 
+## A look at the threat a level opens on (a boss, the lone ace) with the whole
+## game held still under it: [method show_ship]'s shot, and [FlightRoot] reads
+## [method spotlight_active] to freeze time and the controls until the camera
+## is back behind the player's ship.
+func spotlight(target: Node3D, target_radius: float, hold := 1.6, ease_in := 0.9, ease_out := 0.9) -> bool:
+	if not show_ship(target, target_radius, hold, ease_in, ease_out):
+		return false
+	_spot = true
+	return true
+
+
+func spotlight_active() -> bool:
+	return _kc_active and _spot
+
+
 func cancel_kill_cam() -> void:
 	if not _kc_active:
 		return
+	_spot = false
 	_kc_active = false
 	_kc_weight = 0.0
 	global_transform = _base_xform
@@ -1006,7 +1113,7 @@ func _update_chase(delta: float) -> void:
 	var lead := (nose + ref.z) * hull_length * 3.0 * JuiceSettings.cam_turn_lead
 	var focus := _anchor - ref.z * (hull_length * 1.5) + lead * (1.0 - _calm())
 	# Swung round by the player: the ship is the pivot, so aim at it.
-	focus = focus.lerp(_anchor, _user_swing()) + _look_ahead
+	focus = focus.lerp(_anchor, _user_swing()) + _aim_extra()
 
 	if _snap:
 		_chase_offset = wanted_offset
@@ -1116,7 +1223,7 @@ func _update_follow_view(delta: float) -> void:
 			offset = dir * (l * 2.2 + r * 1.6) * (1.0 + 0.25 * sin(_cine_t * 0.43))
 			focus = _anchor - ref.z * (l * 0.6)
 	offset = ref * (_user_basis() * offset) * chase_scale * _user_scale()
-	focus = focus.lerp(_anchor, _user_swing()) + _look_ahead
+	focus = focus.lerp(_anchor, _user_swing()) + _aim_extra()
 	if _snap:
 		_chase_offset = offset
 	else:

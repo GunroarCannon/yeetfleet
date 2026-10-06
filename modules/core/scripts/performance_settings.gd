@@ -25,28 +25,28 @@ static var max_fps := 0
 static var vsync := 1
 ## 3D render resolution as a fraction of the window (0.5–1.0). Multiplies with
 ## the Settings menu's High-res supersampling.
-static var render_scale := 1.0
+static var render_scale := 0.85
 ## MSAA level: 0 off, 1 = 2×, 2 = 4×, 3 = 8×.
 static var msaa := 0
 static var fxaa := false
 ## 0 no shadows, 1 sun only, 2 every light.
-static var shadows := 2
+static var shadows := 1
 ## Bloom/glow on the world environment.
 static var glow := true
 ## Physics simulation rate. Higher is more precise and costs more CPU; with
 ## [member physics_interpolation] on, 60 already looks smooth.
 static var physics_tps := 60
 ## Live AI ship cap for the spawner.
-static var max_ai_ships := 12
+static var max_ai_ships := 8
 ## Concurrent addon effects (hit sparks, explosions) before extra ones are
 ## skipped. Explosions for ship deaths and part loss always spawn.
-static var vfx_budget := 32
+static var vfx_budget := 24
 ## Live wreckage/debris cap: past it, the oldest piece is freed.
-static var max_debris := 120
+static var max_debris := 80
 ## Multiplier on how long debris lives.
-static var debris_lifetime := 1.0
+static var debris_lifetime := 0.7
 ## Mesh LOD aggressiveness: pixels of error allowed before a lower LOD is used.
-static var mesh_lod := 1.0
+static var mesh_lod := 2.0
 ## Phones only: cap the frame rate at [constant BATTERY_FPS] (a 90/120 Hz
 ## screen otherwise renders the whole scene twice as often for the same game)
 ## and the 3D render scale at [constant BATTERY_RENDER_SCALE] (invisible at a

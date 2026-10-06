@@ -80,8 +80,11 @@ var run: SlingRun = null
 ## Finger → ship screen offset while aiming (pixels), and the launch it gives.
 var pull := Vector2.ZERO
 var aim_dir := Vector3.ZERO
-## A pull shorter than this share of a full one cancels the sling on release.
-const CANCEL_PULL := 0.3
+## A pull that ends inside the power gauge's ring (this × the grab radius, the
+## segmented arc round the ship) is a cancel: grey, and letting go launches nothing.
+const DEAD_ZONE_RINGS := 1.25
+## Grey for a pull that letting go would cancel (the band and the 3D arrow).
+const CANCEL_GREY := Color(0.7, 0.7, 0.75, 0.6)
 var aim_power := 0.0
 ## A finger that caught the flying ship: it turns into the next aim once the
 ## ship has stopped.
@@ -107,6 +110,9 @@ var aim_target: AiShip = null
 var _auto_volleys := 0
 ## The flight direction the camera follows (see [member FlightCamera.follow_dir]).
 var _dir_cb := Callable()
+## The thumb's own pull, 0..1 of a full one, before an aim snap tops
+## [member aim_power] up: what decides launch or cancel.
+var _raw_pull := 0.0
 ## The aim the camera locked onto this pull (ZERO until the pull gets going),
 ## and the look-ahead it framed then: the one camera move of the pull.
 var _cam_lock := Vector3.ZERO
@@ -157,6 +163,11 @@ func deactivate() -> void:
 
 ## Off the ship, a drag swings the camera (a tap there still shoots).
 func _drag_orbits(pos: Vector2) -> bool:
+	# A touch on the ship, or on the middle of the screen where the ship sits in
+	# the chase view, is a pilot's touch, never a camera move.
+	var centre := root.get_viewport().get_visible_rect().size * 0.5
+	if pos.distance_to(centre) <= short_edge() * 0.12:
+		return false
 	return not near_ship(pos)
 
 
@@ -218,6 +229,7 @@ func _update_aim(at: Vector2) -> void:
 	else:
 		aim_dir = dome_dir(pull, _aim_frame, JuiceSettings.sling_aim_depth, _aim_ray)
 	aim_power = clampf(pull.length() / (short_edge() * 0.38), 0.0, 1.0)
+	_raw_pull = aim_power
 	var bend := SMART_SNAP_BEND if smart else AIM_SNAP_BEND
 	# Snap onto a ship close to the aim line: a 3D aim doesn't have to be exact.
 	var snap_deg := SMART_SNAP_DEG if smart else AIM_SNAP_DEG
@@ -307,9 +319,9 @@ func _on_released(_pos: Vector2) -> void:
 		return
 	# A feeble pull (under a third of a full one) is a let-go, not a launch: they
 	# most likely meant to cancel it.
-	var raw_pull := pull.length() / (short_edge() * 0.38)
-	if aim_power >= CANCEL_PULL and raw_pull >= CANCEL_PULL and aim_dir != Vector3.ZERO:
+	if will_launch():
 		run.launch(aim_dir, aim_power)
+		Campaign.bump_stat("yeets")
 		_auto_volleys = 1
 		_launch_dir = aim_dir
 		# Launched: the flight framing takes over from the aim.
@@ -324,16 +336,22 @@ func _on_released(_pos: Vector2) -> void:
 	_cam_ahead = Vector3.INF
 	pull = Vector2.ZERO
 	aim_power = 0.0
+	_raw_pull = 0.0
 	aim_target = null
+
+
+## Whether letting go now launches (else it cancels): the thumb pulled at
+## out past the gauge ring ([constant DEAD_ZONE_RINGS]), toward somewhere. The band and
+## the arrow grey out on exactly this.
+func will_launch() -> bool:
+	return pull.length() >= grab_radius() * DEAD_ZONE_RINGS and aim_dir != Vector3.ZERO
 
 
 func _on_tap(pos: Vector2) -> void:
 	if run == null or not JuiceSettings.sling_tap_fire:
 		return
 	var flying := run.state == SlingRun.State.FLYING
-	# Mid-launch the guns only fire on their own (Settings > Difficulty > Auto fire).
-	if flying and roundi(JuiceSettings.sling_auto_shoot) < 2:
-		return
+	# Mid-launch a tap off the ship shoots too (auto fire adds to it, not instead).
 	# Resting between launches, only an auto-aim tap shoots.
 	if not flying and not (JuiceSettings.sling_tap_auto_aim and run.state == SlingRun.State.READY):
 		return
@@ -488,7 +506,9 @@ func frame_tick(delta: float) -> void:
 	root.camera_rig.follow_dir_rate = 1.3 if run.state == SlingRun.State.AIMING else 1.6
 	if run.state == SlingRun.State.AIMING and aim_power > 0.02:
 		var tint := ARROW_BLUE.lerp(Color(0.75, 0.35, 1.0), aim_power * 0.7)
-		lay_arrow(0, aim_dir, aim_power, tint, 0.6 + 0.4 * aim_power)
+		if not will_launch():
+			tint = CANCEL_GREY
+		lay_arrow(0, aim_dir, aim_power, tint, (0.6 + 0.4 * aim_power) if will_launch() else 0.45)
 	else:
 		hide_arrows()
 	_update_camera()
@@ -619,8 +639,10 @@ func _draw_pull_band(canvas: Control, s: Vector2, band: Vector2, gr: float, t: f
 	var power := clampf(aim_power, 0.0, 1.0)
 	var col := Color("ffd23f").lerp(Color("ff3b3b"), power)
 	# Too weak to launch: the band greys out, so letting go reads as a cancel.
-	if power < CANCEL_PULL:
-		col = Color(0.7, 0.7, 0.75, 0.6)
+	# The same test as the release itself — the shown power can be topped up
+	# by an aim snapped onto a ship, while the thumb's own pull is what counts.
+	if not will_launch():
+		col = CANCEL_GREY
 	var ink := Color(0.05, 0.02, 0.08, 0.85)
 	var pouch := s + band
 	var along := band.normalized()

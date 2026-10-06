@@ -76,6 +76,13 @@ const DEFAULTS := {
 	"escort_size": 4.0,
 	"escort_speed": 50.0,
 	"escort_hp": 1.0,
+	# What stands at an escort's yellow marker: "station", "gate" or "beacon"
+	# ("" = the beacon alone).
+	"dest": "",
+	# A colour in the level's name: which ships wear it ("foes" / "friend";
+	# "planet" is the main world, handled with the system) and the faction paint.
+	"tint_for": "",
+	"tint_faction": "",
 	# Seconds between enemy waves on an escort (0 = none).
 	"wave_every": 0.0,
 	# A boss: one huge enemy warship in the first wave, [code]boss_size[/code]
@@ -107,6 +114,16 @@ const DEFAULTS := {
 	"max_attackers": -1,
 	"boss_gun_class": -1,
 	"boss_preset": "",
+	# Backdrop megastructures' size ([enum FlightRoot.CraftSize]; -1 = the
+	# debug menu's pick).
+	"backdrop_size": -1,
+	# A megastructure boss ([LargeCraftGenerator] + [MegaCraft]) instead of a
+	# big ship: its kind (0 dreadnought, 1 mothership) and size (CraftSize).
+	"mega_boss": false,
+	"mega_kind": 0,
+	"mega_size": 1,
+	# ASSAULT: the carrier is a megastructure of mega_size.
+	"mega": false,
 	# Heavy dreadnoughts (the keel_dreadnought hull) in the first wave.
 	"dreadnoughts": 0,
 	"dreadnought_size": 3.0,
@@ -170,15 +187,15 @@ const OBJECTIVE_PRESETS := {
 	"escort": {
 		"name": "Escort the hauler", "desc": "Guard a big freighter to its destination. Pirates will go for it, not you.",
 		"objective": Objective.ESCORT, "enemies": 3, "enemy_arch": "Pirates", "wave_every": 22.0,
-		"escort_size": 4.0, "escort_speed": 55.0, "route": 3500.0, "enemy_distance": 700.0,
+		"escort_size": 4.0, "escort_speed": 60.0, "route": 2100.0, "enemy_distance": 700.0,
 	},
 	"capital": {
 		"name": "Escort the capital ship", "desc": "A huge capital ship crawls to the jump point under heavy attack. Keep it alive.",
 		"objective": Objective.ESCORT, "enemies": 4, "enemy_arch": "Military squad", "wave_every": 26.0, "allies": 2,
-		"escort_size": 9.0, "escort_speed": 32.0, "escort_hp": 2.5, "route": 4000.0, "enemy_distance": 900.0,
+		"escort_size": 9.0, "escort_speed": 42.0, "escort_hp": 2.5, "route": 2500.0, "enemy_distance": 900.0,
 	},
 	"protect": {
-		"name": "Protect the hauler", "desc": "A hauler is stranded while its drive cools. Keep it alive until the clock runs out.",
+		"name": "Guard the hauler", "desc": "A hauler is stranded while its drive cools. Keep it safe until the clock runs out.",
 		"objective": Objective.ESCORT, "enemies": 3, "enemy_arch": "Pirates", "wave_every": 18.0,
 		"escort_size": 4.0, "hold_time": 75.0, "enemy_distance": 700.0,
 	},
@@ -220,7 +237,10 @@ var _objectives: ScenarioObjectives = null
 var _wave_clock := 0.0
 ## The running boss fight's boss, or null.
 var boss: AiShip = null
+## A megastructure boss ([code]mega_boss[/code]), or null.
+var mega_boss: MegaCraft = null
 var _boss_clock := 0.0
+var _mega_nag := 6.0
 ## Scenery this scenario put in (see [code]bystanders[/code] / [code]backdrop[/code]).
 var _bystanders: Array[AiShip] = []
 var _backdrop := false
@@ -233,9 +253,9 @@ const TIPS := {
 	"duel": "BEAT THE ACE", "skirmish": "WRECK THEM ALL", "waves": "CLEAR EVERY WAVE",
 	"battle": "WIN THE BATTLE", "survive": "STAY ALIVE", "practice": "WRECK THE DRONES",
 	"ambush": "BREAK THE AMBUSH", "courier": "GRAB THE CARGO", "race": "FLY THROUGH THE RINGS",
-	"salvage": "GRAB THE PODS", "dock": "FLY INTO THE BAY", "escort": "GUARD THE HAULER",
-	"capital": "GUARD THE BIG SHIP", "assault": "WRECK THE MOTHERSHIP", "boss": "WRECK THE BOSS",
-	"protect": "KEEP THE HAULER ALIVE", "voyage": "FLY TO THE FAR PLANET",
+	"salvage": "GRAB THE PODS", "dock": "FLY INTO THE BAY", "escort": "ESCORT THE HAULER",
+	"capital": "ESCORT THE BIG SHIP", "assault": "WRECK THE MOTHERSHIP", "boss": "WRECK THE BOSS",
+	"protect": "GUARD THE HAULER", "voyage": "FLY TO THE FAR PLANET",
 }
 
 
@@ -274,6 +294,14 @@ func objective_points() -> Array[Vector3]:
 	if _objectives != null and is_instance_valid(_objectives):
 		return _objectives.magnet_points()
 	return []
+
+
+## The first enemy still flying (the lone ace of a duel), or null.
+func first_enemy() -> AiShip:
+	for s: AiShip in _enemies:
+		if s != null and is_instance_valid(s) and s._alive:
+			return s
+	return null
 
 
 ## The friendly ship an escort mission guards, while it lives; else null.
@@ -337,6 +365,10 @@ func start(settings: Dictionary) -> void:
 	for i in int(config.get("dreadnoughts", 0)):
 		_spawn_dreadnought(i)
 	_spawn_scenery()
+	# A guard job says how long: "GUARD IT FOR 1 MINUTE".
+	var hold := roundi(float(config.get("hold_time", 0.0)))
+	if hold > 0:
+		config["tip"] = "GUARD IT FOR %s" % hold_words(hold)
 	# A short tip in the sprayed hint line; the long desc stays in the picker.
 	_root.announce(String(config.get("tip", String(config["name"]))))
 	changed.emit()
@@ -354,6 +386,7 @@ func stop(restore_fleet := true) -> void:
 	_enemies.clear()
 	_allies.clear()
 	boss = null
+	mega_boss = null
 	_boss_clock = 0.0
 	for b in _bystanders:
 		if is_instance_valid(b) and b._alive:
@@ -418,7 +451,8 @@ func status_line() -> String:
 			return "%s: %s" % [config.get("name", ""), lose_reason]
 	if _objectives != null:
 		return _objectives.status()
-	var foes := _alive(_enemies).size()
+	# A megastructure boss is an enemy too, and the last one standing.
+	var foes := _alive(_enemies).size() + (1 if mega_alive() else 0)
 	var friends := _alive(_allies).size()
 	var line := String(config["name"]).to_upper()
 	match int(config["objective"]):
@@ -429,6 +463,8 @@ func status_line() -> String:
 				line += "  ·  WAVE %d/%d" % [wave, int(config["waves"])]
 			if is_instance_valid(boss) and boss._alive:
 				line += "  ·  BOSS %d%%" % ceili(boss.hp / maxf(boss.max_hp, 1.0) * 100.0)
+			elif mega_alive():
+				line += "  ·  BOSS %d%%" % ceili(mega_boss.health() * 100.0)
 			line += "  ·  %d LEFT" % foes
 	if not _allies.is_empty():
 		line += "  ·  %d WINGMEN" % friends
@@ -469,7 +505,7 @@ func _process(delta: float) -> void:
 		# Keep the pressure on: top the attackers back up as they fall.
 		if foes.size() < int(config["enemies"]) and _wave_delay < 0.0:
 			_wave_delay = 3.0
-	elif foes.is_empty() and _wave_delay < 0.0:
+	elif foes.is_empty() and _wave_delay < 0.0 and not mega_alive():
 		# Nobody has gone down yet, so this wave never arrived (the spawner was
 		# full): call it again. Finishing here handed out a free win — three
 		# stars and the pay — the moment a level started.
@@ -551,17 +587,26 @@ func _spawn_side(count: int, team: int, arch_name: String) -> void:
 				s._ai_paused = true
 				s.systems.set_firing(false)
 			_enemies.append(s)
+			if String(config.get("tint_for", "")) == "foes":
+				s.paint_as(String(config.get("tint_faction", "")))
+			# The ones coming for the convoy wear a red target from the start.
+			if int(config.get("objective", -1)) == Objective.ESCORT:
+				_root.pin_marker(s, InteractionMarkers.COLORS[AiShip.Attitude.HOSTILE])
 		else:
 			var side := -1.0 if i % 2 == 0 else 1.0
 			pos = ship_x.origin + right * side * (50.0 + 35.0 * float(i / 2)) - fwd * (25.0 + 15.0 * float(i / 2))
 			_place(s, Transform3D(Basis.looking_at(fwd, up), pos))
 			_allies.append(s)
+			# Wingmen wear a green target, like the red ones on the foe.
+			_root.pin_marker(s, InteractionMarkers.COLORS[AiShip.Attitude.FRIENDLY])
 		i += 1
 
 
 ## The boss: one huge warship at the head of the enemy line, marked for the
 ## player, with a hull of [constant BOSS_HP] under the level's dials.
 func _spawn_boss() -> void:
+	if bool(config.get("mega_boss", false)) and _spawn_mega_boss():
+		return
 	var ship_x := _root.model.global_transform
 	var fwd := -ship_x.basis.z
 	var up := ship_x.basis.y
@@ -572,10 +617,14 @@ func _spawn_boss() -> void:
 	if boss == null:
 		return
 	_place(boss, xf)
+	# Marked so a swarm archetype's "popcorn" rules (a hard ram pops it) skip it.
+	boss.set_meta("boss", true)
 	boss.max_hp = BOSS_HP * float(config["boss_hp"]) * float(config["enemy_hp"])
 	boss.hp = boss.max_hp
 	boss._weapon_mult *= float(config["enemy_damage"])
 	boss.set_threat(float(config.get("threat", 1.0)))
+	if String(config.get("tint_for", "")) == "foes":
+		boss.paint_as(String(config.get("tint_faction", "")))
 	if int(config.get("boss_gun_class", -1)) >= 0:
 		boss.arm(int(config["boss_gun_class"]))
 	_enemies.append(boss)
@@ -586,6 +635,12 @@ func _spawn_boss() -> void:
 
 ## While the boss lives it calls in fresh guards now and then.
 func _tick_boss(delta: float) -> void:
+	# Only the big ship left: say so now and then, or the level looks stuck.
+	if mega_alive() and _alive(_enemies).is_empty():
+		_mega_nag -= delta
+		if _mega_nag <= 0.0:
+			_mega_nag = 20.0
+			_root.announce("WRECK THE BOSS SHIP TO WIN!")
 	var every := float(config.get("boss_reinforce", 0.0))
 	if boss == null or every <= 0.0:
 		return
@@ -614,6 +669,51 @@ func _tick_boss(delta: float) -> void:
 		_root.announce("THE BOSS CALLS FOR HELP!")
 
 
+## A megastructure boss: a dreadnought or a mothership ([code]mega_kind[/code])
+## of [code]mega_size[/code], straight ahead, armed — turrets, launch bays, a
+## hull shot off piece by piece. False if it could not be built (the level
+## then gets its ordinary big-ship boss).
+func _spawn_mega_boss() -> bool:
+	var kind := LargeCraftGenerator.Archetype.MOTHERSHIP if int(config.get("mega_kind", 0)) == 1 \
+		else LargeCraftGenerator.Archetype.DREADNOUGHT
+	var gen := _root.spawn_large_craft(kind, Vector3.ZERO, int(config.get("mega_size", 1)))
+	if gen == null:
+		return false
+	mega_boss = _root.arm_large_craft(gen, true)
+	if mega_boss == null:
+		return false
+	mega_boss.damage_mult = float(config.get("enemy_damage", 1.0))
+	mega_boss.always_active = true
+	_backdrop = true
+	_root.big_notice("BOSS!", String(config.get("name", "")).to_upper(), Color("ff2a4a"), 1.6)
+	return true
+
+
+## Whether the megastructure boss is still in one piece.
+func mega_alive() -> bool:
+	return mega_boss != null and is_instance_valid(mega_boss) and not mega_boss.is_dead()
+
+
+## A ship that joined the enemy mid-fight (a megastructure's launched
+## fighter): counted, marked and toughened like the rest.
+func add_enemy(s: AiShip) -> void:
+	if state != State.RUNNING or s == null or s in _enemies:
+		return
+	_toughen(s)
+	_enemies.append(s)
+	_root.pin_marker(s, InteractionMarkers.COLORS[AiShip.Attitude.HOSTILE])
+
+
+## [param s] seconds as words: "30 SECONDS", "1 MINUTE", "1 MINUTE 30".
+static func hold_words(s: int) -> String:
+	if s < 60:
+		return "%d SECONDS" % s
+	var m := s / 60
+	var rest := s % 60
+	var out := "%d MINUTE%s" % [m, "" if m == 1 else "S"]
+	return out + (" %d" % rest if rest > 0 else "")
+
+
 ## The level's scenery: neutral giants drifting across the field and
 ## megastructures out in the distance. They fight no one; they are there to
 ## make the place feel lived in (and to be flown past).
@@ -638,10 +738,10 @@ func _spawn_scenery() -> void:
 			_place(b, xf)
 			_bystanders.append(b)
 	var kinds := [LargeCraftGenerator.Archetype.MOTHERSHIP, LargeCraftGenerator.Archetype.RING_STATION,
-		LargeCraftGenerator.Archetype.TOWER_CLUSTER]
+		LargeCraftGenerator.Archetype.TOWER_CLUSTER, LargeCraftGenerator.Archetype.GATE_FRAME]
 	for i in int(config.get("backdrop", 0)):
 		var bearing := (fwd + right * randf_range(-1.2, 1.2) + up * randf_range(-0.2, 0.4)).normalized()
-		if _root.spawn_large_craft(kinds[randi() % kinds.size()], bearing) != null:
+		if _root.spawn_large_craft(kinds[randi() % kinds.size()], bearing, int(config.get("backdrop_size", -1))) != null:
 			_backdrop = true
 
 

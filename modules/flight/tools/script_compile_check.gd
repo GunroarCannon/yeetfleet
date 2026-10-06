@@ -50,6 +50,18 @@ const SCRIPTS := [
 	"res://modules/common/juice/addon_vfx.gd",
 	"res://modules/common/juice/particles/particle_burst.gd",
 	"res://modules/flight/scripts/ui/radar_display.gd",
+	"res://modules/flight/scripts/mega_craft.gd",
+	"res://modules/flight/scripts/sandbox_life.gd",
+	"res://modules/flight/scripts/ui/planet_callout.gd",
+	"res://modules/events/scripts/world_marker.gd",
+	"res://modules/flight/scripts/ui/cargo_indicators.gd",
+	"res://modules/large_craft_gen/scripts/large_craft_generator.gd",
+	"res://modules/flight/scripts/ui/campaign_level_overlay.gd",
+	"res://modules/campaign/scripts/campaign.gd",
+	"res://modules/campaign/scripts/level_gen.gd",
+	"res://modules/campaign/scripts/ship_catalog.gd",
+	"res://modules/difficulty/scripts/difficulty.gd",
+	"res://modules/physics/scripts/phys_world.gd",
 ]
 
 

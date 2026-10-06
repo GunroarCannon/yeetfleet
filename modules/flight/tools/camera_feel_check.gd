@@ -233,7 +233,7 @@ func _weave(model: FlightModel) -> void:
 func _use_old_feel(on: bool) -> void:
 	var old := {
 		"cam_follow_rate": 40.0, "cam_position_smooth": 6.0, "cam_aim_smooth": 11.0,
-		"cam_turn_lead": 0.0, "cam_speed_fov": 0.0, "cam_turn_swing": 0.0,
+		"cam_turn_lead": 0.0, "cam_speed_fov": 0.0, "cam_turn_swing": 0.0, "cam_motion_focus": 0.0,
 	}
 	_rng.seed = 7
 	for k: String in old:

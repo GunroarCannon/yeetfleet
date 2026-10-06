@@ -1,10 +1,8 @@
 ## GarageScreen: the pad, the ship turning on it, and what can be done with
 ## it.
 ##
-## Two shelves behind two tabs. HANGAR is the ships the player owns — with
-## the next couple they could buy mixed in as dark silhouettes and a price,
-## so shuffling through always dangles something. SHOP is every ship not yet
-## owned, in full paint. ◀ ▶ (or a swipe across the pad) shuffle; the panel
+## Two shelves behind two tabs. HANGAR is only the ships the player owns.
+## SHOP is every ship not yet owned, in full paint. ◀ ▶ (or a swipe across the pad) shuffle; the panel
 ## shows the ship's name and type, four upgrade tracks (HULL, GUNS, SPEED,
 ## YEET) with capped pips and a + to buy the next one, and one big action:
 ## FLY THIS, FLYING, or BUY.
@@ -17,9 +15,6 @@ class_name GarageScreen
 extends MenuScreen
 
 enum Shelf { HANGAR, SHOP }
-
-## How many not-yet-owned ships the hangar teases.
-const TEASERS := 2
 
 var _bar: TopBar
 var _tabs: HBoxContainer
@@ -103,12 +98,41 @@ func opened() -> void:
 	_rebuild_list(start)
 	layout()
 	_action.grab_focus.call_deferred()
+	# The very first visit: two cards on what the garage sells and what the bars mean.
+	if not Campaign.nudge_seen("intro") and not _picking():
+		Campaign.mark_nudge("intro")
+		_intro_cards()
+		return
 	# Right after the upgrade hint: other ships can be bought too.
 	if Campaign.nudge_seen("upgrade") and not Campaign.nudge_seen("ships") and not _picking():
 		Campaign.mark_nudge("ships")
 		add_child(NudgePopup.make("MORE SHIPS",
 			"You can also buy other ships here. Tap the SHOP tab to see what each one does.",
 			"GOT IT", false))
+
+
+## Two first-visit cards: what coins buy here, then what each stat does and how
+## to win faster.
+func _intro_cards() -> void:
+	var first := NudgePopup.make("SPEND YOUR COINS",
+		"Coins earned in levels buy upgrades for your ship, one pip at a time, on the right. "
+		+ "The SHOP tab sells whole new ships. Every pip you buy makes the next level easier.",
+		"NEXT", false)
+	first.chosen.connect(func() -> void:
+		add_child(NudgePopup.make("WHAT THE BARS DO",
+			"HULL: how much damage you take before you wreck.
+"
+			+ "GUNS: how hard your shots hit.
+"
+			+ "SPEED: how fast you fly and how far a launch carries.
+"
+			+ "YEET: how hard you hit when you ram or fling into something.
+
+"
+			+ "Win faster and cleaner for more stars: wreck enemies quickly, keep your hull high, "
+			+ "and protect whatever you are guarding. Three stars pay the most.",
+			"GOT IT", false)))
+	add_child(first)
 
 
 func back() -> bool:
@@ -150,12 +174,6 @@ func _rebuild_list(keep: String) -> void:
 			_list.append(String(Campaign.ship_for(menu.ship_pick_level)["id"]))
 	elif _shelf == Shelf.HANGAR:
 		_list = Campaign.owned_ids()
-		var teased := 0
-		for id in _cheapest_unowned():
-			if teased >= TEASERS:
-				break
-			_list.append(id)
-			teased += 1
 	else:
 		_list = _cheapest_unowned()
 	_index = maxi(0, _list.find(keep))
@@ -200,7 +218,7 @@ func _refresh() -> void:
 	_panel.ship_id = id
 	_panel.set_rank(Campaign.rank_tier(id) if id != "" else -1)
 	var owned := id != "" and Campaign.owns(id)
-	# Hangar teasers are shadows; the shop shows the paint it is selling (and
+	# The shop shows the paint it is selling (and
 	# a picker's loaner is shown in full: it is the ship flown).
 	if menu != null and id != "":
 		menu.stage.show_pad_ship(id, not owned and _shelf == Shelf.HANGAR and not _picking())

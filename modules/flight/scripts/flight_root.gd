@@ -107,6 +107,8 @@ var generated_system: SolarSystemGenerator = null
 
 var _hud: FlightHud
 var incident_director: IncidentDirector = null
+## The sandbox's life (real incidents, traffic, landmarks), or null.
+var sandbox: SandboxLife = null
 var _coach: CoachOverlay
 var _ship_holder: Node3D
 var _motes: MultiMeshInstance3D
@@ -433,6 +435,13 @@ func _ready() -> void:
 	_interaction_markers.ships_source = _marker_ships
 	_interaction_markers.exclude_source = func() -> Variant: return controlled_ai
 	_hud.add_child(_interaction_markers)
+	# Free flight (the sandbox): the nearest world's name and a pointer to it.
+	if Session.pending_level.is_empty():
+		var callout := PlanetCallout.new()
+		callout.name = "PlanetCallout"
+		callout.landmarks_source = landmarks
+		callout.camera_source = camera_node
+		_hud.add_child(callout)
 	# Re-apply persisted trail toggles after a scene restart: the preference flags
 	# survive in static state, but the trail nodes themselves were rebuilt.
 	set_trail_player(Session.trail_player)
@@ -480,6 +489,12 @@ func _ready() -> void:
 	model.boost_changed.connect(_on_model_boost_changed)
 	_build_incident_director()
 	_schedule_setup_events()
+	# The sandbox (a ship from the menu, no level): a living system.
+	if Session.pending_level.is_empty() and not Session.pending_ship.is_empty() and location == Location.SPACE:
+		sandbox = SandboxLife.new()
+		sandbox.name = "SandboxLife"
+		sandbox.setup(self, incident_director)
+		add_child(sandbox)
 
 	BuilderTheme.apply_density_scale(get_window())
 	get_viewport().size_changed.connect(
@@ -698,6 +713,11 @@ func _build_gravity() -> void:
 		SpaceScene.STATION_POS, 10000.0, SpaceScene.STATION_RADIUS,
 		"Ceres Gate", false
 	)
+	# A sandbox system's outer worlds (after the station, so the fixed bodies
+	# keep their indices): mass with radius², like the main world.
+	for o: Dictionary in space.outer_bodies:
+		var k := float(o["radius"]) / SpaceScene.PLANET_RADIUS
+		gravity.register_body(o["centre"], 10000000.0 * k * k, float(o["radius"]), String(o["name"]), true)
 	# The force law comes from the feel profile (g, falloff). Applied before the
 	# ship spawns so the spawn orbit is computed for the same gravity the ship
 	# will actually feel, and before the moon integrates so it starts matched.
@@ -809,10 +829,13 @@ func _build_incident_director() -> void:
 	ctx.reputation = rep_store
 	incident_director.context = ctx
 	incident_director.world_parent = self
+	incident_director.player_source = active_model
 	# Wordy incident banners are a debug read-out; players get a short one.
 	incident_director.quiet = not Session.debug_mode
-	# Random incidents (meteors, factions, distress calls…) are a debug read-out too.
-	incident_director.auto_spawn = Session.debug_mode
+	# Random incidents (meteors, factions, distress calls…) belong to free
+	# flight: the sandbox turns them on (see [SandboxLife]), a level never has
+	# them, and the bare flight test has them in debug mode.
+	incident_director.auto_spawn = Session.debug_mode and Session.pending_level.is_empty()
 	if _hud != null:
 		incident_director.hud_container = _hud.get_event_container()
 	add_child(incident_director)
@@ -1383,6 +1406,7 @@ func _assemble() -> void:
 	# Init player HP from ship stats (clamped to a playable range, scaled by the
 	# global HP dial and the player's own extra durability -- see JuiceSettings).
 	_player_dead = false
+	AiShip.player_down = false
 	var stats := view.resolution.stats
 	var base_hp := maxf(stats.get_stat("hull_hp"), 80.0) * JuiceSettings.hull_hp_mult
 	player_max_hp = base_hp * JuiceSettings.player_durability_mult * Difficulty.v("player_hull")
@@ -1397,7 +1421,28 @@ func _assemble() -> void:
 func _build_camera() -> void:
 	camera_rig = FlightCamera.new()
 	camera_rig.name = "CameraRig"
+	camera_rig.foe_focus = _foe_focus_pos
 	add_child(camera_rig)
+
+
+## Where the nearest hostile ship is (Vector3.INF: none near): what the chase
+## view looks at after the player is knocked away.
+func _foe_focus_pos() -> Vector3:
+	if model == null:
+		return Vector3.INF
+	var me := model.global_position
+	var best := Vector3.INF
+	var best_d := 2200.0
+	for s in _marker_ships():
+		if not is_instance_valid(s) or not s._alive or s == controlled_ai:
+			continue
+		if s.attitude_to_player() != AiShip.Attitude.HOSTILE:
+			continue
+		var d := me.distance_to(s.global_position)
+		if d < best_d:
+			best_d = d
+			best = s.global_position
+	return best
 
 
 ## Build the rear view: a small SubViewport with a backward-facing camera,
@@ -1544,7 +1589,7 @@ func _restore_early_prefs() -> void:
 func _restore_prefs() -> void:
 	if not is_inside_tree():
 		return
-	if Session.move_profile != move_profile:
+	if Session.move_profile != move_profile or _pilot == null and not Session.debug_mode:
 		set_move_profile(Session.move_profile)
 	var p := Session.prefs
 	if BuilderTheme.high_contrast:
@@ -1611,6 +1656,8 @@ func _on_back(from_phone: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	# Real seconds in the cockpit, for the stats page (not stretched by slow-mo).
+	Campaign.bump_stat("time_played", delta / maxf(Engine.time_scale, 0.05))
 	_update_blast_outline(delta)
 	_update_knocked_planets(delta)
 	_tick_tutorial_guard()
@@ -1677,7 +1724,6 @@ func _process(delta: float) -> void:
 	_update_near_miss(delta)
 	_update_large_craft_orbits(delta)
 	_update_large_craft_patrols(delta)
-	_update_large_craft_turrets(delta)
 	# Drift, spin and fade broken-off debris.
 	var still_alive: Array[Dictionary] = []
 	for d in _debris_list:
@@ -1846,6 +1892,9 @@ var _pilot: MovePilot = null
 
 func set_move_profile(p: int) -> void:
 	p = clampi(p, 0, MoveProfile.size() - 1)
+	# Shipped builds only fly swipe or slingshot; the rest are dev tools.
+	if not Session.debug_mode and p != MoveProfile.SWIPE:
+		p = MoveProfile.SLINGSHOT
 	if _pilot != null:
 		_pilot.deactivate()
 		_pilot = null
@@ -1863,6 +1912,9 @@ func set_move_profile(p: int) -> void:
 
 
 func cycle_move_profile() -> void:
+	if not Session.debug_mode:
+		set_move_profile(MoveProfile.SLINGSHOT if move_profile == MoveProfile.SWIPE else MoveProfile.SWIPE)
+		return
 	set_move_profile((move_profile + 1) % MoveProfile.size())
 
 
@@ -2015,7 +2067,7 @@ func _apply_aim_assist() -> void:
 ## True while a level's opening shot is playing: every control is ignored
 ## until the camera has landed behind the ship.
 func controls_locked() -> bool:
-	return camera_rig != null and camera_rig.intro_active()
+	return camera_rig != null and (camera_rig.intro_active() or camera_rig.spotlight_active())
 
 
 func _read_keyboard(delta: float) -> void:
@@ -2302,6 +2354,7 @@ func respawn() -> void:
 ## can hurt them — they used to die again the moment they reappeared.
 func _after_respawn() -> void:
 	_player_dead = false
+	AiShip.player_down = false
 	_slowmo = 1.0
 	if _hud != null and _hud.has_method("hide_game_over"):
 		_hud.hide_game_over()
@@ -2515,6 +2568,8 @@ func game_over() -> void:
 	if _player_dead:
 		return
 	_player_dead = true
+	AiShip.player_down = true
+	Campaign.bump_stat("deaths")
 	model.halt()
 	model.clear_phys_world()
 	_emote("dizzy", 1.4)
@@ -2903,6 +2958,9 @@ const KILL_CAM_SEE_RANGE := 900.0
 func _kill_cam_factor() -> float:
 	if camera_rig == null or not camera_rig.kill_cam_active():
 		return 1.0
+	# The opening look at a boss or ace: everything holds still under it.
+	if camera_rig.spotlight_active():
+		return lerpf(1.0, JuiceRuntime.FREEZE_FLOOR, camera_rig.kill_cam_weight())
 	var paused := maxf(JuiceSettings.kill_cam_time_scale, JuiceRuntime.FREEZE_FLOOR)
 	return lerpf(1.0, paused, camera_rig.kill_cam_weight())
 
@@ -3372,7 +3430,12 @@ const CRAFT_SIZE_FLOOR := {
 ## gravitating body if one dominates the spawn point (see [_CraftOrbit]).
 ## [param bearing] (not zero): a backdrop instead — set well off along that
 ## direction from the ship, no hint (a level's scenery, see [FlightScenarios]).
-func spawn_large_craft(archetype: int, bearing := Vector3.ZERO) -> LargeCraftGenerator:
+## [param size]: a [enum CraftSize] for this one (-1: [member craft_size_preset]).
+## A dreadnought or mothership dropped from the debug menu (no bearing) comes
+## armed and hostile ([method arm_large_craft]); callers with a bearing arm
+## their own. [param at] (not INF): placed exactly there instead (the
+## sandbox's landmarks), no hint and not armed — the caller decides.
+func spawn_large_craft(archetype: int, bearing := Vector3.ZERO, size := -1, at := Vector3.INF) -> LargeCraftGenerator:
 	var ship := active_ship_node()
 	if ship == null:
 		return null
@@ -3385,6 +3448,7 @@ func spawn_large_craft(archetype: int, bearing := Vector3.ZERO) -> LargeCraftGen
 	# twice (wasted work at this scale — hundreds of parts).
 	var rng := RandomNumberGenerator.new()
 	rng.seed = gen.craft_seed
+	var preset := craft_size_preset if size < 0 else size
 	for entry: Dictionary in LargeCraftGenerator.RANDOMIZABLE:
 		var key: String = entry["key"]
 		var jittered := float(gen.get(key)) * rng.randf_range(CRAFT_JITTER_RANGE.x, CRAFT_JITTER_RANGE.y)
@@ -3393,15 +3457,15 @@ func spawn_large_craft(archetype: int, bearing := Vector3.ZERO) -> LargeCraftGen
 	# The size preset overrides whatever the loop above just jittered
 	# scale_mult to — a debug spawner should reliably land on the size you
 	# picked, not "probably somewhere near it".
-	gen.scale_mult = float(CRAFT_SIZE_SCALE[craft_size_preset]) * rng.randf_range(0.85, 1.15)
+	gen.scale_mult = float(CRAFT_SIZE_SCALE[preset]) * rng.randf_range(0.85, 1.15)
 	add_child(gen)
 
 	# Top up to this preset's floor: the per-dial jitter above can hand back
 	# a smaller-than-usual unscaled structure before scale_mult even applies,
 	# and "quarter-planet" is a floor the user asked for explicitly, not an
 	# average to land near.
-	if CRAFT_SIZE_FLOOR.has(craft_size_preset):
-		var min_extent: float = CRAFT_SIZE_FLOOR[craft_size_preset]
+	if CRAFT_SIZE_FLOOR.has(preset):
+		var min_extent: float = CRAFT_SIZE_FLOOR[preset]
 		var current_extent := gen.approx_extent()
 		if current_extent < min_extent:
 			gen.scale *= (min_extent / current_extent)
@@ -3419,6 +3483,12 @@ func spawn_large_craft(archetype: int, bearing := Vector3.ZERO) -> LargeCraftGen
 	gen.global_position = ship.global_position + fwd * spawn_dist + fan
 	if bearing != Vector3.ZERO:
 		gen.global_position = ship.global_position + bearing.normalized() * spawn_dist * BACKDROP_DISTANCE
+	var placed := at != Vector3.INF
+	if placed:
+		gen.global_position = at
+		# Facing the system's middle, not wherever the ship happened to look.
+		var face := -at.normalized() if at.length() > 1.0 else Vector3.FORWARD
+		gen.global_basis = Basis.looking_at(face, Vector3.UP if absf(face.y) < 0.95 else Vector3.FORWARD, true).scaled(gen.scale)
 	_large_craft.append(gen)
 	_register_large_craft_collision(gen)
 	# Ships move under their own power; everything else (stations, gates,
@@ -3427,7 +3497,9 @@ func spawn_large_craft(archetype: int, bearing := Vector3.ZERO) -> LargeCraftGen
 		_place_large_craft_patrol(gen)
 	else:
 		_place_large_craft_orbit(gen)
-	if _hud != null and bearing == Vector3.ZERO:
+	if not placed and bearing == Vector3.ZERO and archetype in [LargeCraftGenerator.Archetype.DREADNOUGHT, LargeCraftGenerator.Archetype.MOTHERSHIP]:
+		arm_large_craft(gen, true)
+	if _hud != null and bearing == Vector3.ZERO and not placed:
 		var label: String = LargeCraftGenerator.ARCHETYPE_NAMES.get(archetype, "Large craft")
 		_hud.show_hint("Spawned %s — %d parts, %d dock pads" % [label, gen.part_count(), gen.dock_pad_count()])
 	return gen
@@ -3467,18 +3539,24 @@ func _register_large_craft_collision(gen: LargeCraftGenerator) -> void:
 	if phys_world == null:
 		return
 	var made: Array[PhysBody] = []
+	# The craft is scaled up as a whole (scale_mult, 5-35x): the solver scales
+	# each hull sphere by the node's transform, but the quick "could these
+	# touch at all" reach tests read the plain enclosing radius — at 1x that
+	# skipped nearly every real contact and ships flew through the hull. So
+	# the enclosing radius is stored at world size, and every part collides as
+	# a hull (a lone sphere would be scaled twice).
+	var s := gen.global_basis.get_scale().x if gen.is_inside_tree() else gen.scale.x
 	for entry: Dictionary in gen.get_collision_spheres():
-		# Radius is a placeholder: set_hull re-derives the enclosing radius from the
-		# compound it is handed.
 		var body := PhysBody.new(1.0, 1.0)
 		body.node = entry["node"]
 		var hull: Array[Dictionary] = entry.get("hull", [])
 		if hull.is_empty():
-			body.radius = float(entry.get("radius", 1.0))
-		else:
-			body.set_hull(hull)
+			hull = [{"offset": Vector3.ZERO, "radius": float(entry.get("radius", 1.0))}]
+		body.set_hull(hull)
+		body.radius *= s
 		body.layer = PhysBody.Layer.STATIC
 		body.kinematic = true
+		body.impacted.connect(_on_craft_part_impacted.bind(gen, body))
 		phys_world.add(body)
 		made.append(body)
 	_craft_collision_bodies[gen] = made
@@ -3599,16 +3677,26 @@ func _update_large_craft_patrols(delta: float) -> void:
 		if not is_instance_valid(patrol.gen):
 			continue
 		var gen := patrol.gen
+		var mega := mega_of(gen)
+		if mega != null and mega.is_dead():
+			still.append(patrol)
+			continue
 		var t := gen.global_transform
 		var to_player := model.global_position - t.origin
+		# The hull is built bow along +Z (the stern's engine ring is at -Z),
+		# so +Z is the way it faces and flies — it used to cruise stern first.
 		if to_player.length_squared() > 1.0:
 			var wanted_fwd := to_player.normalized()
-			var cur_fwd := -t.basis.z.normalized()
+			var cur_fwd := t.basis.z.normalized()
 			var new_fwd := cur_fwd.slerp(wanted_fwd, clampf(patrol.turn_rate * delta, 0.0, 1.0))
 			if new_fwd.length_squared() > 0.001:
 				var up := Vector3.UP if absf(new_fwd.dot(Vector3.UP)) < 0.98 else Vector3.FORWARD
-				t.basis = Basis.looking_at(new_fwd, up).scaled(Vector3.ONE * gen.scale.x)
-		t.origin += (-t.basis.z.normalized()) * patrol.speed * delta
+				t.basis = Basis.looking_at(new_fwd, up, true).scaled(Vector3.ONE * gen.scale.x)
+		# Closes to gun range and holds there, instead of ploughing on into
+		# the player (a sun-sized hull would just swallow them).
+		var stand_off := gen.approx_extent() * 1.3 + 600.0
+		var go := smoothstep(stand_off, stand_off * 1.6, to_player.length())
+		t.origin += t.basis.z.normalized() * patrol.speed * go * delta
 		gen.global_transform = t
 		still.append(patrol)
 	_craft_patrols = still
@@ -3616,72 +3704,77 @@ func _update_large_craft_patrols(delta: float) -> void:
 		phys_world.mark_scenery_dirty()  # see the matching note in _update_large_craft_orbits
 
 
-## Visual-only weapon fire from [constant LargeCraftGenerator.Archetype.DREADNOUGHT]
-## turrets: a volley of glowing bolts travels in a straight line toward
-## wherever the player was at the moment of firing, then fades out. No damage
-## is applied — the user explicitly chose "looks and moves like it's
-## fighting" over full combat integration for this pass; real hull damage can
-## wire into [member damage] later without touching any of this.
-const TURRET_RANGE := 900.0
-const TURRET_COOLDOWN := 1.6
-const TURRET_BOLT_SPEED := 220.0
-const TURRET_BOLT_LIFE := 3.5
-
-var _turret_timers: Dictionary = {}  ## LargeCraftGenerator -> seconds to next volley
-var _turret_bolts: Array[Dictionary] = []  ## {node, velocity, life}
+## The warships among the large craft ([MegaCraft]: guns that hit, hangars
+## that launch, a hull that breaks up), keyed by their generator.
+var _megas: Dictionary = {}  ## LargeCraftGenerator -> MegaCraft
 
 
-func _update_large_craft_turrets(delta: float) -> void:
-	if model == null:
+## Make [param gen] fight: [param hostile] turns its guns and hangars on the
+## player (off: a station or carrier that only takes hits). Its fighters join
+## a running scenario's enemies. Returns the craft's [MegaCraft].
+func arm_large_craft(gen: LargeCraftGenerator, hostile := true) -> MegaCraft:
+	if gen == null or not is_instance_valid(gen):
+		return null
+	if _megas.has(gen):
+		var known: MegaCraft = _megas[gen]
+		known.hostile = hostile
+		return known
+	var mega := MegaCraft.new()
+	mega.name = "Mega_%s" % gen.name
+	mega.setup(gen, self)
+	mega.hostile = hostile
+	if scenarios != null and scenarios.is_running():
+		mega.damage_mult = float(scenarios.config.get("enemy_damage", 1.0))
+	mega.launched.connect(_on_mega_launched)
+	add_child(mega)
+	_megas[gen] = mega
+	return mega
+
+
+## The [MegaCraft] fighting for [param gen], or null.
+func mega_of(gen: LargeCraftGenerator) -> MegaCraft:
+	return _megas.get(gen, null)
+
+
+func _on_mega_launched(ship: AiShip) -> void:
+	if scenarios != null and scenarios.is_running():
+		scenarios.add_enemy(ship)
+
+
+## Take one large craft out of the scene (a wreck that finished breaking up).
+func remove_large_craft(gen: LargeCraftGenerator) -> void:
+	if phys_world != null and _craft_collision_bodies.has(gen):
+		for body: PhysBody in _craft_collision_bodies[gen]:
+			phys_world.remove(body)
+		phys_world.mark_scenery_dirty()
+	_craft_collision_bodies.erase(gen)
+	_megas.erase(gen)
+	_large_craft.erase(gen)
+	if is_instance_valid(gen):
+		gen.queue_free()
+
+
+## A hard ram into a large craft knocks pieces off it, like a shot would —
+## the player's hull is a weapon. Speeds under [constant CRAFT_RAM_SPEED]
+## just bounce.
+const CRAFT_RAM_SPEED := 45.0
+var _next_craft_ram_ms := 0
+
+
+func _on_craft_part_impacted(other: PhysBody, _impulse: float, point: Vector3, normal: Vector3,
+		closing: float, gen: LargeCraftGenerator, _body: PhysBody) -> void:
+	if not is_instance_valid(gen) or closing < CRAFT_RAM_SPEED:
 		return
-	for gen in _large_craft:
-		if not is_instance_valid(gen) or gen.archetype != LargeCraftGenerator.Archetype.DREADNOUGHT:
-			continue
-		var cooldown: float = float(_turret_timers.get(gen, 0.0)) - delta
-		if cooldown > 0.0:
-			_turret_timers[gen] = cooldown
-			continue
-		if gen.global_position.distance_to(model.global_position) > TURRET_RANGE:
-			_turret_timers[gen] = 0.5  # cheap range re-check, not a full reload
-			continue
-		_turret_timers[gen] = TURRET_COOLDOWN
-		var target := model.global_position
-		for muzzle in gen.get_turret_points():
-			_spawn_turret_bolt(muzzle.origin, (target - muzzle.origin).normalized())
-	_update_turret_bolts(delta)
-
-
-func _spawn_turret_bolt(pos: Vector3, dir: Vector3) -> void:
-	if dir.length_squared() < 0.001:
+	var mine := active_model()
+	if mine == null or other == null or other != mine.phys_body():
 		return
-	var mesh_inst := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.5
-	sphere.height = 1.0
-	mesh_inst.mesh = sphere
-	mesh_inst.material_override = ShipMaterials.glow_material(Color("ff5a3c"))
-	mesh_inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mesh_inst)
-	mesh_inst.global_position = pos
-	_turret_bolts.append({"node": mesh_inst, "velocity": dir * TURRET_BOLT_SPEED, "life": TURRET_BOLT_LIFE})
-
-
-func _update_turret_bolts(delta: float) -> void:
-	if _turret_bolts.is_empty():
+	var now := Time.get_ticks_msec()
+	if now < _next_craft_ram_ms:
 		return
-	var still: Array[Dictionary] = []
-	for b: Dictionary in _turret_bolts:
-		var node: MeshInstance3D = b["node"]
-		if not is_instance_valid(node):
-			continue
-		node.global_position += (b["velocity"] as Vector3) * delta
-		var life: float = float(b["life"]) - delta
-		if life <= 0.0:
-			node.queue_free()
-		else:
-			b["life"] = life
-			still.append(b)
-	_turret_bolts = still
+	_next_craft_ram_ms = now + 250
+	var r := 14.0 + closing * 0.25
+	if not gen.shatter_at(point, r, normal * -closing * 0.3).is_empty():
+		hit_word("CRUNCH!", point, Color("ffe23d"), 1.2)
 
 
 ## Magnetizes the player's own ship toward any spawned large craft's dock
@@ -3694,6 +3787,10 @@ func _update_large_craft_docking(delta: float) -> void:
 		return
 	for gen in _large_craft:
 		if not is_instance_valid(gen):
+			continue
+		# A warship's bays are where its fighters come out, not a dock.
+		var mega := mega_of(gen)
+		if mega != null and (mega.hostile or mega.is_dead()):
 			continue
 		for pad in gen.get_dock_pads():
 			model.velocity = pad.pull_point(model.global_position, model.velocity, delta, model)
@@ -3712,12 +3809,10 @@ func clear_large_craft(quiet := false) -> void:
 	_large_craft.clear()
 	_craft_orbits.clear()
 	_craft_patrols.clear()
-	_turret_timers.clear()
-	for b: Dictionary in _turret_bolts:
-		var node: Node = b["node"]
-		if is_instance_valid(node):
-			node.queue_free()
-	_turret_bolts.clear()
+	for mega: MegaCraft in _megas.values():
+		if is_instance_valid(mega):
+			mega.queue_free()
+	_megas.clear()
 	if _hud != null and not quiet:
 		_hud.show_hint("Large craft cleared")
 
@@ -5034,6 +5129,7 @@ func on_planet_destroyed(planet: Planet) -> void:
 	
 	if not planet.has_meta("shattered"):
 		planet.set_meta("shattered", true)
+		Campaign.bump_stat("planets_destroyed")
 		PlanetDebrisBuilder.shatter_planet(planet, p_pos, self, 420.0, Session.planet_break_fineness, phys_world)
 	if audio != null and not planet.has_meta("boom_sounded"):
 		planet.set_meta("boom_sounded", true)
@@ -5128,6 +5224,7 @@ func shatter_nearest_planet() -> void:
 	else:
 		if not target_planet.has_meta("shattered"):
 			target_planet.set_meta("shattered", true)
+			Campaign.bump_stat("planets_destroyed")
 			PlanetDebrisBuilder.shatter_planet(target_planet, hit_pos, self, 420.0, Session.planet_break_fineness, phys_world)
 		on_planet_destroyed(target_planet)
 	

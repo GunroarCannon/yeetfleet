@@ -72,8 +72,36 @@ static func save_to_disk() -> void:
 	f.close()
 
 
+## Count something for the Settings > STATS page ([param amount] more of
+## [param key]). Saved to disk at most every few seconds, so a stream of small
+## counts (play time) costs nothing.
+static func bump_stat(key: String, amount: float = 1.0) -> void:
+	ensure_loaded()
+	var st := _data["stats"] as Dictionary
+	st[key] = st.get(key, 0) + amount
+	var now := Time.get_ticks_msec()
+	if now - _stat_saved_ms > 8000:
+		_stat_saved_ms = now
+		save_to_disk()
+
+
+static var _stat_saved_ms := 0
+
+
+## One counter from the stats page (0 when never counted).
+static func stat_value(key: String) -> float:
+	ensure_loaded()
+	return float((_data["stats"] as Dictionary).get(key, 0))
+
+
 ## Wipe progress back to a fresh pilot (the Settings screen's reset).
 static func reset() -> void:
+	# The one-time pop-ups and the flight school are part of a fresh pilot too.
+	for k in Session.prefs.keys():
+		var key := String(k)
+		if key.begins_with("nudge_") or key.begins_with("intro_") or key in ["tutorial_done", "welcomed"]:
+			Session.prefs.erase(k)
+	Session.save_to_disk()
 	_data = _fresh()
 	_loaded = true
 	save_to_disk()
@@ -94,7 +122,9 @@ static func _fresh() -> Dictionary:
 		"pips": {},
 		"route": [LevelGen.THEME_CODES[LevelGen.first_theme()]],
 		"levels": {},
-		"stats": {"kills": 0, "fight_wins": 0, "cargo_wins": 0, "wins": 0, "flights": 0},
+		"stats": {"kills": 0, "fight_wins": 0, "cargo_wins": 0, "wins": 0, "flights": 0,
+			"ships_bought": 0, "upgrades_bought": 0, "planets_destroyed": 0, "yeets": 0, "deaths": 0,
+			"time_played": 0.0, "coins_earned": 0},
 	}
 
 
@@ -179,6 +209,7 @@ static func select_ship(id: String) -> bool:
 	if not owns(id):
 		return false
 	_data["current"] = id
+	bump_stat("ships_bought")
 	save_to_disk()
 	notifier.changed.emit()
 	return true
@@ -208,7 +239,8 @@ static func pips(id: String, stat: String) -> int:
 ## What the next pip of [param stat] on [param id] costs, or -1 when maxed.
 static func next_pip_cost(id: String, stat: String) -> int:
 	var have := pips(id, stat)
-	if have >= ShipCatalog.MAX_PIPS:
+	# The bar has ten cells: a top-shelf ship rated 8 has room for two pips.
+	if have >= mini(ShipCatalog.MAX_PIPS, 10 - ShipCatalog.rating(id, stat)):
 		return -1
 	return ShipCatalog.pip_cost(id, stat, have)
 
@@ -255,6 +287,7 @@ static func buy_pip(id: String, stat: String) -> bool:
 	if not all.has(id):
 		all[id] = {}
 	(all[id] as Dictionary)[stat] = pips(id, stat) + 1
+	bump_stat("upgrades_bought")
 	save_to_disk()
 	notifier.changed.emit()
 	return true
@@ -296,7 +329,7 @@ static func flight_ship(id: String, loaner := false) -> Dictionary:
 	var s := ShipCatalog.get_ship(id)
 	var mults := {}
 	for stat in ShipCatalog.STATS:
-		mults[stat] = ShipCatalog.stat_mult(id, stat, 0 if loaner else pips(id, stat))
+		mults[stat] = ShipCatalog.stat_mult(id, stat, 0 if loaner else pips(id, stat)) * ShipCatalog.class_mult(id, stat)
 	return {
 		"id": id, "name": String(s.get("name", id)),
 		"preset": String(s.get("preset", "")), "paint": String(s.get("paint", "")),
@@ -448,13 +481,17 @@ static func launch(lvl: Dictionary) -> void:
 		"par": float(lvl["par"]),
 		"grade": (lvl.get("grade", {}) as Dictionary).duplicate(true),
 		"word": String(lvl["word"]),
-		"brief": String(LevelGen.KIND_BRIEF.get(String(lvl["kind"]), "")),
+		"brief": LevelGen.brief_for(String(lvl["kind"]), lvl.get("overrides", {})),
 		# What NEXT on the win card can go to (see [method next_candidates]).
 		"next": next_candidates(lvl),
 		"stars_now": total_stars(),
 		# Winning the last level on the road leaves a branch to choose on the map.
 		"ends_road": String(lvl["key"]) == LevelGen.level_key(route(), LevelGen.LEVELS_PER_SECTOR - 1),
 		"stars_here": int(record(String(lvl["key"]))["stars"]),
+		# What the end card shows as the pay-out (see [method apply_result]).
+		"reward": int(lvl["reward"]),
+		"pay_base": int(lvl["reward"]) if int(record(String(lvl["key"]))["wins"]) == 0 else int(float(lvl["reward"]) * replay_pay()),
+		"star_bonus": star_bonus(),
 	}
 	Session.pending_ship = flight_ship(String(pick["id"]), bool(pick["loaner"]))
 	Session.space_setup = (lvl.get("space", {}) as Dictionary).duplicate(true)
@@ -563,6 +600,9 @@ static func apply_result(lvl: Dictionary, res: Dictionary) -> Dictionary:
 			st["cargo_wins"] = int(st.get("cargo_wins", 0)) + 1
 		else:
 			st["fight_wins"] = int(st.get("fight_wins", 0)) + 1
+	else:
+		# A loss still pays for the ships wrecked on the way.
+		pay = StarRating.loss_coins(int(lvl.get("reward", 0)), kills)
 	levels[key] = rec
 	# RETRY on the loss card re-runs the level without leaving it, so a visit
 	# can hold many losses: every try but a winning last one was a loss.

@@ -163,8 +163,10 @@ func _build() -> void:
 	for panel: Control in [_debug_scroll, _combat_modal, _juice_panel, _palette_drawer]:
 		if panel != null:
 			_modals.manage(panel)
-	# Come back in the layout the player left in.
-	if bool(Session.pref("mobile_layout", OS.has_feature("mobile"))):
+	# Come back in the layout the player left in. A player (debug mode off)
+	# always gets the game's own HUD, on a phone or a PC: the desktop chrome
+	# is the developer's toolbox.
+	if not Session.debug_mode or bool(Session.pref("mobile_layout", OS.has_feature("mobile"))):
 		set_mobile_layout.call_deferred(true)
 
 
@@ -1001,6 +1003,9 @@ func _apply_move_profile() -> void:
 func set_mobile_layout(on: bool) -> void:
 	if on == _mobile_layout:
 		return
+	# There is no desktop toolbox to go back to with debug mode off.
+	if not on and not Session.debug_mode:
+		return
 	_mobile_layout = on
 	Session.prefs["mobile_layout"] = on
 	if on:
@@ -1026,7 +1031,7 @@ func set_mobile_layout(on: bool) -> void:
 		for c in get_children():
 			# The graffiti targets are drawn instruments too (added by the root),
 			# and the tutorial banner belongs to both layouts.
-			if c is CanvasItem and not c in keep and not c is InteractionMarkers and not c is FlightTutorial:
+			if c is CanvasItem and not c in keep and not c is InteractionMarkers and not c is FlightTutorial and not c is PlanetCallout:
 				_desktop_visible[c] = (c as CanvasItem).visible
 				(c as CanvasItem).visible = false
 		_mobile_hud.visible = true
@@ -1878,6 +1883,9 @@ func _fill_controls_popup(popup: FlightMenu.DraggablePopup) -> void:
 	popup.title = "Flight"
 	popup.add_section("Movement profile (U)")
 	for i in FlightRoot.MOVE_PROFILE_NAMES.size():
+		if not Session.debug_mode and i != FlightRoot.MoveProfile.SWIPE \
+				and i != FlightRoot.MoveProfile.SLINGSHOT:
+			continue
 		popup.add_radio_row(
 			String(FlightRoot.MOVE_PROFILE_NAMES[i]), _root.move_profile == i, i,
 			func(v: int) -> void: _root.set_move_profile(v)
@@ -2301,12 +2309,12 @@ func _process(delta: float) -> void:
 	_target_label.text = _root.target_line()
 	# Show out of control warning or damage status if parts lost.
 	var dmg := _root.damage
-	if model.out_of_control:
+	if model.out_of_control and not Session.debug_mode:
 		_damage_label.text = "⚠️ TUMBLING OUT OF CONTROL!"
 		_damage_label.add_theme_color_override("font_color", Color(1.0, 0.25, 0.15))
 		_damage_label.visible = true
 	elif dmg != null and dmg.broken_count() > 0:
-		_damage_label.text = "⚠ %d part(s) lost" % dmg.broken_count()
+		_damage_label.text = "%d part(s) lost" % dmg.broken_count()
 		_damage_label.add_theme_color_override("font_color", BuilderTheme.warn())
 		_damage_label.visible = true
 	else:
@@ -2471,6 +2479,9 @@ func _draw_drift(camera: Camera3D, centre: Vector2) -> void:
 ## range figure is the whole point — apparent size tells you nothing about
 ## distance when the objects vary from 120 m to 1.4 km across.
 func _draw_markers(camera: Camera3D) -> void:
+	# Small print, for the developer; players get [PlanetCallout].
+	if not Session.debug_mode:
+		return
 	var font := get_theme_default_font()
 	var font_size := 11
 	for landmark in _root.landmarks():
@@ -2528,6 +2539,8 @@ func _draw_lock_bracket(camera: Camera3D) -> void:
 		label += "  %d%%" % roundi(hp_frac * 100.0)
 	else:
 		label = "LOCK  %s" % _range_text(dist)
+	if not Session.debug_mode:
+		return
 	_overlay.draw_string(
 		font, point + Vector2(r + 5.0, 5.0), label,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, col
@@ -2556,7 +2569,8 @@ func _draw_ai_lock_brackets(camera: Camera3D) -> void:
 				var corner := point + Vector2(sx, sy) * r
 				_overlay.draw_line(corner, corner - Vector2(sx * 3.0, 0.0), col, 1.0, true)
 				_overlay.draw_line(corner, corner - Vector2(0.0, sy * 3.0), col, 1.0, true)
-		var dist := camera.global_position.distance_to(world)
+		if not Session.debug_mode:
+			continue
 		_overlay.draw_string(
 			font, point + Vector2(r + 4.0, 4.0), "LOCKED",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col
@@ -2622,7 +2636,8 @@ func _draw_ghost_bar(rect: Rect2, fraction: float, ghost: float, color: Color, l
 
 
 func _draw_damage_numbers() -> void:
-	if _damage_numbers.is_empty():
+	# Small print: debug only (players get the big sprayed hit words).
+	if _damage_numbers.is_empty() or not Session.debug_mode:
 		return
 	var font := get_theme_default_font()
 	for dn in _damage_numbers:
@@ -2701,6 +2716,8 @@ func _draw_player_indicator(camera: Camera3D) -> void:
 		# Off screen: clamp to the edge and draw a large chevron pointing back at
 		# the ship's true screen direction.
 		_draw_indicator_arrow(clamped, dir.angle(), r, col, outline)
+	if not Session.debug_mode:
+		return
 	_overlay.draw_string(
 		get_theme_default_font(), clamped + Vector2(-12.0, r + 16.0), "YOU",
 		HORIZONTAL_ALIGNMENT_CENTER, 24, 11, col

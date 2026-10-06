@@ -29,6 +29,7 @@ func _initialize() -> void:
 	# The scene loads the saved dials: switch the veils off again after it.
 	JuiceSettings.enemy_shields = false
 	await _boss()
+	await _spotlight()
 	await _graze()
 	await _sounds()
 	await _tutorial_guard()
@@ -53,6 +54,47 @@ func _levels() -> void:
 	_report("no big ships unless the level needs them", dressed == 0)
 	var first := LevelGen.level([0], 0)
 	_report("enemies start at full strength", float(first["overrides"]["enemy_hp"]) >= 1.0)
+	_jobs()
+
+
+## Names, escorts, guards and colours across a spread of roads.
+func _jobs() -> void:
+	var finals_ok := true
+	var near := 0
+	var far := 0
+	var escort_ok := true
+	var holds_ok := true
+	var guard_seen := 0
+	var colours := 0
+	var tint_ok := true
+	for theme in 5:
+		for route in [[0, theme], [0, theme, 1, theme], [0, theme, 3, theme, 2, theme]]:
+			for i in LevelGen.LEVELS_PER_SECTOR:
+				var l := LevelGen.level(route, i)
+				var o: Dictionary = l["overrides"]
+				var kind := String(l["kind"])
+				if String(l["title"]).begins_with("Final ") and kind != "boss":
+					finals_ok = false
+				if kind in ["escort", "capital"]:
+					var trip := float(o["route"]) / float(o["escort_speed"])
+					escort_ok = escort_ok and trip < 60.0 and o.has("dest")
+					if kind == "escort":
+						if float(o["route"]) > 4000.0:
+							far += 1
+							escort_ok = escort_ok and float(o["escort_speed"]) >= 100.0
+						else:
+							near += 1
+							escort_ok = escort_ok and float(o["route"]) <= 2500.0
+				if kind == "protect":
+					guard_seen += 1
+					holds_ok = holds_ok and float(o["hold_time"]) in [30.0, 60.0, 90.0, 120.0] 						and String(l["brief"] if l.has("brief") else LevelGen.brief_for(kind, o)).contains("safe for")
+				if LevelGen.name_color(String(l["title"])) != "":
+					colours += 1
+					tint_ok = tint_ok and o.has("tint_for") and String(o["tint_faction"]) != ""
+	_report("only a sector's boss is called Final", finals_ok)
+	_report("escorts are short hops or fast long runs, both under a minute", escort_ok and near > 0 and far > 0)
+	_report("guards hold out 30 s to 2 min and say so", holds_ok and guard_seen > 0)
+	_report("a colour in a name tints something", colours > 0 and tint_ok)
 
 
 func _boss() -> void:
@@ -75,6 +117,15 @@ func _boss() -> void:
 	sc._boss_clock = float(cfg["boss_reinforce"]) - 0.05
 	await _seconds(0.3)
 	_report("the boss calls in guards", sc._enemies.size() > before)
+	# A boss in a swarm's colours is still no popcorn: a hard ram does not pop it.
+	if boss != null and boss.archetype != null:
+		var was := boss.archetype.popcorn
+		boss.archetype.popcorn = true
+		boss.shield_hp = 0.0
+		var hp0 := boss.hp
+		boss.model._apply_collision_damage(_root.model.phys_body(), 0.0, boss.model.global_position, 60.0)
+		_report("a hard ram does not pop a boss", boss._alive and boss.hp > hp0 * 0.5)
+		boss.archetype.popcorn = was
 	if boss != null:
 		boss.shield_hp = 0.0
 		boss.take_damage(boss.hp + 10.0, true)
@@ -97,6 +148,29 @@ func _boss() -> void:
 	_report("a megastructure sits in a skirmish's distance", _root.large_craft().size() == 1)
 	sc.stop()
 	await _frames(5)
+
+
+## The opening look at a boss: time and the controls hold still under it, then
+## everything comes back.
+func _spotlight() -> void:
+	var sc := _root.scenarios
+	if sc.boss == null or not is_instance_valid(sc.boss):
+		sc.start(FlightScenarios.preset("boss"))
+		await _frames(5)
+	var boss := sc.boss
+	var ok: bool = _root.camera_rig.spotlight(boss, 60.0, 0.5, 0.25, 0.25)
+	_report("the camera can spotlight the boss", ok)
+	await _real(0.6)
+	_report("the game holds still under the spotlight", Engine.time_scale < 0.1 and _root.controls_locked())
+	await _real(1.4)
+	_report("time and the controls come back after it", Engine.time_scale > 0.9 and not _root.controls_locked())
+	sc.stop()
+	await _frames(5)
+
+
+## Real seconds, whatever the game's clock is doing.
+func _real(s: float) -> void:
+	await create_timer(s, true, false, true).timeout
 
 
 ## A graze (reach ram) no longer pops a popcorn ship; a hard ram still does.
@@ -187,6 +261,10 @@ func _heard(ids: Array) -> bool:
 	for id: StringName in ids:
 		want.append_array(Sfx.streams(id))
 	for p in audio._spatial_pool:
+		if p.playing and p.stream in want:
+			return true
+	# Blasts have their own voices, so a gunfight cannot cut one off.
+	for p in audio._blast_pool:
 		if p.playing and p.stream in want:
 			return true
 	for p in audio._pilot_pool:

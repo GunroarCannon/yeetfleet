@@ -60,24 +60,22 @@ const THEME_BLURBS: Array = [
 	[
 		"So empty even the space dust asked for a day off.",
 		"Wide open lanes, zero traffic cops, and nobody to blame.",
-		"Great views, terrible snacks, one very confused rock.",
-		"The wilds: where 'are we lost?' is a lifestyle.",
-		"Peaceful, until a lone ace shows up to ruin your nap.",
-		"No signs, no maps, just vibes and a suspicious comet.",
+		"Great views, quesionable company.",
+		"Peaceful, until a lone warrior shows up to ruin your nap.",
+		"No signs, no maps, just you and whoever woke up on the wrong side of the moon that day.",
 		"Races and cargo, plus the occasional cosmic jump-scare.",
 		"Nature is healing. Mostly by hitting you with rocks.",
 		"Bring a friend. Or at least a very good playlist.",
-		"Fresh air! Technically none, but the thought counts.",
+		"Fresh air! Technically no air, but the thought counts.",
 	],
 	[
-		"Pirates here have eyepatches, bad manners and worse aim.",
-		"Every rock hides a raider with something to prove.",
+		"Pirates here have bad manners and worse aim.",
 		"Yo-ho-ho and a bottle of rocket fuel.",
 		"They'll take your cargo, your coins and your snacks.",
 		"Warning: 'pirate discount' is not an actual discount.",
 		"Ambushes at breakfast, ambushes at lunch, ambushes at dinner.",
 		"Expect a fight around every asteroid. Wear comfy pants.",
-		"Someone stole a moon here once. They're still bragging.",
+		"Someone stole a moon here once.",
 		"Loud, rude and heavily armed. So, a normal Tuesday.",
 		"The locals are friendly. The locals' guns are not.",
 	],
@@ -85,35 +83,30 @@ const THEME_BLURBS: Array = [
 		"Traffic jams in space, but with lasers.",
 		"Everyone's hauling something, and everyone's late.",
 		"Escort the convoy and try not to sneeze on the freight.",
-		"Freight lanes: glamorous as watching a truck, but explosive.",
 		"Protect the haulers! They're slow, round and very smooshable.",
 		"Please keep arms and engines inside the convoy at all times.",
-		"Honking is not allowed. Shooting, however...",
+		"Honking is not allowed. Yeeting, however...",
 		"A thousand crates, one tiny escort. That's you!",
 		"Delivery guaranteed or your coins back. (They won't be.)",
 		"Biggest danger: a very rude, very large cargo ship.",
 	],
 	[
-		"Two fleets, one battlefield, and absolutely no manners.",
 		"Capital ships the size of small countries. Say hi!",
 		"The war zone: now with 40% more things exploding.",
 		"Bring your A-game, your B-game and a backup game.",
 		"Sieges, big guns, and someone yelling 'incoming!'.",
-		"Fun fact: nobody here is having fun.",
 		"Medals are handed out. Mostly posthumously.",
 		"The sky is full of lasers and bad decisions.",
 		"A very loud place to take a very quiet nap.",
 		"Both sides claim to be winning. Both are wrong.",
 	],
 	[
-		"Bugs. Lots of bugs. Please don't look at the legs.",
+		"Ships. Lots of ships.",
 		"The nest hums with 10,000 tiny, extremely angry opinions.",
 		"They're small, fast, and weirdly good at teamwork.",
-		"Squish first, ask questions never.",
+		"Smash first, ask questions never.",
 		"If it skitters, shoot it. If it doesn't, shoot it anyway.",
-		"Warning: contains buzzing, clicking and mild existential dread.",
 		"They outnumber you a thousand to one. Odds are for cowards.",
-		"Free insect-themed bonus: a thousand new friends!",
 		"The nest smells like old cheese and doom.",
 		"Think of it as a very aggressive pest-control job.",
 	],
@@ -171,7 +164,7 @@ const KIND_INFO := {
 	"capital": {"word": "ESCORT", "icon": "shield"},
 	"assault": {"word": "WRECK IT", "icon": "target"},
 	"boss": {"word": "BOSS", "icon": "target"},
-	"protect": {"word": "PROTECT", "icon": "shield"},
+	"protect": {"word": "GUARD", "icon": "shield"},
 	"voyage": {"word": "VOYAGE", "icon": "ring"},
 }
 
@@ -188,11 +181,11 @@ const KIND_BRIEF := {
 	"race": "Fly through every ring. Any order.",
 	"salvage": "Grab all the cargo pods.",
 	"dock": "Fly into the carrier's bay and stop.",
-	"escort": "Keep the hauler alive. Guard it.",
-	"capital": "Keep the big ship alive till it's home.",
+	"escort": "Fly the hauler to its destination. Keep it alive.",
+	"capital": "Fly the big ship home. Keep it alive.",
 	"assault": "Wreck the mothership.",
 	"boss": "A huge warship blocks the road. Wreck it.",
-	"protect": "A stranded hauler. Keep it alive till the clock runs out.",
+	"protect": "A stranded hauler. Keep it safe till the clock runs out.",
 	"voyage": "Fly all the way out to the far planet.",
 }
 
@@ -244,12 +237,30 @@ const FOE_MIX := {
 }
 
 const WORDS_ADJ := {
-	Turf.WILDS: ["Drifty", "Lonely", "Wobbly", "Frosty", "Dusty", "Quiet"],
-	Turf.PIRATE: ["Angry", "Rusty", "Greedy", "Sneaky", "Loud", "Salty"],
-	Turf.TRADE: ["Fragile", "Late", "Heavy", "Shiny", "Lost", "Priority"],
-	Turf.MILITARY: ["Iron", "Final", "Big", "Red", "Heavy", "Loud"],
-	Turf.SWARM: ["Buzzing", "Hungry", "Itchy", "Endless", "Sticky", "Twitchy"],
+	Turf.WILDS: ["Drifty", "Lonely", "Wobbly", "Frosty", "Dusty", "Quiet", "Green", "Blue"],
+	Turf.PIRATE: ["Angry", "Rusty", "Greedy", "Sneaky", "Loud", "Salty", "Orange", "Purple"],
+	Turf.TRADE: ["Fragile", "Late", "Heavy", "Shiny", "Lost", "Priority", "Golden", "Teal"],
+	Turf.MILITARY: ["Iron", "Grim", "Big", "Red", "Heavy", "Loud", "Blue", "Crimson"],
+	Turf.SWARM: ["Buzzing", "Hungry", "Itchy", "Endless", "Sticky", "Twitchy", "Pink", "Green"],
 }
+## A colour in a level's name means something in the level is that colour: the
+## ship paint (a [code]ShipBuilder[/code] faction) for ships, and the planet look
+## for a planet. Keyed by the lower-case word.
+const NAME_COLORS := {
+	"red": {"faction": "crimson_toybox", "look": "lava"},
+	"crimson": {"faction": "crimson_toybox", "look": "lava"},
+	"orange": {"faction": "solar_raiders", "look": "desert"},
+	"golden": {"faction": "vega_industrial", "look": "desert"},
+	"green": {"faction": "emerald_warlords", "look": "lush"},
+	"teal": {"faction": "cyber_teal", "look": "ice"},
+	"blue": {"faction": "cobalt_vanguard", "look": "ocean"},
+	"purple": {"faction": "amethyst_void", "look": "toxic"},
+	"pink": {"faction": "neon_turbo", "look": "candy"},
+}
+## Which thing a colour word colours, by kind of level: the ship being guarded
+## or docked with, the enemy ships, or (a trip, a haul) the main planet.
+const FRIEND_KINDS: Array[String] = ["escort", "capital", "protect", "dock"]
+const FOE_KINDS: Array[String] = ["duel", "skirmish", "ambush", "battle", "waves", "survive", "assault", "boss"]
 const WORDS_NOUN := {
 	Turf.WILDS: ["Drift", "Rocks", "Comet", "Void", "Moon", "Detour"],
 	Turf.PIRATE: ["Heist", "Grudge", "Ruckus", "Plunder", "Cutlass", "Payday"],
@@ -304,7 +315,9 @@ static func stars_needed(number: int) -> int:
 		return 0
 	var could_have := 3.0 * float(number - 1)
 	var share := STAR_SHARE_MAX * (1.0 - exp(-float(number - FREE_LEVELS) / STAR_SHARE_RAMP))
-	return maxi(1, roundi(could_have * share))
+	if number <= 10:
+		return maxi(1, roundi(could_have * share))
+	return number*2
 
 
 ## Which era level [param number] is in: 0 before [constant ERA_START], then
@@ -427,7 +440,7 @@ static func level(route: Array, index: int) -> Dictionary:
 	var d := clampf(float(number - 1) / 40.0, 0.0, 1.6)
 	var foes: Array = THEME_FOES[theme]
 	var arch := String(foes[r.randi_range(0, foes.size() - 1)])
-	var o := _overrides(kind, d, r, arch)
+	var o := _overrides(kind, d, r, arch, key)
 	# The climb (see [Difficulty]): every level a step up — hull, damage,
 	# size, aggression, gun class, how many may shoot at once, dreadnoughts.
 	# Its own roll, so the level's other numbers are what they always were.
@@ -462,6 +475,13 @@ static func level(route: Array, index: int) -> Dictionary:
 		# screen may out-size a boss, cosmetic or not.
 		o["bystanders"] = 0
 		o["backdrop"] = 0
+	elif depth > 0 or index >= 2:
+		# A trip with no fight can have a megastructure out in the distance —
+		# often sun-sized — to fly past. Its own roll.
+		var br := _rng("backdrop/" + key)
+		if br.randf() < Difficulty.v("backdrop_chance"):
+			o["backdrop"] = 1
+			o["backdrop_size"] = 3 if br.randf() < 0.55 else 2
 	# Some levels name a type of ship (forced, or only recommended: see
 	# Difficulty.forces_ship); never in the first sector.
 	var ship_type := -1
@@ -469,7 +489,16 @@ static func level(route: Array, index: int) -> Dictionary:
 		ship_type = int(KIND_SHIP[kind])
 	var adj: Array = WORDS_ADJ[theme]
 	var noun: Array = WORDS_NOUN[theme]
-	var title := "%s %s" % [adj[r.randi_range(0, adj.size() - 1)], noun[r.randi_range(0, noun.size() - 1)]]
+	var word_adj: String = adj[r.randi_range(0, adj.size() - 1)]
+	# "Final" is the sector's last level (its boss) and nobody else's.
+	if kind == "boss" and index == LEVELS_PER_SECTOR - 1:
+		word_adj = "Final"
+	var title := "%s %s" % [word_adj, noun[r.randi_range(0, noun.size() - 1)]]
+	var tint := name_color(title)
+	if tint != "":
+		var what := "friend" if kind in FRIEND_KINDS else ("foes" if kind in FOE_KINDS else "planet")
+		o["tint_for"] = what
+		o["tint_faction"] = String(NAME_COLORS[tint]["faction"])
 	var bgs: Array = THEME_BG[theme]
 	var info: Dictionary = KIND_INFO.get(kind, {"word": "FLY", "icon": "target"})
 	o["name"] = title
@@ -501,25 +530,53 @@ static func level(route: Array, index: int) -> Dictionary:
 			"roll": r.randi_range(0, 9999),
 			"flip": r.randf() < 0.5,
 		},
-		"space": space_setup(key, theme),
+		"space": space_setup(key, theme, String(o.get("tint_for", "")) == "planet", tint),
 	}
 
 
 ## The system a level is flown in ([member Session.space_setup]): its own
 ## planets, sizes and layout from the level's key, the main world's look
 ## from the theme. The same key always gives the same system.
-static func space_setup(key: String, theme: int) -> Dictionary:
+static func space_setup(key: String, theme: int, tint_planet := false, tint := "") -> Dictionary:
 	var r := _rng("space/" + key)
 	var mains: Array = THEME_LOOKS.get(theme, ALL_LOOKS)
-	return _space(r, String(mains[r.randi_range(0, mains.size() - 1)]))
+	var look := String(mains[r.randi_range(0, mains.size() - 1)])
+	# A colour in the name tints the main world.
+	if tint_planet and NAME_COLORS.has(tint):
+		look = String(NAME_COLORS[tint]["look"])
+	return _space(r, look)
 
 
-## A fresh random system for the sandbox: any looks, any sizes, and a few
+## The colour word in a level's [param title] (a [constant NAME_COLORS] key), or "".
+static func name_color(title: String) -> String:
+	for w in title.to_lower().split(" "):
+		if NAME_COLORS.has(w):
+			return w
+	return ""
+
+
+## A fresh random system for the sandbox: any looks, any sizes, a few outer
+## worlds round the edge (gas giants among them, some ringed) and a few
 ## incidents going on.
 static func random_space(seed_val: int) -> Dictionary:
 	var r := RandomNumberGenerator.new()
 	r.seed = seed_val
 	var out := _space(r, ALL_LOOKS[r.randi_range(0, ALL_LOOKS.size() - 1)])
+	var outer: Array = []
+	var looks: Array = out["looks"]
+	var yaw0 := r.randf_range(0.0, TAU)
+	var count := r.randi_range(2, 4)
+	for i in count:
+		var gas := r.randf() < 0.4
+		looks.append(("gas" if r.randf() < 0.5 else "gas_blue") if gas else ALL_LOOKS[r.randi_range(0, ALL_LOOKS.size() - 1)])
+		outer.append({
+			"yaw": yaw0 + TAU * float(i) / float(count) + r.randf_range(-0.4, 0.4),
+			"rise": r.randf_range(-0.25, 0.25),
+			"dist": r.randf_range(12000.0, 21000.0),
+			"size": r.randf_range(1.4, 2.6) if gas else r.randf_range(0.4, 1.3),
+			"rings": gas and r.randf() < 0.6,
+		})
+	out["outer"] = outer
 	var events: Array[String] = []
 	for i in r.randi_range(1, 3):
 		var e := SANDBOX_EVENTS[r.randi_range(0, SANDBOX_EVENTS.size() - 1)]
@@ -553,7 +610,7 @@ static func from_key(key: String) -> Dictionary:
 
 
 ## Scenario dial overrides for a kind at difficulty [param d] (0..1.6).
-static func _overrides(kind: String, d: float, r: RandomNumberGenerator, arch: String) -> Dictionary:
+static func _overrides(kind: String, d: float, r: RandomNumberGenerator, arch: String, key := "") -> Dictionary:
 	# Enemies start at full strength (they used to start at 0.6 hull and half
 	# damage, which made the early game a walk) and keep climbing.
 	var o := {
@@ -605,14 +662,37 @@ static func _overrides(kind: String, d: float, r: RandomNumberGenerator, arch: S
 		"escort":
 			o["enemies"] = 2 + extra
 			o["wave_every"] = maxf(14.0, 26.0 - d * 8.0)
+			# Its own roll, so the level's other numbers are what they were. A
+			# short hop with a plain hauler, or (one in three) a quick little
+			# ship on a run more than twice as far.
+			var er := _rng("escort/" + key)
+			if er.randf() < 0.34:
+				o["escort_speed"] = snappedf(er.randf_range(105.0, 135.0), 1.0)
+				o["escort_size"] = 2.6
+				o["escort_hp"] = 0.8
+				o["route"] = snappedf(er.randf_range(4500.0, 6500.0), 50.0)
+				o["wave_every"] = maxf(10.0, float(o["wave_every"]) - 5.0)
+			else:
+				o["escort_speed"] = snappedf(er.randf_range(55.0, 75.0), 1.0)
+				o["route"] = snappedf(er.randf_range(1700.0, 2400.0), 50.0)
+			o["dest"] = _dest_kind(er)
 		"capital":
 			o["enemies"] = 3 + extra
 			o["allies"] = 2
 			o["wave_every"] = maxf(16.0, 28.0 - d * 8.0)
+			var cr := _rng("escort/" + key)
+			o["escort_speed"] = snappedf(cr.randf_range(38.0, 48.0), 1.0)
+			o["route"] = snappedf(cr.randf_range(2200.0, 2800.0), 50.0)
+			o["dest"] = _dest_kind(cr)
 		"protect":
+			# A guard job: it is not going anywhere. Keep it alive for 30 s, a
+			# minute, a minute and a half or two minutes (longer as the climb goes on).
 			o["enemies"] = 2 + extra
 			o["wave_every"] = maxf(12.0, 20.0 - d * 6.0)
-			o["hold_time"] = roundf(55.0 + d * 30.0)
+			var gr := _rng("guard/" + key)
+			var holds: Array[float] = [30.0, 60.0, 60.0, 90.0, 120.0]
+			var pick := clampi(int(gr.randf() * 3.0 + d * 2.0), 0, holds.size() - 1)
+			o["hold_time"] = holds[pick]
 		"voyage":
 			# Mostly a trip; later on, someone is out there too.
 			o["enemies"] = 0 if d < 0.4 else extra
@@ -633,19 +713,42 @@ static func _overrides(kind: String, d: float, r: RandomNumberGenerator, arch: S
 ## Seconds a clean run should take — the third star's bar.
 static func _par_time(kind: String, o: Dictionary) -> float:
 	if o.has("time_limit"):
-		return roundf(float(o["time_limit"]) * 0.65)
+		# A fast clear, not most of the allowance: the third star's bar stays short.
+		return clampf(roundf(float(o["time_limit"]) * 0.65), 30.0, 90.0) if kind in ["survive", "protect", "escort", "capital"] else clampf(roundf(float(o["time_limit"]) * 0.3), 30.0, 60.0)
 	match kind:
 		"survive":
 			return float(o.get("survive_time", 60.0)) + 1.0
 		"courier":
-			return 70.0 + 35.0 * float(o.get("points", 2))
+			return minf(30.0 + 12.0 * float(o.get("points", 2)), 60.0)
 		"salvage":
-			return 40.0 + 18.0 * float(o.get("pods", 4))
-		"escort", "capital", "dock":
-			return 150.0
+			return minf(25.0 + 5.0 * float(o.get("pods", 4)), 45.0)
+		"escort", "capital":
+			# The trip itself, a little slack, and a few seconds for the fights.
+			return roundf(float(o.get("route", 2000.0)) / maxf(float(o.get("escort_speed", 60.0)), 1.0) * 1.2 + 20.0)
+		"protect":
+			return float(o.get("hold_time", 60.0)) + 1.0
+		"dock":
+			return 60.0
 		"waves", "battle", "boss":
-			return 120.0
-	return 75.0
+			return 40.0
+	return 60.0
+
+
+## What stands at an escort's yellow marker: a ring station, a big gate, or
+## just the beacon.
+static func _dest_kind(r: RandomNumberGenerator) -> String:
+	var roll := r.randf()
+	return "station" if roll < 0.4 else ("gate" if roll < 0.8 else "beacon")
+
+
+## The one-line brief for a level's kind with its own numbers in it (a guard's
+## clock, an escort's trip).
+static func brief_for(kind: String, o: Dictionary) -> String:
+	if kind == "protect":
+		var s := roundi(float(o.get("hold_time", 60.0)))
+		var span := ("%d seconds" % s) if s < 60 or s % 60 != 0 else ("%d minute%s" % [s / 60, "" if s == 60 else "s"])
+		return "Keep the stranded hauler safe for %s." % span
+	return String(KIND_BRIEF.get(kind, ""))
 
 
 static func _weighted(r: RandomNumberGenerator, table: Dictionary) -> String:

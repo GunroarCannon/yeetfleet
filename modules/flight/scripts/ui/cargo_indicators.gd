@@ -53,6 +53,8 @@ func _draw() -> void:
 		var pts := PackedVector2Array([at + dir * 14.0, at - dir * 8.0 + side * 11.0, at - dir * 8.0 - side * 11.0])
 		draw_colored_polygon(pts, GOLD)
 		draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]), Color(0, 0, 0, 0.8), 2.0)
+		if not Session.debug_mode:
+			continue
 		var dist := camera.global_position.distance_to(wp)
 		var label := "%dm" % roundi(dist)
 		var lp := at - dir * 30.0 - Vector2(font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x * 0.5, -5.0)

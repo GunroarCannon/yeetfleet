@@ -1,15 +1,15 @@
-[gd_scene load_steps=4 format=3 uid="uid://cu4bpdiswlllv"]
+[gd_scene format=3 uid="uid://cu4bpdiswlllv"]
 
 [ext_resource type="Script" uid="uid://bpf6sju2exkdd" path="res://modules/flight/scripts/flight_root.gd" id="1_root"]
 [ext_resource type="Script" uid="uid://b1sbtufj7ih2g" path="res://modules/flight/scripts/ui/flight_hud.gd" id="2_hud"]
 [ext_resource type="Script" uid="uid://c8jesqa3oxw2f" path="res://modules/ship_builder/scripts/ui/coach_overlay.gd" id="3_coach"]
 
-[node name="FlightTest" type="Node3D"]
+[node name="FlightTest" type="Node3D" unique_id=1651812802]
 script = ExtResource("1_root")
 
-[node name="Ui" type="CanvasLayer" parent="."]
+[node name="Ui" type="CanvasLayer" parent="." unique_id=1052767112]
 
-[node name="Hud" type="Control" parent="Ui"]
+[node name="Hud" type="Control" parent="Ui" unique_id=1299876990]
 unique_name_in_owner = true
 layout_mode = 3
 anchors_preset = 15
@@ -20,7 +20,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("2_hud")
 
-[node name="Coach" type="Control" parent="Ui"]
+[node name="Coach" type="Control" parent="Ui" unique_id=1977798289]
 unique_name_in_owner = true
 visible = false
 layout_mode = 3

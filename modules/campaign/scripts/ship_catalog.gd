@@ -95,6 +95,48 @@ const SHIPS: Array[Dictionary] = [
 		"paint": "crimson_toybox", "type": Type.TITAN, "price": 6500, "tier": 5,
 		"base": {"hull": 5, "guns": 5, "speed": 2, "yeet": 5},
 	},
+	# The top shelf: ratings past 5 (A, AA, S, SSS before any pips), and each
+	# point past 5 is a real boost in flight too (see [method class_mult]).
+	{
+		"id": "phantom", "name": "Phantom", "preset": "kestrel_phantom",
+		"paint": "cyber_teal", "type": Type.SCOUT, "price": 9000, "tier": 6,
+		"base": {"hull": 4, "guns": 5, "speed": 9, "yeet": 6},
+	},
+	{
+		"id": "ace", "name": "Red Ace", "preset": "lance_ace",
+		"paint": "crimson_toybox", "type": Type.FIGHTER, "price": 14000, "tier": 6,
+		"base": {"hull": 6, "guns": 8, "speed": 7, "yeet": 6},
+	},
+	{
+		"id": "juggernaut", "name": "Juggernaut", "preset": "mule_juggernaut",
+		"paint": "solar_raiders", "type": Type.HAULER, "price": 18000, "tier": 7,
+		"base": {"hull": 8, "guns": 6, "speed": 3, "yeet": 9},
+	},
+	{
+		"id": "warden", "name": "Warden", "preset": "bulwark_warden",
+		"paint": "cobalt_vanguard", "type": Type.TANK, "price": 22000, "tier": 7,
+		"base": {"hull": 9, "guns": 7, "speed": 4, "yeet": 7},
+	},
+	{
+		"id": "wraith", "name": "Wraith", "preset": "kestrel_phantom",
+		"paint": "amethyst_void", "type": Type.SCOUT, "price": 40000, "tier": 8,
+		"base": {"hull": 6, "guns": 8, "speed": 10, "yeet": 9},
+	},
+	{
+		"id": "cruiser", "name": "Cruiser", "preset": "segment_cruiser",
+		"paint": "emerald_warlords", "type": Type.TITAN, "price": 60000, "tier": 9,
+		"base": {"hull": 9, "guns": 9, "speed": 5, "yeet": 8},
+	},
+	{
+		"id": "zenith", "name": "Zenith", "preset": "lance_ace",
+		"paint": "neon_turbo", "type": Type.FIGHTER, "price": 85000, "tier": 9,
+		"base": {"hull": 8, "guns": 10, "speed": 8, "yeet": 8},
+	},
+	{
+		"id": "sovereign", "name": "Sovereign", "preset": "keel_sovereign",
+		"paint": "amethyst_void", "type": Type.TITAN, "price": 150000, "tier": 10,
+		"base": {"hull": 10, "guns": 10, "speed": 6, "yeet": 10},
+	},
 ]
 
 
@@ -157,6 +199,14 @@ static func stat_mult(id: String, stat: String, pips: int) -> float:
 	var t := type_of(id)
 	var gain := float((PIP_GAIN.get(t, {}) as Dictionary).get(stat, 0.1))
 	return 1.0 + gain * clampi(pips, 0, MAX_PIPS)
+
+
+## A top-shelf ship's built-in edge on [param stat]: each rating point past 5
+## adds a tenth (speed a little less, or the fastest hulls outrun the camera).
+## 1 for every ship rated 5 or under.
+static func class_mult(id: String, stat: String) -> float:
+	var over := maxi(rating(id, stat) - 5, 0)
+	return 1.0 + over * (0.07 if stat == "speed" else 0.1)
 
 
 ## The bar the garage draws for a track: the ship's own rating plus a

@@ -72,22 +72,21 @@ func rebuild() -> void:
 	if Campaign.at_fork():
 		_fork = Campaign.fork_options()
 	_next_key = ""
-	var past_played := Campaign.last_played_key == ""
-	var first_after := ""
+	# The first unbeaten level past the newest beaten one (and open): where the
+	# road goes on, not the furthest level the stars happen to reach.
+	var after_newest_win := ""
+	var last_open := ""
 	for s in _sectors:
 		for l in s["levels"]:
 			var k := String(l["key"])
-			var open := Campaign.is_unlocked(l) and int(Campaign.record(k)["wins"]) == 0
-			if open:
-				# The most recently opened level the pilot has not won yet...
-				_next_key = k
-				# ...unless a level was just played: then the first one open past it.
-				if past_played and first_after == "" and k != Campaign.last_played_key:
-					first_after = k
-			if k == Campaign.last_played_key:
-				past_played = true
-	if first_after != "" and Campaign.last_played_key != "":
-		_next_key = first_after
+			if int(Campaign.record(k)["wins"]) > 0:
+				# A later win moves the starting point on.
+				after_newest_win = ""
+			elif Campaign.is_unlocked(l):
+				last_open = k
+				if after_newest_win == "":
+					after_newest_win = k
+	_next_key = after_newest_win if after_newest_win != "" else last_open
 	_layout()
 	queue_redraw()
 
@@ -109,8 +108,16 @@ func focus_level(key: String, instant := false) -> void:
 				found = true
 	if not found:
 		for c in _cards:
-			if c.has("fork") or (c.has("lvl") and String(c["lvl"]["key"]) == _next_key):
+			if c.has("lvl") and _next_key != "" and String(c["lvl"]["key"]) == _next_key:
 				target = (c["rect"] as Rect2).get_center()
+				found = true
+				break
+	# Nothing is next: the fork (or the locked teaser) at the road's end.
+	if not found:
+		for c in _cards:
+			if c.has("fork") or c.has("teaser"):
+				target = (c["rect"] as Rect2).get_center()
+				break
 	var want := Vector2(size.x * 0.5, top_inset + (size.y - top_inset) * 0.5) - target
 	_offset = _clamp(want) if instant else _offset
 	if not instant:

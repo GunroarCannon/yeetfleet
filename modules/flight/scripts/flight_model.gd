@@ -1057,6 +1057,14 @@ func _ship_mass() -> float:
 	return maxf(m, 0.5)
 
 
+## The player's hull HP, or -1 when this is not the player's model.
+func _player_hull() -> float:
+	var p := get_parent()
+	if is_player() and p != null and "player_hp" in p:
+		return float(p.player_hp)
+	return -1.0
+
+
 ## Called by [PhysWorld] when this body took an impulse. Routes the severity of
 ## the hit — its closing speed, the number a pilot reads as "how hard did I hit
 ## that" — into the assist lockout, part damage and hitstop.
@@ -1070,10 +1078,14 @@ func _on_phys_impacted(other: PhysBody, impulse: float, point: Vector3, normal: 
 		_assist_lockout = lockout
 
 	# Collision & ramming damage factoring speed and durability
+	var hull_before := _player_hull()
 	_apply_collision_damage(other, impulse, point, closing)
 
-	# Damage: a genuinely fast slam breaks parts off.
-	if closing >= IMPACT_DAMAGE_SPEED and _damage != null:
+	# Damage: a genuinely fast slam breaks parts off. The player's own hull must
+	# really have been hurt: a yeet that won its clash, or a hit the shield soaked,
+	# used to rip parts off at full health.
+	var hurt := not is_player() or _player_hull() < hull_before
+	if closing >= IMPACT_DAMAGE_SPEED and _damage != null and hurt:
 		_damage.handle_impact(closing)
 
 	# Calculate contact lever arm and impact torque to spin the ship:
@@ -1246,14 +1258,15 @@ func _apply_collision_damage(other: PhysBody, _impulse: float, point: Vector3, c
 			var ram_now := Time.get_ticks_msec()
 			if ram_now < int(ai.get_meta("ram_until_ms", 0)):
 				return
-			var is_popcorn := ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled
+			# A boss wearing a popcorn archetype (a swarm's) is still no popcorn.
+			var is_popcorn := not ai.has_meta("boss") and ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled
 			if not is_popcorn:
 				ai.set_meta("ram_until_ms", ram_now + int(Difficulty.v("ram_gap") * 1000.0))
 				dmg = minf(dmg, ai.max_hp * Difficulty.v("ram_max_share"))
 			# Popcorn enemies (see AiFactions.ArchetypeData.popcorn): a real,
 			# hard ram pops them outright. It used to be any contact over
 			# 10 m/s, grazes included, so a brush in passing killed them.
-			if ai.archetype != null and ai.archetype.popcorn and JuiceSettings.popcorn_enemies_enabled \
+			if is_popcorn \
 					and not _reach_ram and closing >= POPCORN_POP_SPEED:
 				dmg = ai.hp + 1.0
 			# A graze takes a bite, never the whole ship (the ram dials can

@@ -12,10 +12,14 @@
 ## - SALVAGE: cargo pods scattered round the player, collected by touching.
 ## - ESCORT: a big friendly hauler (or capital ship) flies a route to a
 ##   destination at its own pace; it must arrive alive. Waves go for it.
-## - ASSAULT: a mothership to bring down (it launches fighters).
+## - ASSAULT: a mothership to bring down (it launches fighters). With
+##   [code]mega[/code] it is a megastructure carrier ([LargeCraftGenerator] +
+##   [MegaCraft]) of [code]mega_size[/code] ([enum FlightRoot.CraftSize]):
+##   turrets, launch bays, and a hull shot off piece by piece.
 ## - DOCK: fly into a giant friendly carrier's glowing bay and come to rest.
 ## - ESCORT with [code]hold_time[/code] (PROTECT): the hauler is stranded;
-##   keep it alive until the clock runs out.
+##   keep it alive until the clock runs out. It sits inside a gold guard
+##   ring (no route, no beacon), so it never reads as an escort run.
 ## - VOYAGE: fly out to the system's farthest named planet.
 ##
 ## An escort's route is drawn as a dashed gold line from the hauler to its
@@ -77,6 +81,10 @@ var points: Array[Vector3] = []
 var done := 0
 ## The ship being escorted / assaulted / docked with.
 var ship: AiShip = null
+## ASSAULT with [code]mega[/code]: the megastructure carrier instead of [member ship].
+var mega: MegaCraft = null
+## PROTECT: the gold ring round the stranded hauler.
+var _guard_ring: Node3D = null
 var destination := Vector3.ZERO
 
 var _root: FlightRoot
@@ -101,6 +109,8 @@ var _hold := 0.0
 var _route_len := 1.0
 ## The dashed line from the hauler to its beacon.
 var _route_line: MeshInstance3D = null
+## The ring station or gate standing at an escort's destination (or null).
+var _dest_prop: Node3D = null
 ## VOYAGE: the planet's name and radius.
 var _voyage_name := ""
 var _voyage_radius := 0.0
@@ -164,15 +174,21 @@ func begin(k: int, config: Dictionary, root: FlightRoot, spawner: AiSpawner) -> 
 				ship._ai_paused = true
 				ship.team_id = FlightScenarios.PLAYER_TEAM
 				ship.player_proof = true
+				if String(config.get("tint_for", "")) == "friend":
+					ship.paint_as(String(config.get("tint_faction", "")))
 				ship.max_hp = ESCORT_HP_PER_SIZE * float(config.get("escort_size", 4.0)) * float(config.get("escort_hp", 1.0))
 				ship.hp = ship.max_hp
 				ship.systems.set_firing(false)
 				ship.model.external_drive = true
 				# A gold target on it, held at the screen edge when out of view.
 				root.pin_marker(ship, GOLD)
+			if _hold > 0.0 and ship != null:
+				_guard_ring = _ring_round(ship, GOLD)
 			if _hold <= 0.0:
 				_markers.append(_beacon(destination, GOLD, 90.0))
 				_route_line = _dashed_line(GOLD)
+				# Something real stands there too, fixed where the beacon is.
+				_dest_prop = _destination_prop(String(config.get("dest", "")), destination, fwd)
 		Kind.VOYAGE:
 			# The farthest named body (the moon moves, so not that one).
 			var best := {}
@@ -191,6 +207,13 @@ func begin(k: int, config: Dictionary, root: FlightRoot, spawner: AiSpawner) -> 
 			points.append(p)
 			_markers.append(_beacon(p, BLUE, maxf(_voyage_radius * 0.15, 120.0)))
 		Kind.ASSAULT:
+			if bool(config.get("mega", false)):
+				var gen := root.spawn_large_craft(LargeCraftGenerator.Archetype.MOTHERSHIP, Vector3.ZERO, int(config.get("mega_size", 1)))
+				mega = root.mega_of(gen) if gen != null else null
+				if mega != null:
+					mega.damage_mult = float(config.get("enemy_damage", 1.0))
+					_finish_begin()
+					return
 			ship = spawner.spawn_mother()
 			if ship != null:
 				var pos := origin + fwd * float(config.get("enemy_distance", 1400.0))
@@ -207,10 +230,18 @@ func begin(k: int, config: Dictionary, root: FlightRoot, spawner: AiSpawner) -> 
 				var pos := origin + fwd * float(config.get("route", 2500.0))
 				_place(ship, Transform3D(Basis.looking_at(fwd, up), pos))
 				ship.systems.set_firing(false)
+				if String(config.get("tint_for", "")) == "friend":
+					ship.paint_as(String(config.get("tint_faction", "")))
 				var r := _ship_radius(ship)
 				# The bay: off the carrier's stern, big enough to fly into.
 				destination = pos + fwd * r * 1.1
 				_markers.append(_beacon(destination, BLUE, maxf(r * 0.3, 60.0)))
+	_finish_begin()
+
+
+## The objective's on-screen helpers, once it is laid out.
+func _finish_begin() -> void:
+	var root := _root
 	if kind in [Kind.DELIVER, Kind.SALVAGE] and root._hud != null:
 		_pod_marks = CargoIndicators.new()
 		_pod_marks.camera = root.camera_node()
@@ -231,6 +262,8 @@ func tick(delta: float) -> int:
 	if model == null:
 		return 0
 	var pos := model.global_position
+	if _dest_prop != null and is_instance_valid(_dest_prop) and _dest_prop.has_meta("spin"):
+		_dest_prop.rotate_object_local(Vector3.UP, delta * float(_dest_prop.get_meta("spin")))
 	for i in _markers.size():
 		# Beacons turn slowly; the collected / passed ones are hidden.
 		if is_instance_valid(_markers[i]):
@@ -279,6 +312,12 @@ func tick(delta: float) -> int:
 			if _hold > 0.0:
 				# PROTECT: it sits and drifts; hold out till the clock is done.
 				ship.model.velocity = ship.model.velocity.move_toward(Vector3.ZERO, 20.0 * delta)
+				if _guard_ring != null and is_instance_valid(_guard_ring):
+					# Follows the hull, turns slowly, and beats faster as the clock runs out.
+					_guard_ring.global_position = ship.model.global_position
+					_guard_ring.rotate_y(delta * 0.4)
+					var beat := 1.0 + 0.04 * sin(_t * lerpf(3.0, 12.0, clampf(_t / maxf(_hold, 1.0), 0.0, 1.0)))
+					_guard_ring.scale = Vector3.ONE * beat
 				if _t >= _hold:
 					_root.hit_word("SAFE!", ship.global_position, GOLD, 1.6)
 					return 1
@@ -297,7 +336,11 @@ func tick(delta: float) -> int:
 			var want := Basis.looking_at(dir, b.y)
 			ship.model.global_transform.basis = Basis(b.get_rotation_quaternion().slerp(want.get_rotation_quaternion(), 1.0 - exp(-1.2 * delta)))
 		Kind.ASSAULT:
-			if ship == null or not is_instance_valid(ship) or not ship._alive:
+			if mega != null:
+				if not is_instance_valid(mega) or mega.is_dead():
+					return 1
+				_lay_arrow(delta)
+			elif ship == null or not is_instance_valid(ship) or not ship._alive:
 				return 1
 		Kind.VOYAGE:
 			if pos.distance_to(points[0]) < REACH * 1.5 + _hull() or pos.distance_to(destination) < _voyage_radius * 1.4:
@@ -477,7 +520,9 @@ func status() -> String:
 		Kind.VOYAGE:
 			line = "REACH %s" % _voyage_name + far
 		Kind.ASSAULT:
-			if ship != null and is_instance_valid(ship):
+			if mega != null and is_instance_valid(mega):
+				line += "  ·  MOTHERSHIP %d%%" % roundi(mega.health() * 100.0) + far
+			elif ship != null and is_instance_valid(ship):
 				line += "  ·  CARRIER %d%%" % roundi(ship.hp / maxf(ship.max_hp, 1.0) * 100.0) + far
 		Kind.DOCK:
 			line += "  ·  INTO THE BAY, SLOW" + far
@@ -518,6 +563,8 @@ func goal_position() -> Vector3:
 		Kind.VOYAGE:
 			return points[0] if not points.is_empty() else Vector3.INF
 		Kind.ASSAULT:
+			if mega != null and is_instance_valid(mega) and not mega.is_dead():
+				return mega.centre()
 			return ship.global_position if ship != null and is_instance_valid(ship) else Vector3.INF
 		Kind.DOCK:
 			return destination
@@ -535,9 +582,16 @@ func clear() -> void:
 		if is_instance_valid(m):
 			m.queue_free()
 	_markers.clear()
+	if _guard_ring != null and is_instance_valid(_guard_ring):
+		_guard_ring.queue_free()
+	_guard_ring = null
 	if ship != null and is_instance_valid(ship) and ship._alive:
 		ship.teardown()
 	ship = null
+	if mega != null and is_instance_valid(mega) and is_instance_valid(mega.gen):
+		_root.remove_large_craft(mega.gen)
+		mega.queue_free()
+	mega = null
 	queue_free()
 
 
@@ -562,6 +616,90 @@ func _lay_arrow(delta: float) -> void:
 
 func _hull() -> float:
 	return _root.camera_rig.hull_radius if _root.camera_rig != null else 4.0
+
+
+## What stands at an escort's journey end: a ring station (a spinning hoop with
+## a hub, spokes and lamps) or a big gate (a hoop on two pylons that the hauler
+## flies through); "beacon" or "" is the beacon alone. It never moves.
+func _destination_prop(which: String, at: Vector3, axis: Vector3) -> Node3D:
+	if which != "station" and which != "gate":
+		return null
+	var n := Node3D.new()
+	add_child(n)
+	var up := Vector3.UP if absf(axis.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+	var side := axis.cross(up).normalized()
+	# The hoop faces along the route: its axis is the way the hauler comes.
+	n.global_transform = Transform3D(Basis(side, axis, side.cross(axis)), at)
+	var hull := _toy(Color("c9d2e6"))
+	var trim := _toy(Color("ffcc1a"))
+	if which == "gate":
+		var radius := 95.0
+		n.add_child(_prop_part(_torus(radius * 0.88, radius, 48, 10), hull, Vector3.ZERO))
+		for i in 12:
+			var a := TAU * float(i) / 12.0
+			n.add_child(_prop_part(_ball(6.0), trim if i % 2 == 0 else _glow(GOLD, 1.0),
+				Vector3(cos(a), 0.0, sin(a)) * radius * 0.94))
+		# Two pylons it stands between.
+		for sx in [-1.0, 1.0]:
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 7.0
+			cyl.bottom_radius = 11.0
+			cyl.height = radius * 1.2
+			cyl.radial_segments = 8
+			n.add_child(_prop_part(cyl, trim, Vector3(sx * (radius + 24.0), 0.0, 0.0)))
+		return n
+	# Station: a wide ring and a hub joined by spokes, turning slowly.
+	var rr := 80.0
+	n.add_child(_prop_part(_torus(rr * 0.78, rr, 48, 12), hull, Vector3.ZERO))
+	n.add_child(_prop_part(_ball(24.0), trim, Vector3.ZERO))
+	for i in 4:
+		var box := BoxMesh.new()
+		box.size = Vector3(rr * 1.7, 6.0, 6.0)
+		var spoke := _prop_part(box, hull, Vector3.ZERO)
+		spoke.rotation = Vector3(0.0, TAU * float(i) / 8.0, 0.0)
+		n.add_child(spoke)
+	for i in 8:
+		var a := TAU * float(i) / 8.0
+		n.add_child(_prop_part(_ball(7.0), _glow(GOLD, 1.0), Vector3(cos(a), 0.0, sin(a)) * rr * 0.89))
+	n.set_meta("spin", 0.22)
+	return n
+
+
+func _prop_part(mesh: Mesh, mat: Material, at: Vector3) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.position = at
+	return mi
+
+
+static func _torus(inner: float, outer: float, rings: int, segments: int) -> TorusMesh:
+	var t := TorusMesh.new()
+	t.inner_radius = inner
+	t.outer_radius = outer
+	t.rings = rings
+	t.ring_segments = segments
+	return t
+
+
+static func _ball(radius: float) -> SphereMesh:
+	var s := SphereMesh.new()
+	s.radius = radius
+	s.height = radius * 2.0
+	s.radial_segments = 12
+	s.rings = 6
+	return s
+
+
+## A flat toy-plastic material for the destination props.
+static func _toy(col: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col
+	m.roughness = 0.55
+	m.emission_enabled = true
+	m.emission = col
+	m.emission_energy_multiplier = 0.25
+	return m
 
 
 ## A ring on a beam of light standing over [param at], visible from afar.
@@ -647,6 +785,26 @@ static func _glow(col: Color, alpha: float) -> StandardMaterial3D:
 	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD if alpha < 1.0 else BaseMaterial3D.BLEND_MODE_MIX
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return m
+
+
+## PROTECT's guard ring: a flat gold hoop (with lamps round it) circling the
+## stranded ship, riding on its hull, so a guard job reads as "hold this
+## spot", never "fly it somewhere".
+func _ring_round(s: AiShip, col: Color) -> Node3D:
+	if s == null or s.model == null:
+		return null
+	var r := _ship_radius(s) * 2.4 + 60.0
+	var n := Node3D.new()
+	n.name = "GuardRing"
+	n.top_level = true
+	s.model.add_child(n)
+	n.global_position = s.model.global_position
+	n.add_child(_prop_part(_torus(r * 0.97, r, 64, 8), _glow(col, 0.85), Vector3.ZERO))
+	for i in 16:
+		var a := TAU * float(i) / 16.0
+		n.add_child(_prop_part(_ball(r * 0.025 + 3.0), _glow(Color.WHITE if i % 2 == 0 else col, 1.0),
+			Vector3(cos(a), 0.0, sin(a)) * r))
+	return n
 
 
 static func _ship_radius(s: AiShip) -> float:

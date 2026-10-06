@@ -12,6 +12,7 @@
 ##   protect);
 ## - [b]fight[/b]: the player's own share of the kills (fight levels), so
 ##   sitting back while the wingmen win is one star, not three.
+## A run slower than par never gets three (see [method stars]).
 ## Two stars at [code]bar[0][/code], three at [code]bar[1][/code]; both bars
 ## rise with the level's difficulty, so a late level's third star is earned.
 class_name StarRating
@@ -98,7 +99,19 @@ static func stars(grade: Dictionary, par: float, run: Dictionary) -> int:
 		return 0
 	var bar: Array = grade.get("bar", [0.4, 0.66])
 	var s := score(grade, par, run)
-	return 3 if s >= float(bar[1]) else (2 if s >= float(bar[0]) else 1)
+	if s >= float(bar[1]):
+		# Par is the third star's bar: a level that grades speed never gives
+		# three to a run slower than par, however clean the rest of it was.
+		var slow := par > 0.0 and (grade.get("weights", {}) as Dictionary).has("time") 			and float(run.get("time", 0.0)) > par
+		return 2 if slow else 3
+	return 2 if s >= float(bar[0]) else 1
+
+
+## Coins a lost run still pays: a few per wreck, never more than a share of
+## the level's reward. Shown on the end card and paid by the campaign alike.
+static func loss_coins(reward: int, kills: int) -> int:
+	var each := maxi(1, roundi(float(reward) * 0.05))
+	return mini(maxi(kills, 0) * each, roundi(float(reward) * 0.4))
 
 
 ## A few words on what this level grades most, for the cards.

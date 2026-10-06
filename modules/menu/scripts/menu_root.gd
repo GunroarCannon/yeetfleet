@@ -67,6 +67,7 @@ func _ready() -> void:
 	Session.pending_ship = {}
 	Session.space_setup = {}
 	apply_volume()
+	apply_orientation()
 	# The ⚡ performance dials hold here too: battery saver's frame cap and
 	# render scale matter most on a screen people leave open.
 	PerformanceSettings.ensure_loaded()
@@ -201,6 +202,16 @@ func _to_flight() -> void:
 ## The dev workbench: the old module launcher (labs, builder, arena...).
 func open_workbench() -> void:
 	get_tree().change_scene_to_file("res://modules/core/core.tscn")
+
+
+## Phones and tablets stay landscape (forced, not sensor-driven) unless the
+## player picked portrait in Settings.
+static func apply_orientation() -> void:
+	if not OS.has_feature("mobile"):
+		return
+	var portrait := bool(Session.pref("portrait", false))
+	DisplayServer.screen_set_orientation(
+			DisplayServer.SCREEN_PORTRAIT if portrait else DisplayServer.SCREEN_LANDSCAPE)
 
 
 ## The saved SOUND and MUSIC levels (Settings), pushed onto their buses.
