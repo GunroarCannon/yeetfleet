@@ -1,0 +1,10 @@
+{
+  "name": "yeetfleet-leaderboard-worker",
+  "private": true,
+  "type": "module",
+  "description": "Yeetfleet's leaderboard: Sign-In-With-Solana, the Seeker Genesis check, daily runs and SKR orders on Cloudflare Workers + D1.",
+  "scripts": {
+    "test": "node --test --no-warnings \"test/*.test.js\"",
+    "deploy": "npx wrangler@4 deploy"
+  }
+}

@@ -2,8 +2,9 @@
 ## ID. Signed out it reads CONNECT WALLET and a tap is one Sign-In-With-Solana
 ## prompt ([method Chain.sign_in]). While the wallet is open it reads
 ## WAITING… and a tap cancels. Signed in it shows the short key, the SKR
-## balance and a SEEKER tag on a Seeker; a tap opens the Pilot ID card (copy
-## the key, refresh, disconnect).
+## balance and a tag: GENESIS when the leaderboard found a Seeker Genesis
+## Token (ranked play), SEEKER on a Seeker without that check yet. A tap
+## opens the Pilot ID card (copy the key, disconnect).
 ##
 ## A failure shows on the chip itself for a few seconds, in plain words
 ## ([method Chain.say]); backing out of the wallet shows nothing.
@@ -31,6 +32,7 @@ func _ready() -> void:
 	Chain.notifier.disconnected.connect(_on_disconnected)
 	Chain.notifier.paid.connect(_on_paid)
 	Chain.notifier.failed.connect(_on_failed)
+	Chain.notifier.session_changed.connect(queue_redraw)
 	if Chain.is_connected_wallet():
 		refresh_balance()
 
@@ -68,7 +70,7 @@ func _gui_input(event: InputEvent) -> void:
 func _sign_in() -> void:
 	_said_left = 0.0
 	queue_redraw()
-	await Chain.sign_in()
+	await Chain.sign_in(Campaign.pilot_name())
 	queue_redraw()
 
 
@@ -128,16 +130,24 @@ func _draw() -> void:
 	elif not connected:
 		_text_fit("CONNECT WALLET", mid, int(h * 0.42), room, GraffitiStyle.LIME)
 	else:
-		# Key | SKR, with the SEEKER tag tucked under the key on a Seeker.
+		# Key | SKR, with the tag tucked under the key.
 		var cut := size.x * 0.52
 		draw_line(Vector2(cut + lean * 0.35, h * 0.16), Vector2(cut - lean * 0.35, h * 0.84), GraffitiStyle.CYAN, maxf(3.0, h * 0.07))
-		var key_mid := Vector2(cut * 0.5 + lean * 0.2, h * (0.4 if Chain.is_seeker() else 0.5))
+		var tag := _tag()
+		var key_mid := Vector2(cut * 0.5 + lean * 0.2, h * (0.4 if tag != "" else 0.5))
 		_text_fit(Chain.short_key(Chain.pubkey()), key_mid, int(h * 0.38), cut - lean - 10.0, GraffitiStyle.LIME)
-		if Chain.is_seeker():
-			_text_fit("SEEKER", Vector2(key_mid.x, h * 0.8), int(h * 0.24), cut - lean, GraffitiStyle.SUN)
+		if tag != "":
+			_text_fit(tag, Vector2(key_mid.x, h * 0.8), int(h * 0.24), cut - lean, GraffitiStyle.SUN if Chain.has_genesis() else GraffitiStyle.DIM)
 		var skr := "…" if _skr < 0.0 else _amount(_skr)
 		_text_fit(skr + " SKR", Vector2((cut + size.x - lean * 0.5) * 0.5, h * 0.52), int(h * 0.4),
 				size.x - cut - lean - 10.0, GraffitiStyle.SUN, GraffitiStyle.number_font())
+
+
+## GENESIS (the Worker found the token), SEEKER (the phone says so), or "".
+func _tag() -> String:
+	if Chain.has_genesis():
+		return "GENESIS"
+	return "SEEKER" if Chain.is_seeker() else ""
 
 
 ## [param text] centred on [param at], shrunk until it fits [param width].
@@ -202,8 +212,11 @@ func _open_card() -> void:
 	key.custom_minimum_size.x = minf(560.0 * u, vp.x * 0.86)
 	box.add_child(key)
 	var facts := "%s SKR   ·   %s" % ["?" if _skr < 0.0 else _amount(_skr), Chain.cluster().to_upper()]
-	if Chain.is_seeker():
-		facts += "   ·   SEEKER"
+	if _tag() != "":
+		facts += "   ·   " + _tag()
+	if Chain.api_url != "":
+		facts += "
+" + ("RANKED" if Chain.has_genesis() else "SIGNED IN, UNRANKED" if Chain.has_session() else "LEADERBOARD OFFLINE")
 	var line := GraffitiStyle.label(facts, int(30 * u), GraffitiStyle.SUN, int(6 * u))
 	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(line)

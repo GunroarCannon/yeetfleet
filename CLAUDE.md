@@ -66,6 +66,10 @@ code must do the same. Decision records live in `docs/decisions/`.
     `... --script modules/chain/tools/chain_check.gd`. Addresses: `docs/solana-wallets.md`.
   - the Pilot ID chip (tap signs in / cancels / opens the card, failures in plain words,
     fits beside STORE, Back closes its card): `... --script modules/menu/tools/pilot_chip_check.gd`.
+  - Chain against the real leaderboard Worker code on localhost (server nonce signed, session +
+    Genesis, kept across launches, offline still signs in unranked):
+    `... --script modules/chain/tools/chain_server_check.gd` (needs `node` 22.5+). The Worker's own
+    tests: `cd services/leaderboard-worker && npm test` (no dependencies).
   - shipped game defaults (layering, no headless bake, reset):
     `... --script modules/core/tools/game_defaults_check.gd`.
   - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd

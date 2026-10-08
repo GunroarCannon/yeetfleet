@@ -105,9 +105,17 @@ func connect_wallet() -> Dictionary:
 
 ## Connect + Sign-In-With-Solana in one prompt. The result's [code]sign_in[/code]
 ## holds [code]signed_message[/code] and [code]signature[/code] (base64) for a
-## server to verify.
-func sign_in(domain := "", statement := "") -> Dictionary:
-	return await _request("authorize", {"sign_in": {"domain": domain, "statement": statement}})
+## server to verify. [param fields] adds the optional SIWS fields a server
+## sets, by their SIWS names: [code]nonce[/code], [code]issuedAt[/code],
+## [code]expirationTime[/code], [code]notBefore[/code], [code]requestId[/code],
+## [code]uri[/code], [code]version[/code], [code]chainId[/code],
+## [code]resources[/code] (an Array of URIs). A server nonce is what stops a
+## captured sign-in from being replayed.
+func sign_in(domain := "", statement := "", fields := {}) -> Dictionary:
+	var si := fields.duplicate()
+	si["domain"] = domain
+	si["statement"] = statement
+	return await _request("authorize", {"sign_in": si})
 
 
 ## Revokes the session in the wallet, and forgets it here either way.

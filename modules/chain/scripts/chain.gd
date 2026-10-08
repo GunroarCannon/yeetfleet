@@ -13,6 +13,11 @@
 ## confirmed on chain; the leaderboard Worker re-checks each one before it
 ## grants anything (milestone G4).
 ##
+## With [constant WORKER_URL] set, [method sign_in] also opens a session with
+## the leaderboard Worker (a server nonce in the signed message, checked
+## there, plus the Seeker Genesis Token check). Without it, or when the Worker
+## can't be reached, the wallet still signs in and play is unranked.
+##
 ## A static façade like [CoinStore]: the signals live on [member notifier].
 class_name Chain
 extends RefCounted
@@ -47,17 +52,24 @@ const PRICES := {
 ## The tip buttons on a leaderboard row, in whole SKR.
 const TIP_PRESETS: Array[int] = [10, 50, 100]
 const SAVE_PATH := "user://chain.cfg"
+## The leaderboard Worker (services/leaderboard-worker); "" until it is
+## deployed, which keeps everything offline and unranked.
+const WORKER_URL := ""
+
+const Api := preload("res://modules/chain/scripts/chain_api.gd")
 
 
 ## Emits [signal Notifier.connected] (the pilot's public key), [signal
 ## Notifier.disconnected], [signal Notifier.paid] (what was bought or
 ## "tip", and the confirmed signature) and [signal Notifier.failed] (what was
 ## tried and the client's failure code; "cancelled" is the pilot backing out,
-## not an error worth a word).
+## not an error worth a word). [signal Notifier.session_changed]: the
+## leaderboard session opened or closed ([method has_session]).
 class Notifier:
 	extends RefCounted
 	signal connected(pubkey: String)
 	signal disconnected
+	signal session_changed
 	signal paid(what: String, signature: String)
 	signal failed(what: String, code: String)
 
@@ -65,7 +77,13 @@ class Notifier:
 static var notifier := Notifier.new()
 ## Where the session is kept between launches (the checks point it elsewhere).
 static var save_path := SAVE_PATH
+## The Worker's address ([constant WORKER_URL]; the checks point it at a
+## local one).
+static var api_url := WORKER_URL
 static var _client: SolanaMobileClient = null
+## The leaderboard session: {token, expires (unix s), seeker, name}; empty
+## when there is none.
+static var _session := {}
 
 
 ## The addon client, made on first use with the saved session restored.
@@ -113,9 +131,25 @@ static func device() -> Dictionary:
 	return client().device_info()
 
 
-## A Solana Seeker. Its Genesis Token is checked by the Worker, not here (G2).
+## A Solana Seeker, by the phone's own word. The Genesis Token is what
+## counts for ranked play: [method has_genesis].
 static func is_seeker() -> bool:
 	return bool(device().get("seeker", false))
+
+
+## Signed in with the leaderboard Worker, and the session hasn't run out.
+static func has_session() -> bool:
+	return _session.get("token", "") != "" and int(_session.get("expires", 0)) > int(Time.get_unix_time_from_system())
+
+
+## The session's bearer token for the Worker ("" without one).
+static func session_token() -> String:
+	return String(_session.get("token", "")) if has_session() else ""
+
+
+## The Worker found a Seeker Genesis Token in the pilot's wallet: ranked play.
+static func has_genesis() -> bool:
+	return has_session() and bool(_session.get("seeker", false))
 
 
 ## Ends the open wallet request as "cancelled".
@@ -144,6 +178,10 @@ static func say(code: String) -> String:
 			return "Sign in again"
 		"busy":
 			return "The wallet is already open"
+		"server_offline":
+			return "Leaderboard offline. Playing unranked"
+		"server_refused":
+			return "The leaderboard refused the sign-in. Try again"
 		"tx_failed":
 			return "The payment failed on chain. Nothing was taken"
 		"not_confirmed":
@@ -164,17 +202,50 @@ static func connect_wallet() -> Dictionary:
 	return _after("connect", await client().connect_wallet())
 
 
-## Connect and Sign-In-With-Solana in one prompt. The result's
-## [code]sign_in[/code] ([code]signed_message[/code], [code]signature[/code],
-## base64) is what the Worker verifies (G2).
-static func sign_in() -> Dictionary:
-	return _after("sign_in", await client().sign_in(SIWS_DOMAIN, SIWS_STATEMENT))
+## Connect and Sign-In-With-Solana in one prompt, and open the leaderboard
+## session: the Worker's nonce goes into the signed message and the Worker
+## checks it. [param pilot_name] is the name the leaderboard shows. When the
+## Worker is away the wallet still signs in; the result then has
+## [code]server[/code] set to the reason, and play is unranked.
+static func sign_in(pilot_name := "") -> Dictionary:
+	if api_url == "":
+		return _after("sign_in", await client().sign_in(SIWS_DOMAIN, SIWS_STATEMENT))
+	var ch := await Api.post(api_url, "/auth/challenge", {})
+	if not ch.ok:
+		var local := _after("sign_in", await client().sign_in(SIWS_DOMAIN, SIWS_STATEMENT))
+		if local.ok:
+			local["server"] = ch.code
+			notifier.failed.emit("server", "server_offline")
+		return local
+	var r := _after("sign_in", await client().sign_in(String(ch.domain), SIWS_STATEMENT, ch.fields))
+	if not r.ok:
+		return r
+	var v := await Api.post(api_url, "/auth/verify", {
+		"public_key": client().public_key,
+		"signed_message": r.sign_in.signed_message,
+		"signature": r.sign_in.signature,
+		"name": pilot_name,
+	})
+	if not v.ok:
+		r["server"] = v.code
+		notifier.failed.emit("server", "server_offline" if v.code == "offline" else "server_refused")
+		return r
+	_session = {
+		"token": v.token,
+		"expires": int(Time.get_unix_time_from_system()) + int(v.get("expires_in", 3600)) - 60,
+		"seeker": bool(v.pilot.get("seeker", false)),
+		"name": String(v.pilot.get("name", "")),
+	}
+	_save()
+	notifier.session_changed.emit()
+	r["pilot"] = v.pilot
+	return r
 
 
 ## Revoke the session in the wallet, and forget it here either way.
 static func disconnect_wallet() -> Dictionary:
 	var r := await client().disconnect_wallet()
-	_save()
+	_end_session()
 	return r
 
 
@@ -211,6 +282,7 @@ static func _make(force_mock: bool) -> void:
 	if _client != null and _client.account_changed.is_connected(_on_account_changed):
 		_client.account_changed.disconnect(_on_account_changed)
 	_client = SolanaMobileClient.new(APP_NAME, IDENTITY_URI, ICON, cluster(), force_mock)
+	_session = {}
 	_load()
 	_client.account_changed.connect(_on_account_changed)
 
@@ -247,6 +319,9 @@ static func _fail(what: String, code: String, message: String) -> Dictionary:
 
 
 static func _on_account_changed(key: String) -> void:
+	# Another account (or none) can't keep the old pilot's session.
+	if key != _session.get("pubkey", key):
+		_end_session()
 	if key == "":
 		notifier.disconnected.emit()
 	else:
@@ -257,6 +332,9 @@ static func _save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("wallet", "auth_token", _client.auth_token)
 	cfg.set_value("wallet", "public_key", _client.public_key)
+	if not _session.is_empty():
+		_session["pubkey"] = _client.public_key
+		cfg.set_value("server", "session", _session)
 	cfg.save(save_path)
 
 
@@ -266,3 +344,14 @@ static func _load() -> void:
 		return
 	_client.auth_token = String(cfg.get_value("wallet", "auth_token", ""))
 	_client.public_key = String(cfg.get_value("wallet", "public_key", ""))
+	var saved: Variant = cfg.get_value("server", "session", {})
+	_session = saved if saved is Dictionary and saved.get("pubkey", "") == _client.public_key else {}
+
+
+static func _end_session() -> void:
+	var had := not _session.is_empty()
+	_session = {}
+	if _client != null:
+		_save()
+	if had:
+		notifier.session_changed.emit()

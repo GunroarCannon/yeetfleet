@@ -45,6 +45,8 @@ for everything extra.
 | SKR prices (2026-10-08) | Extra ranked attempt **25 SKR**, hull paint **50**, decal **75**, sling trail **100**; tip buttons **10 / 50 / 100**. In `Chain.PRICES` / `Chain.TIP_PRESETS` | SKR ≈ $0.016–0.022 (cap ~$111–152M, ATH $0.056): an attempt ≈ $0.50, cosmetics ≈ $1–2, so impulse-sized for a daily game | SKR moves more than ~2× either way |
 | Burn share | **10%** of SKR received, burned by the treasury in weekly batches (`docs/solana-wallets.md`) | A per-payment burn needs a second instruction (and the payer burning their own tokens), which complicates the Worker's payment check; batches keep each payment a plain transfer | — |
 | Treasury | A fresh keypair, `2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1`, same on both clusters; secret off-repo (`docs/solana-wallets.md`) | The user had none; one address keeps config simple | before mainnet: a hardware wallet or Squads multisig |
+| SIWS nonce | The plugin's `sign_in` takes SIWS fields (plugin 0.2.0); the Worker issues a one-use nonce that expires in 5 min | Without it a captured sign-in could be replayed | — |
+| Worker code | Plain JS, no dependencies; tests on Node's built-in runner + `node:sqlite` as a D1 stand-in; a local dev server for the game's headless checks | Nothing to install or keep updated; the same SQL runs in tests and in D1 | if the Worker outgrows one file per concern |
 | Haptics | `Input.vibrate_handheld` (VIBRATE permission) behind a Juice dial, default on | No plugin needed; matches the dial convention | — |
 
 ## Module and API shape (planned)
@@ -76,8 +78,8 @@ the existing shop. The new screens get shots at both phone sizes.
 | # | Done when |
 |---|---|
 | G0 ✅ | Addon copied in; `Chain` façade over the addon client and its mock; `chain_check` passes headless (2026-10-08, 23 checks) |
-| G1 | Pilot ID chip: connect / SIWS / disconnect / reconnect on the phone with Phantom; Seeker detection |
-| G2 | Worker deployed: SIWS verify, Genesis Token check, session token; D1 schema; Worker tests |
+| G1 ✅ (code) | Pilot ID chip: connect / SIWS / disconnect / reconnect on the phone with Phantom; Seeker detection. Done headless (`pilot_chip_check`) and in shots; the on-phone pass is batched with G4's |
+| G2 ✅ (code) | Worker deployed: SIWS verify, Genesis Token check, session token; D1 schema; Worker tests. Written and tested (14 Node tests, `chain_server_check` end to end); **deploy waits on the user's Cloudflare login** (`services/leaderboard-worker/README.md`) |
 | G3 | Daily Sortie: ranked ticket → run → submit → leaderboard; streaks; `daily_check` passes |
 | G4 | SKR: order → transfer with memo → verify → grant (extra attempt, cosmetic); tip a pilot. Devnet dSKR end to end |
 | G5 | Hardware polish: "arm the sling" signature, haptics, gyro dial; menu shots at phone sizes |
@@ -86,5 +88,7 @@ the existing shop. The new screens get shots at both phone sizes.
 ## Open questions for the user
 
 - The hackathon deadline (it sets how much of G4's stretch and G5 fits).
+- G2 needs a Cloudflare account login (`npx wrangler@4 login`) and,
+  ideally, a Helius key for the mainnet Genesis check.
 - Answered 2026-10-08: app name **Yeetfleet**; SKR prices and burn share as
   above (revisit freely); treasury created.

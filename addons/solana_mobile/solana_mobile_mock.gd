@@ -131,9 +131,7 @@ func _answer(id: int, op: String, p: Dictionary) -> void:
 	match op:
 		"authorize":
 			if p.get("sign_in") is Dictionary:
-				var si: Dictionary = p["sign_in"]
-				var text := "%s wants you to sign in with your Solana account:\n%s\n\n%s" % [
-						si.get("domain", ""), public_key, si.get("statement", "")]
+				var text := siws_text(p["sign_in"], public_key)
 				out["sign_in"] = {
 					"public_key": public_key,
 					"signed_message": Marshalls.utf8_to_base64(text),
@@ -172,6 +170,28 @@ func _answer(id: int, op: String, p: Dictionary) -> void:
 			return
 	_busy_id = -1
 	request_succeeded.emit(id, JSON.stringify(out))
+
+
+## The SIWS message a wallet signs for [param si] (the sign_in fields), in
+## the standard's layout: the header, the address, the statement, then the
+## optional fields that are set.
+static func siws_text(si: Dictionary, address: String) -> String:
+	var text := "%s wants you to sign in with your Solana account:\n%s" % [si.get("domain", ""), address]
+	if str(si.get("statement", "")) != "":
+		text += "\n\n" + str(si["statement"])
+	var lines: Array[String] = []
+	for pair in [["uri", "URI"], ["version", "Version"], ["chainId", "Chain ID"], ["nonce", "Nonce"],
+			["issuedAt", "Issued At"], ["expirationTime", "Expiration Time"], ["notBefore", "Not Before"],
+			["requestId", "Request ID"]]:
+		if str(si.get(pair[0], "")) != "":
+			lines.append("%s: %s" % [pair[1], si[pair[0]]])
+	if si.get("resources") is Array and not si["resources"].is_empty():
+		lines.append("Resources:")
+		for res in si["resources"]:
+			lines.append("- " + str(res))
+	if not lines.is_empty():
+		text += "\n\n" + "\n".join(lines)
+	return text
 
 
 func _fail(id: int, code: String, message: String) -> void:
