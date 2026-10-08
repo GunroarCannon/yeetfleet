@@ -1,8 +1,8 @@
 ## HomeScreen: the title over the frozen fight, and the way into everything.
 ##
 ## Landscape: the spray-painted title top-left, a staggered cascade of
-## slanted comic panels down the right (CAMPAIGN, SANDBOX, GARAGE, SETTINGS,
-## EXIT) and the wallet top-right. Portrait: title on top, the panels
+## slanted comic panels down the right (CAMPAIGN, SANDBOX, DAILY SORTIE,
+## GARAGE, SETTINGS, EXIT) and the wallet top-right. Portrait: title on top, the panels
 ## zig-zagging under it. Just big words — no icons, no small print.
 ##
 ## EXIT (and Back on the home screen) never quits straight away: it asks
@@ -43,6 +43,11 @@ func _ready() -> void:
 	if not Campaign.tutorial_done():
 		sandbox.disabled = true
 		sandbox.tooltip_text = "Finish flight school first."
+	# The day's one level, the same for everyone: after flight school too.
+	var daily := _panel("DAILY SORTIE", GraffitiStyle.LIME, func() -> void: menu.go(MenuRoot.Screen.DAILY))
+	if not Campaign.tutorial_done():
+		daily.disabled = true
+		daily.tooltip_text = "Finish flight school first."
 	_panel("GARAGE", GraffitiStyle.SUN, func() -> void: menu.go(MenuRoot.Screen.GARAGE))
 	_panel("SETTINGS", GraffitiStyle.VIOLET, func() -> void: menu.go(MenuRoot.Screen.SETTINGS))
 	# Web and iOS have no "quit"; the browser tab or the home swipe is the exit.
@@ -170,7 +175,7 @@ func layout() -> void:
 		var y := top + i * (bh + gap) + (bh * 0.16 if i > 0 else 0.0)
 		b.position = Vector2(x, y)
 		b.pivot_offset = b.size * 0.5
-		b.rotation = [-0.018, 0.012, -0.01, 0.015, -0.012][i % 5]
+		b.rotation = [-0.018, 0.012, -0.01, 0.015, -0.012, 0.01][i % 6]
 
 
 ## Back on the home screen: close the QUIT? card, or ask it.

@@ -152,6 +152,18 @@ static func has_genesis() -> bool:
 	return has_session() and bool(_session.get("seeker", false))
 
 
+## GET [param path] from the leaderboard Worker, with the session's token
+## when there is one. [code]{ok, …body}[/code] or [code]{ok = false, code}[/code]
+## ("offline" when it can't be reached or isn't set up).
+static func server_get(path: String) -> Dictionary:
+	return await Api.fetch(api_url, path, session_token())
+
+
+## POST [param body] to the leaderboard Worker (see [method server_get]).
+static func server_post(path: String, body: Dictionary) -> Dictionary:
+	return await Api.post(api_url, path, body, session_token())
+
+
 ## Ends the open wallet request as "cancelled".
 static func cancel() -> void:
 	client().cancel()

@@ -7,7 +7,8 @@
 ## Writes home.png, quit.png, map.png, report.png, pick.png (the garage as a
 ## level's ship picker), fork.png, garage.png, shop.png, settings.png,
 ## settings_sub.png (the PERFORMANCE submenu), store.png, rename.png, loading.png, and
-## pilot.png / pilot_card.png (the Pilot ID signed in on the mock wallet). Runs on a scratch campaign save with a little progress
+## pilot.png / pilot_card.png (the Pilot ID signed in on the mock wallet) and daily.png
+## (the Daily Sortie, offline: its board says so). Runs on a scratch campaign save with a little progress
 ## (first sector won, some coins) so the map and garage have something to
 ## show; the player's own save is never touched.
 extends SceneTree
@@ -115,6 +116,9 @@ func _run() -> void:
 	_menu.go(MenuRoot.Screen.STORE)
 	await _wait(1.0)
 	await _shot("store")
+	_menu.go(MenuRoot.Screen.DAILY)
+	await _wait(1.2)
+	await _shot("daily")
 	var wallet := (_menu._screens[MenuRoot.Screen.STORE] as StoreScreen)._bar._wallet
 	wallet._ask_name()
 	await _wait(0.5)

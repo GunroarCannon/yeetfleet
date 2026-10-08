@@ -70,6 +70,9 @@ code must do the same. Decision records live in `docs/decisions/`.
     Genesis, kept across launches, offline still signs in unranked):
     `... --script modules/chain/tools/chain_server_check.gd` (needs `node` 22.5+). The Worker's own
     tests: `cd services/leaderboard-worker && npm test` (no dependencies).
+  - Daily Sortie (level stable per date, its own key, points, offline practice, then one ranked
+    run per Genesis pilot sent and ranked against the local Worker, the open board, the screen):
+    `... --script modules/daily/tools/daily_check.gd` (the Worker part needs `node`).
   - shipped game defaults (layering, no headless bake, reset):
     `... --script modules/core/tools/game_defaults_check.gd`.
   - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd

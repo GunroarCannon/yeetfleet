@@ -19,3 +19,31 @@ CREATE TABLE IF NOT EXISTS pilots (
   last_seen INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pilots_genesis ON pilots (genesis_mint);
+
+-- Daily Sortie runs (G3). A ticket (/run/start) opens a run; /run/finish
+-- closes it once. Ranked runs need a Genesis Token and are counted per
+-- token (genesis_mint), so one Seeker is one ranked pilot.
+CREATE TABLE IF NOT EXISTS runs (
+  id TEXT PRIMARY KEY,
+  pubkey TEXT NOT NULL,
+  genesis_mint TEXT,
+  day TEXT NOT NULL,                    -- UTC date, YYYY-MM-DD
+  ranked INTEGER NOT NULL,
+  started_at INTEGER NOT NULL,          -- ms
+  finished_at INTEGER,
+  points INTEGER,
+  won INTEGER,
+  time_sec REAL,
+  kills INTEGER
+);
+CREATE INDEX IF NOT EXISTS runs_board ON runs (day, ranked, points);
+CREATE INDEX IF NOT EXISTS runs_pilot ON runs (pubkey, day);
+CREATE INDEX IF NOT EXISTS runs_genesis ON runs (genesis_mint, day, ranked);
+
+-- Extra ranked attempts bought with SKR (G4), per Genesis Token and day.
+CREATE TABLE IF NOT EXISTS extra_attempts (
+  genesis_mint TEXT NOT NULL,
+  day TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (genesis_mint, day)
+);

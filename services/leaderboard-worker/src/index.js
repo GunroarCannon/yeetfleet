@@ -10,6 +10,12 @@
 //                                        → {token, expires_at, pilot}
 //   GET  /me           (Bearer token)    → {pilot}
 //
+// Daily Sortie (G3, src/daily.js):
+//   GET  /daily        (token optional)  → {day, ends_in_sec, me?: {streak, ranked_left, best}}
+//   POST /run/start    {day, ranked}     → {run_id, day, ranked}
+//   POST /run/finish   {run_id, won, points, time, kills} → {board, points, best, rank, streak}
+//   GET  /leaderboard?day=&board=ranked|open (token optional) → {rows, me}
+//
 // Environment: DB (D1), SIWS_DOMAIN, SIWS_STATEMENT, GENESIS_GROUP, CLUSTER,
 // secrets SESSION_SECRET and MAINNET_RPC_URL (a Helius URL; the public RPC
 // otherwise). DEV_GENESIS_OWNERS (comma-separated keys counted as Seekers)
@@ -19,6 +25,10 @@ import { isPublicKey } from "./base58.js";
 import { parse, verify, fromBase64 } from "./siws.js";
 import * as session from "./session.js";
 import { genesisMint } from "./genesis.js";
+import { HttpError } from "./errors.js";
+import * as daily from "./daily.js";
+
+export { HttpError };
 
 export const NONCE_TTL_MS = 5 * 60 * 1000;
 export const SESSION_TTL_SEC = 24 * 60 * 60;
@@ -38,14 +48,6 @@ export default {
   },
 };
 
-export class HttpError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-
 async function route(request, env) {
   const url = new URL(request.url);
   const key = `${request.method} ${url.pathname.replace(/\/+$/, "") || "/"}`;
@@ -59,6 +61,14 @@ async function route(request, env) {
       return json(await signIn(env, await body(request)));
     case "GET /me":
       return json({ pilot: await pilotOf(env, (await requirePilot(request, env)).pk) });
+    case "GET /daily":
+      return json(await daily.today(env, now(env), await optionalPilot(request, env)));
+    case "POST /run/start":
+      return json(await daily.start(env, now(env), await requirePilot(request, env), await body(request)));
+    case "POST /run/finish":
+      return json(await daily.finish(env, now(env), await requirePilot(request, env), await body(request)));
+    case "GET /leaderboard":
+      return json(await daily.board(env, now(env), await optionalPilot(request, env), url.searchParams));
   }
   throw new HttpError(404, "not_found", `No route ${key}`);
 }
@@ -143,6 +153,11 @@ export async function requirePilot(request, env) {
   const p = await session.read(auth.replace(/^Bearer\s+/i, ""), env.SESSION_SECRET, now(env));
   if (!p) throw new HttpError(401, "no_session", "Sign in first");
   return p;
+}
+
+/** The session's pilot, or null without one (a bad token is still a 401). */
+async function optionalPilot(request, env) {
+  return request.headers.has("authorization") ? requirePilot(request, env) : null;
 }
 
 async function pilotOf(env, pk) {

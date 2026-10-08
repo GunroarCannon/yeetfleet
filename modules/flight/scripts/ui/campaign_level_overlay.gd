@@ -12,6 +12,8 @@
 ## which counts it. Sandbox flights (a ship but no level) pause the same way,
 ## with only RESUME and HOME, and a wreck there shows the points card: the
 ## life's points counting up into coins, then RETRY, MAP and HOME.
+## A level with [code]one_shot[/code] set (a ranked Daily Sortie) has no
+## RETRY anywhere: the first run is the run.
 ##
 ## Its own [CanvasLayer] above the HUD. Reads the scenario through
 ## [member FlightRoot.scenarios] and never touches the campaign module.
@@ -359,13 +361,14 @@ func _show_pause() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", int(18 * u))
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var bw := minf((vp.x - 64.0) / (3.0 if not _level.is_empty() else 2.0), 200.0 * u)
+	var retry := not _level.is_empty() and not bool(_level.get("one_shot", false))
+	var bw := minf((vp.x - 64.0) / (3.0 if retry else 2.0), 200.0 * u)
 	var go := _slab("RESUME", GraffitiStyle.LIME)
 	go.text_color = GraffitiStyle.INK
 	go.custom_minimum_size = Vector2(bw, 64 * u)
 	go.pressed.connect(_resume)
 	row.add_child(go)
-	if not _level.is_empty():
+	if retry:
 		var again := _slab("RETRY", GraffitiStyle.SUN)
 		again.text_color = GraffitiStyle.INK
 		again.custom_minimum_size = Vector2(bw, 64 * u)
@@ -479,7 +482,8 @@ func _show_card(run: Dictionary) -> void:
 		next.pressed.connect(_leave)
 		row.add_child(next)
 	else:
-		row.add_child(again)
+		if not bool(_level.get("one_shot", false)):
+			row.add_child(again)
 		row.add_child(map)
 	if next_key != "":
 		next = _slab("NEXT", GraffitiStyle.LIME)
@@ -489,7 +493,9 @@ func _show_card(run: Dictionary) -> void:
 	box.add_child(row)
 	_center(_card, box)
 	_pop_in(box)
-	(next if next != null else (map if won else again)).grab_focus()
+	if again.get_parent() == null:
+		again.queue_free()
+	(next if next != null else (map if won or again.get_parent() == null else again)).grab_focus()
 
 
 ## Coins this run pays, as the campaign will pay them (see [StarRating.loss_coins]):

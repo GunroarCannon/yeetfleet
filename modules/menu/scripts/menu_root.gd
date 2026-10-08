@@ -9,7 +9,7 @@
 class_name MenuRoot
 extends Node
 
-enum Screen { HOME, MAP, GARAGE, SETTINGS, STORE }
+enum Screen { HOME, MAP, GARAGE, SETTINGS, STORE, DAILY }
 
 var stage: MenuStage
 var ui: Control
@@ -62,6 +62,8 @@ func _ready() -> void:
 	# Where a flight asked to come back to: the sandbox's MAP, flight school.
 	var back_key := String(Session.level_result.get("key", ""))
 	var open_map := back_key == "tutorial" or String(Session.level_result.get("open", "")) == "map"
+	# A Daily Sortie run is the daily module's, not the campaign's: it looks first.
+	var daily := DailySortie.take_result()
 	last_result = Campaign.take_result()
 	Session.pending_level = {}
 	Session.pending_ship = {}
@@ -90,6 +92,7 @@ func _ready() -> void:
 	_screens[Screen.GARAGE] = GarageScreen.new()
 	_screens[Screen.SETTINGS] = SettingsScreen.new()
 	_screens[Screen.STORE] = StoreScreen.new()
+	_screens[Screen.DAILY] = DailyScreen.new()
 	# The wallet's + (on every screen's wallet) opens the store.
 	WalletChip.on_store = func() -> void: go(Screen.STORE)
 	CoinStore.start()
@@ -112,6 +115,9 @@ func _ready() -> void:
 		reopen_level = next_lvl
 		_show(Screen.MAP)
 		launch_level.call_deferred(next_lvl)
+		return
+	if not daily.is_empty():
+		_show(Screen.DAILY)
 		return
 	_show(Screen.MAP if not last_result.is_empty() or open_map else Screen.HOME)
 
@@ -169,6 +175,17 @@ func launch_level(lvl: Dictionary) -> void:
 	_to_flight()
 
 
+## Fly today's Daily Sortie, ranked or practice. A refused ticket comes
+## back for the daily screen to explain; nothing is flown then.
+func launch_daily(ranked: bool) -> Dictionary:
+	if _busy:
+		return {"ok": false, "code": "busy", "message": "Already leaving"}
+	var r := await DailySortie.start(ranked)
+	if r.ok:
+		_to_flight()
+	return r
+
+
 ## The tutorial, flown like a level.
 func launch_tutorial() -> void:
 	Campaign.launch_tutorial()
@@ -187,6 +204,8 @@ func _to_flight() -> void:
 	_busy = true
 	var lvl := Session.pending_level
 	var title := "SANDBOX" if lvl.is_empty() else "LEVEL %d: %s" % [int(lvl.get("number", 1)), String(lvl.get("title", "")).to_upper()]
+	if String(lvl.get("key", "")).begins_with(DailySortie.KEY_PREFIX):
+		title = "DAILY SORTIE: %s" % String(lvl.get("title", "")).to_upper()
 	if bool(lvl.get("tutorial", false)):
 		title = "FLIGHT SCHOOL"
 	# Behind the wipe, the loading card goes up and starts pulling the flight
