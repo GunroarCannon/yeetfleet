@@ -123,6 +123,40 @@ static func cancel() -> void:
 	client().cancel()
 
 
+## A wallet key as the menus show it: "GE7b…HLdK".
+static func short_key(key: String) -> String:
+	return "" if key.length() < 9 else key.left(4) + "…" + key.right(4)
+
+
+## A failure code in a few plain words for the pilot; "" for "cancelled"
+## (backing out needs no reply).
+static func say(code: String) -> String:
+	match code:
+		"cancelled":
+			return ""
+		"no_wallet":
+			return "Get a Solana wallet first (Phantom, Solflare)"
+		"declined":
+			return "The wallet said no"
+		"timeout", "connection_failed":
+			return "The wallet didn't answer. Try again"
+		"unauthorized":
+			return "Sign in again"
+		"busy":
+			return "The wallet is already open"
+		"tx_failed":
+			return "The payment failed on chain. Nothing was taken"
+		"not_confirmed":
+			return "Not confirmed yet. Check again soon"
+		"not_submitted":
+			return "The wallet couldn't send it. Enough SKR and SOL?"
+		"cluster_not_supported":
+			return "Switch the wallet to devnet (Testnet mode)" if not USE_MAINNET else "Switch the wallet to mainnet"
+		"rpc_error":
+			return "No connection to Solana"
+	return "Wallet trouble (%s)" % code
+
+
 # --- Wallet ---
 
 ## Connect, or reconnect silently with the saved session.

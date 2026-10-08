@@ -64,6 +64,8 @@ code must do the same. Decision records live in `docs/decisions/`.
   - Solana wallet façade (`Chain` on the addon's mock: SIWS, session kept, SKR to the
     treasury confirmed before it counts, tips, cancel / no wallet):
     `... --script modules/chain/tools/chain_check.gd`. Addresses: `docs/solana-wallets.md`.
+  - the Pilot ID chip (tap signs in / cancels / opens the card, failures in plain words,
+    fits beside STORE, Back closes its card): `... --script modules/menu/tools/pilot_chip_check.gd`.
   - shipped game defaults (layering, no headless bake, reset):
     `... --script modules/core/tools/game_defaults_check.gd`.
   - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd

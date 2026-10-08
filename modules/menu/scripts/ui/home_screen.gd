@@ -7,6 +7,8 @@
 ##
 ## EXIT (and Back on the home screen) never quits straight away: it asks
 ## QUIT? with STAY and QUIT.
+##
+## Beside STORE, bottom-left: the Pilot ID ([PilotChip]), the Solana wallet.
 class_name HomeScreen
 extends MenuScreen
 
@@ -21,6 +23,8 @@ var _debug: DebugJump = null
 var _campaign: SlabButton
 ## Bottom-left: coin packs for real money.
 var _store: SlabButton
+## Right of STORE: the pilot's Solana wallet.
+var _pilot: PilotChip
 ## The QUIT? card, while it is up.
 var _quit_card: Control = null
 
@@ -53,6 +57,8 @@ func _ready() -> void:
 	_store.skew = 10.0
 	_store.pressed.connect(func() -> void: menu.go(MenuRoot.Screen.STORE))
 	add_child(_store)
+	_pilot = PilotChip.new()
+	add_child(_pilot)
 	if Session.debug_mode:
 		_debug = DebugJump.new()
 		_debug.menu = menu
@@ -135,9 +141,15 @@ func layout() -> void:
 	_store.position = Vector2(18, vp.y - _store.size.y - 18)
 	_store.pivot_offset = _store.size * 0.5
 	_store.rotation = -0.03
+	# The Pilot ID on STORE's row: a fixed share in landscape (clear of the
+	# panel cascade), the rest of the row in portrait.
+	var pilot_x := _store.position.x + _store.size.x + 16.0
+	var pilot_w := vp.x - pilot_x - 18.0 if port else clampf(vp.x * 0.26, 240.0, 400.0 * u)
+	_pilot.size = Vector2(pilot_w, store_h * 0.9)
+	_pilot.position = Vector2(pilot_x, _store.position.y + store_h * 0.05)
 	if _debug != null:
 		_debug.menu = menu
-		_debug.place(vp, _store.position.x + _store.size.x + 16.0)
+		_debug.place(vp, pilot_x + (0.0 if port else pilot_w + 16.0))
 	for i in n:
 		var b := _buttons[i]
 		b.custom_minimum_size = Vector2(bw, bh)
@@ -163,7 +175,9 @@ func layout() -> void:
 
 ## Back on the home screen: close the QUIT? card, or ask it.
 func back() -> bool:
-	if _quit_card != null and is_instance_valid(_quit_card):
+	if _pilot.card_open():
+		_pilot.close_card()
+	elif _quit_card != null and is_instance_valid(_quit_card):
 		_close_quit()
 	elif not OS.has_feature("web") and not OS.has_feature("ios"):
 		_ask_quit()

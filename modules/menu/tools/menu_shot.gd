@@ -6,12 +6,14 @@
 ##
 ## Writes home.png, quit.png, map.png, report.png, pick.png (the garage as a
 ## level's ship picker), fork.png, garage.png, shop.png, settings.png,
-## settings_sub.png (the PERFORMANCE submenu), store.png, rename.png and loading.png. Runs on a scratch campaign save with a little progress
+## settings_sub.png (the PERFORMANCE submenu), store.png, rename.png, loading.png, and
+## pilot.png / pilot_card.png (the Pilot ID signed in on the mock wallet). Runs on a scratch campaign save with a little progress
 ## (first sector won, some coins) so the map and garage have something to
 ## show; the player's own save is never touched.
 extends SceneTree
 
 const SCRATCH := "user://menu_shot_scratch.json"
+const CHAIN_SCRATCH := "user://menu_shot_chain.cfg"
 
 var _out := "res://debug_shots/menu"
 var _menu: MenuRoot
@@ -34,6 +36,13 @@ func _initialize() -> void:
 	Campaign.save_path = SCRATCH
 	Campaign.reset()
 	Campaign.add_coins(900)
+	# The mock wallet, signed out, with an RPC that fails at once.
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHAIN_SCRATCH))
+	Chain.save_path = CHAIN_SCRATCH
+	Chain.reset(true)
+	Chain.client().mock.delay_sec = 0.05
+	Chain.client().rpc_url = "http://127.0.0.1:9"
+	Chain.client().mock.device["seeker"] = true
 	var secs := Campaign.sectors()
 	var levels: Array = secs[0]["levels"]
 	for i in 3:
@@ -53,6 +62,15 @@ func _run() -> void:
 	await _wait(0.5)
 	await _shot("quit")
 	home._close_quit()
+	await Chain.sign_in()
+	await _wait(0.4)
+	home._pilot._skr = 1240.0
+	home._pilot.queue_redraw()
+	await _shot("pilot")
+	home._pilot._open_card()
+	await _wait(0.5)
+	await _shot("pilot_card")
+	home._pilot.close_card()
 	_menu.go(MenuRoot.Screen.MAP)
 	await _wait(1.2)
 	await _shot("map")
@@ -111,6 +129,7 @@ func _run() -> void:
 	await _wait(0.8)
 	await _shot("loading")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHAIN_SCRATCH))
 	quit()
 
 
