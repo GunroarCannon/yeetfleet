@@ -6,13 +6,15 @@ Target: the CLOCK IN Solana Mobile hackathon (Seeker). Four judging pillars,
 Required: an Android APK using Mobile Wallet Adapter, a public repo, a demo
 video, a pitch deck, and a Solana dApp Store listing.
 
-This is a plan only; nothing in this file is built yet. The wallet plugin
+Status 2026-10-08: the plugin passed P0–P2 on the API 36 emulator with
+Phantom (SIWS, SOL and dSKR transfers confirmed on devnet); **G0 is done**.
+The wallet plugin
 lives in its own repo, `critbox-godot-solana-mobile` (its plan is
 `docs/PLAN.md` there). This branch only consumes its release addon.
 
 ## The pitch in one line
 
-**Yeet Fleet**: sling your toy ship through a bullet-hell sortie. One daily
+**Yeetfleet** (the dApp Store name): sling your toy ship through a bullet-hell sortie. One daily
 run per Seeker, a global leaderboard, a streak to protect, and SKR as the fuel
 for everything extra.
 
@@ -36,10 +38,13 @@ for everything extra.
 | Identity | SIWS (Sign-In-With-Solana) → the Worker verifies the signature and checks the Seeker Genesis Token with Helius (`getTokenAccountsByOwnerV2`, skipping zero-balance accounts, group `GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te`), then issues a short session token. Rate limits and ranked attempts are keyed by the **Genesis Token mint**, not the wallet | Solana Mobile's own anti-sybil recipe; one Seeker = one ranked pilot | — |
 | Non-Seeker phones | Fully playable: practice runs plus an *unranked* daily board. The ranked board needs a Seeker Genesis Token | Judges may test on any Android; the Seeker gets the premium status | — |
 | Score trust | The server issues a run ticket (nonce + seed) at start. The client returns score, duration and stats; the Worker checks the ticket, the time window, and a score ceiling derived from the seed's par (`StarRating`). Full replay verification is out of scope | Honest about limits; security auditors are judges, so the pitch says exactly what is and isn't verified | if a cheater shows up during judging, add input-log replay |
-| SKR uses | (1) **Extra ranked attempts** (e.g. 5 SKR) sent to a treasury, with a share burned. (2) **Seeker cosmetics**: hull paints, decals, sling trails. (3) **Tip a pilot**: a direct wallet-to-wallet SKR transfer from the leaderboard (no custody). (4) Stretch: **boss bounties** | Sinks plus social utility; nothing pay-to-win; no custody of user funds | — |
+| SKR uses | (1) **Extra ranked attempts** sent to a treasury, with a share burned. (2) **Seeker cosmetics**: hull paints, decals, sling trails. (3) **Tip a pilot**: a direct wallet-to-wallet SKR transfer from the leaderboard (no custody). (4) Stretch: **boss bounties** | Sinks plus social utility; nothing pay-to-win; no custody of user funds | — |
 | Prize pools funded by entry fees | **Not doing** | Looks like gambling and is jurisdiction-dependent; season prizes come from the treasury or sponsors instead | if the organizers explicitly allow it |
 | Payment check | Each SKR transfer carries a Memo with a server-issued order nonce. The Worker confirms it with Helius `getTransaction` (mint, amount, destination token account, memo, unused signature) before granting anything | No trust in the client's "I paid" | — |
 | RevenueCat coins in the Seeker build | **Off** in the dApp Store build (Google Play Billing does not work outside Play). Coins stay earned in-game; the SKR shop replaces packs. Play builds keep `CoinStore` | Store rules, plus fewer dead buttons | — |
+| SKR prices (2026-10-08) | Extra ranked attempt **25 SKR**, hull paint **50**, decal **75**, sling trail **100**; tip buttons **10 / 50 / 100**. In `Chain.PRICES` / `Chain.TIP_PRESETS` | SKR ≈ $0.016–0.022 (cap ~$111–152M, ATH $0.056): an attempt ≈ $0.50, cosmetics ≈ $1–2, so impulse-sized for a daily game | SKR moves more than ~2× either way |
+| Burn share | **10%** of SKR received, burned by the treasury in weekly batches (`docs/solana-wallets.md`) | A per-payment burn needs a second instruction (and the payer burning their own tokens), which complicates the Worker's payment check; batches keep each payment a plain transfer | — |
+| Treasury | A fresh keypair, `2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1`, same on both clusters; secret off-repo (`docs/solana-wallets.md`) | The user had none; one address keeps config simple | before mainnet: a hardware wallet or Squads multisig |
 | Haptics | `Input.vibrate_handheld` (VIBRATE permission) behind a Juice dial, default on | No plugin needed; matches the dial convention | — |
 
 ## Module and API shape (planned)
@@ -70,7 +75,7 @@ the existing shop. The new screens get shots at both phone sizes.
 
 | # | Done when |
 |---|---|
-| G0 | Addon copied in; `Chain` façade over the addon client and its mock; `chain_check` passes headless |
+| G0 ✅ | Addon copied in; `Chain` façade over the addon client and its mock; `chain_check` passes headless (2026-10-08, 23 checks) |
 | G1 | Pilot ID chip: connect / SIWS / disconnect / reconnect on the phone with Phantom; Seeker detection |
 | G2 | Worker deployed: SIWS verify, Genesis Token check, session token; D1 schema; Worker tests |
 | G3 | Daily Sortie: ranked ticket → run → submit → leaderboard; streaks; `daily_check` passes |
@@ -81,6 +86,5 @@ the existing shop. The new screens get shots at both phone sizes.
 ## Open questions for the user
 
 - The hackathon deadline (it sets how much of G4's stretch and G5 fits).
-- The dApp Store app name: "Yeet Fleet" (matches `com.critbox.yeetfleet`)?
-- SKR prices for an extra attempt and cosmetics, and the burn share.
-- Treasury wallet: a fresh wallet the user controls (needed for G4 on mainnet).
+- Answered 2026-10-08: app name **Yeetfleet**; SKR prices and burn share as
+  above (revisit freely); treasury created.

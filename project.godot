@@ -46,7 +46,7 @@ movie_writer/movie_file="C:/Users/hmmm/Documents/elite-clone/mov.png"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/celestial_bodies/plugin.cfg", "res://addons/brackeys_particle_controls/plugin.cfg", "res://addons/face_gen_gallery/plugin.cfg")
+enabled=PackedStringArray("res://addons/celestial_bodies/plugin.cfg", "res://addons/brackeys_particle_controls/plugin.cfg", "res://addons/face_gen_gallery/plugin.cfg", "res://addons/solana_mobile/plugin.cfg")
 
 [file_customization]
 

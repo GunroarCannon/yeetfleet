@@ -61,6 +61,9 @@ code must do the same. Decision records live in `docs/decisions/`.
   - power-ups / shield bubble & enemy veils / EMP freeze / callouts / "!" "?" marks /
     sling tap auto-aim, auto-fire and aim camera / tutorial: `... --fixed-fps 60 --script
     modules/flight/tools/powerup_check.gd` — run at 144 too.
+  - Solana wallet façade (`Chain` on the addon's mock: SIWS, session kept, SKR to the
+    treasury confirmed before it counts, tips, cancel / no wallet):
+    `... --script modules/chain/tools/chain_check.gd`. Addresses: `docs/solana-wallets.md`.
   - shipped game defaults (layering, no headless bake, reset):
     `... --script modules/core/tools/game_defaults_check.gd`.
   - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd
