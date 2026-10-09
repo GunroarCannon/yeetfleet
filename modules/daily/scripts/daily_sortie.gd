@@ -4,7 +4,9 @@
 ## builds the same one with no download. Practice runs are unlimited; a
 ## [i]ranked[/i] run needs the leaderboard session with a Seeker Genesis
 ## Token ([method Chain.has_genesis]), is one a day per token (plus attempts
-## bought with SKR, G4), and has no RETRY.
+## bought with SKR), and has no RETRY. "Arm the sling": the wallet signs each
+## ranked ticket before the flight (on a Seeker, the fingerprint), and only
+## an armed run uses up the day's attempt.
 ##
 ## A run goes through the campaign's flight flow: [method start] fills
 ## [member Session.pending_level] with the key [code]daily:<day>[/code] (which
@@ -123,8 +125,10 @@ static func streak() -> int:
 # --- A run ---
 
 ## Get a ticket (ranked, or practice when signed in) and set the day's level
-## up to fly. The menu flies it after an ok. Codes: "not_seeker",
-## "no_attempts", "offline" (ranked needs the server), "wrong_day", …
+## up to fly. A ranked ticket is armed first: the wallet signs it. The menu
+## flies it after an ok. Codes: "not_seeker", "no_attempts", "offline"
+## (ranked needs the server), "wrong_day", "cancelled" (backed out of the
+## wallet; nothing used), …
 static func start(ranked: bool) -> Dictionary:
 	if ranked and not Chain.has_genesis():
 		return {"ok": false, "code": "not_seeker", "message": "Ranked runs need a Seeker Genesis Token"}
@@ -136,6 +140,10 @@ static func start(ranked: bool) -> Dictionary:
 			run_id = String(t.run_id)
 		elif ranked:
 			return t
+		if ranked:
+			var armed := await _arm(run_id, String(t.get("arm", "")))
+			if not armed.ok:
+				return armed
 	elif ranked:
 		return {"ok": false, "code": "offline", "message": "Ranked runs need the leaderboard"}
 	var lvl := level(day)
@@ -158,6 +166,14 @@ static func start(ranked: bool) -> Dictionary:
 	Session.space_setup = (lvl.get("space", {}) as Dictionary).duplicate(true)
 	Session.level_result = {}
 	return {"ok": true, "ranked": ranked, "run_id": run_id}
+
+
+## Arm a ranked ticket: the wallet signs its message, the Worker checks it.
+static func _arm(run_id: String, text: String) -> Dictionary:
+	var s := await Chain.sign_message(text, "arm")
+	if not s.ok:
+		return s
+	return await Chain.server_post("/run/arm", {"run_id": run_id, "signature": s.signature})
 
 
 ## True when [member Session.level_result] is a daily run's.

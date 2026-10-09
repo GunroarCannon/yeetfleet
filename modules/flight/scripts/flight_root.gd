@@ -2444,6 +2444,7 @@ func _set_hull_overlay(mat: Material) -> void:
 ## Where the player's hull was last hit, on the hull (world). The comic
 ## shouts ([method hit_word]) pop there.
 var last_hit_point := Vector3.ZERO
+var _last_buzz_ms := 0
 
 
 ## Accept damage to the player ship (called by AI weapons and collision model).
@@ -2472,6 +2473,10 @@ func take_damage(amount: float, hit_point := Vector3.ZERO) -> void:
 			where = model.global_position + off.normalized() * hull_r * 0.8
 	last_hit_point = where
 	var now_ms := Time.get_ticks_msec()
+	# A hit buzzes the phone; a stream of hits buzzes at most every 150 ms.
+	if now_ms - _last_buzz_ms > 150:
+		_last_buzz_ms = now_ms
+		Juice.haptic(Juice.HapticKind.LIGHT)
 	# Shield absorbs 65% of incoming damage while it holds.
 	var prev_shield := player_shield
 	if player_shield > 0.0:
@@ -2570,6 +2575,7 @@ func game_over() -> void:
 		return
 	_player_dead = true
 	AiShip.player_down = true
+	Juice.haptic(Juice.HapticKind.HEAVY)
 	Campaign.bump_stat("deaths")
 	model.halt()
 	model.clear_phys_world()

@@ -56,6 +56,9 @@ const AUTO_FIRE_RANGE := 900.0
 const AUTO_FIRE_CONE_COS := 0.5
 ## Once the pull is past this, the camera swings behind the ship along the aim.
 const AIM_CAM_POWER := 0.12
+## Tilt aim ([member JuiceSettings.gyro_aim]): how far turning the phone can
+## turn the aim, each way, in degrees.
+const TILT_MAX_DEG := 25.0
 ## The aim snaps onto an objective point within this many degrees of the line.
 const GOAL_SNAP_DEG := 22.0
 ## How far a snap bends the aim onto its ship or goal (1 = all the way). At
@@ -93,6 +96,9 @@ var _fire_time := 0.0
 ## The camera's frame when the aim began: the pull is read in it, so the view
 ## easing out and looking ahead doesn't move the aim under the thumb.
 var _aim_frame := Basis()
+## Tilt aim: how far the phone has turned since the pull began (radians;
+## x about the screen's up, y about its right).
+var _tilt := Vector2.ZERO
 ## The camera's line of sight through the ship when the aim began.
 var _aim_ray := Vector3.ZERO
 ## The direction of the last launch: the camera holds it while the ship flies.
@@ -140,6 +146,8 @@ func activate(flight: FlightModel) -> void:
 	super(flight)
 	run = SlingRun.new(flight)
 	run.seek = _seek
+	# The sling lets go: the phone kicks with it.
+	run.launched.connect(func(_dir: Vector3, _speed: float) -> void: Juice.haptic(Juice.HapticKind.MEDIUM))
 	model.command.throttle = 0.0
 
 
@@ -214,6 +222,7 @@ func _begin_aim() -> void:
 	_cam_lock = Vector3.ZERO
 	_cam_ahead = Vector3.INF
 	_rest_dir = -_aim_frame.z
+	_tilt = Vector2.ZERO
 
 
 func _update_aim(at: Vector2) -> void:
@@ -228,6 +237,9 @@ func _update_aim(at: Vector2) -> void:
 		aim_dir = MovePilot.depth_dir(-pull, _aim_frame, JuiceSettings.sling_aim_depth, _aim_ray)
 	else:
 		aim_dir = dome_dir(pull, _aim_frame, JuiceSettings.sling_aim_depth, _aim_ray)
+	if _tilt != Vector2.ZERO and aim_dir != Vector3.ZERO:
+		# The phone turned during the pull: the aim turns with it.
+		aim_dir = aim_dir.rotated(_aim_frame.y.normalized(), _tilt.x).rotated(_aim_frame.x.normalized(), _tilt.y).normalized()
 	aim_power = clampf(pull.length() / (short_edge() * 0.38), 0.0, 1.0)
 	_raw_pull = aim_power
 	var bend := SMART_SNAP_BEND if smart else AIM_SNAP_BEND
@@ -413,6 +425,8 @@ func physics_tick(delta: float) -> void:
 	magnet_target = null
 	match run.state:
 		SlingRun.State.AIMING:
+			if JuiceSettings.gyro_aim and gestures.is_down():
+				_tilt_aim(delta)
 			if aim_dir != Vector3.ZERO:
 				root.steer_nose_toward(aim_dir)
 		SlingRun.State.FLYING:
@@ -451,6 +465,17 @@ func physics_tick(delta: float) -> void:
 
 ## Launched: what the guns fire at on their own — the magnet's pick, else
 ## the best enemy ahead of the flight. Null when there is nothing.
+## Tilt aim: add this tick's turn of the phone and re-aim. Godot hands the
+## gyroscope over in screen axes (x right, y up), rad/s.
+func _tilt_aim(delta: float) -> void:
+	var g := Input.get_gyroscope()
+	if g == Vector3.ZERO:
+		return
+	var lim := deg_to_rad(TILT_MAX_DEG)
+	_tilt = (_tilt + Vector2(g.y, g.x) * delta).clamp(Vector2(-lim, -lim), Vector2(lim, lim))
+	_update_aim(gestures.current_position())
+
+
 func _auto_fire_target() -> AiShip:
 	if magnet_target != null and is_instance_valid(magnet_target) and magnet_target._alive 			and TargetPriority.score(magnet_target, model.global_position, Vector3.ZERO, -1.0, AUTO_FIRE_RANGE) > 0.0:
 		return magnet_target

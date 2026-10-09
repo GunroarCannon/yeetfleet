@@ -31,6 +31,14 @@ static var hit_knockback := true
 static var enemy_death_random_explosion := true
 static var hit_screen_shake := true
 static var collision_bump_zoom := true
+## Phone buzzes ([method Juice.haptic]): the sling's release, hits taken, a
+## wreck. On by default; off for pilots who play with the phone flat on a
+## table, or simply don't like it.
+static var haptics := true
+## Tilt aim: turning the phone during a sling pull turns the aim with it (the
+## gyroscope), up to [constant SlingshotPilot.TILT_MAX_DEG] each way. Off by
+## default: a bump while pulling shouldn't move a careful aim.
+static var gyro_aim := false
 ## Once an AI has spotted the player, bias its steering toward staying ahead
 ## of the player instead of always closing straight in -- see
 ## [method AiBehaviour._steer_toward]. Playtest ask: enemies were hard to find.
@@ -596,6 +604,8 @@ const BOOL_FIELDS := [
 	"cam_twist_rotate",
 	"sling_steady_cam",
 	"sling_aim_cam_hold",
+	"haptics",
+	"gyro_aim",
 	"sling_aim_cam_look",
 	"sling_cam_hold_launch",
 	"sling_cam_follow_flight",
@@ -663,6 +673,8 @@ static func get_effect(field: String) -> bool:
 		"cam_twist_rotate": return cam_twist_rotate
 		"sling_steady_cam": return sling_steady_cam
 		"sling_aim_cam_hold": return sling_aim_cam_hold
+		"haptics": return haptics
+		"gyro_aim": return gyro_aim
 		"sling_aim_cam_look": return sling_aim_cam_look
 		"sling_cam_hold_launch": return sling_cam_hold_launch
 		"sling_cam_follow_flight": return sling_cam_follow_flight
@@ -737,6 +749,8 @@ static func _set_bool(field: String, value: bool) -> void:
 		"cam_twist_rotate": cam_twist_rotate = value
 		"sling_steady_cam": sling_steady_cam = value
 		"sling_aim_cam_hold": sling_aim_cam_hold = value
+		"haptics": haptics = value
+		"gyro_aim": gyro_aim = value
 		"sling_aim_cam_look": sling_aim_cam_look = value
 		"sling_cam_hold_launch": sling_cam_hold_launch = value
 		"sling_cam_follow_flight": sling_cam_follow_flight = value

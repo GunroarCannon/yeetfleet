@@ -25,8 +25,12 @@ const MOCK_KEY = "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB";
 const realVerify = crypto.subtle.verify.bind(crypto.subtle);
 crypto.subtle.verify = async (alg, key, sig, data) => {
   if ((alg?.name ?? alg) === "Ed25519") {
-    const stand_in = new TextEncoder().encode(createHash("sha256").update(Buffer.from(data)).digest("hex"));
-    if (Buffer.from(sig).equals(Buffer.from(stand_in))) return true;
+    // The mock signs a sign-in's text, and a message's base64 (sign_messages).
+    const bytes = Buffer.from(data);
+    for (const seed of [bytes, Buffer.from(bytes.toString("base64"))]) {
+      const stand_in = new TextEncoder().encode(createHash("sha256").update(seed).digest("hex"));
+      if (Buffer.from(sig).equals(Buffer.from(stand_in))) return true;
+    }
   }
   return realVerify(alg, key, sig, data);
 };

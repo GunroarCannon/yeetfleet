@@ -8,8 +8,15 @@
 // its claimed time must fit inside the time the ticket was open; its points
 // must fit the scoring rule's range (a win 1000–2000, a loss under 1000).
 // The run itself is played on the phone and isn't replayed here.
+//
+// "Arm the sling": a ranked ticket only counts once the pilot's wallet has
+// signed its arm message (/run/arm); on a Seeker, that's the Seed Vault's
+// fingerprint prompt. A person approves each ranked run, not a script.
+// Backing out of the prompt costs nothing: only armed runs use up the day's
+// attempts, and a ranked run's time window opens when it's armed.
 
 import { HttpError } from "./errors.js";
+import { verify, fromBase64 } from "./siws.js";
 
 export const TICKET_TTL_MS = 45 * 60 * 1000;
 export const MIN_RUN_SEC = 3;
@@ -58,7 +65,32 @@ export async function start(env, now, pilot, b) {
   const id = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, "0")).join("");
   await env.DB.prepare("INSERT INTO runs (id, pubkey, genesis_mint, day, ranked, started_at) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(id, pilot.pk, ranked ? pilot.gm : null, day, ranked ? 1 : 0, now).run();
-  return { run_id: id, day, ranked, expires_in_sec: TICKET_TTL_MS / 1000 };
+  const out = { run_id: id, day, ranked, expires_in_sec: TICKET_TTL_MS / 1000 };
+  if (ranked) out.arm = armText(pilot.pk, day, id);
+  return out;
+}
+
+/** The message a pilot's wallet signs to arm a ranked run. */
+export function armText(pk, day, runId) {
+  return `Yeetfleet: arm the sling\nRanked Daily Sortie ${day}\nPilot: ${pk}\nRun: ${runId}`;
+}
+
+/** POST /run/arm {run_id, signature}: the wallet signed the arm message; the run counts from now. */
+export async function arm(env, now, pilot, b) {
+  const run = await env.DB.prepare("SELECT * FROM runs WHERE id = ?").bind(String(b.run_id ?? "")).first();
+  if (!run || run.pubkey !== pilot.pk || !run.ranked) throw new HttpError(404, "no_run", "No such ranked run");
+  if (now - run.started_at > TICKET_TTL_MS) throw new HttpError(410, "ticket_expired", "That run's ticket ran out");
+  const armed = await env.DB.prepare("SELECT run_id FROM run_arms WHERE run_id = ?").bind(run.id).first();
+  if (armed) return { run_id: run.id, armed: true };
+  const sig = fromBase64(String(b.signature ?? ""));
+  if (!sig) throw new HttpError(400, "bad_request", "signature must be base64");
+  const msg = new TextEncoder().encode(armText(pilot.pk, run.day, run.id));
+  if (!(await verify(pilot.pk, msg, sig))) throw new HttpError(401, "bad_signature", "The signature doesn't match");
+  // Arming is what spends an attempt: check there's one left, now.
+  if ((await rankedLeft(env, run.genesis_mint, run.day)) <= 0) throw new HttpError(403, "no_attempts", "No ranked runs left today");
+  await env.DB.prepare("INSERT OR IGNORE INTO run_arms (run_id, signature, armed_at) VALUES (?, ?, ?)")
+    .bind(run.id, String(b.signature), now).run();
+  return { run_id: run.id, armed: true };
 }
 
 /** POST /run/finish {run_id, won, points, time, kills}: close the run, once. */
@@ -67,6 +99,10 @@ export async function finish(env, now, pilot, b) {
   if (!run || run.pubkey !== pilot.pk) throw new HttpError(404, "no_run", "No such run");
   if (run.finished_at !== null) throw new HttpError(409, "run_finished", "That run is already in");
   if (now - run.started_at > TICKET_TTL_MS) throw new HttpError(410, "ticket_expired", "That run's ticket ran out");
+  const armedAt = run.ranked
+    ? await env.DB.prepare("SELECT armed_at FROM run_arms WHERE run_id = ?").bind(run.id).first("armed_at")
+    : null;
+  if (run.ranked && armedAt === null) throw new HttpError(409, "not_armed", "A ranked run is armed by the wallet first");
   const won = b.won === true;
   const points = Number(b.points);
   const time = Number(b.time);
@@ -77,7 +113,7 @@ export async function finish(env, now, pilot, b) {
   const lo = won ? WIN_BASE : 0;
   const hi = won ? WIN_BASE * 2 : LOSS_MAX;
   if (points < lo || points > hi) throw new HttpError(422, "bad_score", `A ${won ? "win" : "loss"} scores ${lo}–${hi}`);
-  const open = (now - run.started_at) / 1000;
+  const open = (now - (armedAt ?? run.started_at)) / 1000;
   if (time < (won ? MIN_RUN_SEC : 0) || time > open + SLACK_SEC) throw new HttpError(422, "bad_time", "That time doesn't fit the ticket");
   const done = await env.DB.prepare(
     "UPDATE runs SET finished_at = ?, points = ?, won = ?, time_sec = ?, kills = ? WHERE id = ? AND finished_at IS NULL")
@@ -116,7 +152,11 @@ export async function board(env, now, pilot, params) {
 // --- Counting ---
 
 export async function rankedLeft(env, gm, day) {
-  const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM runs WHERE genesis_mint = ? AND day = ? AND ranked = 1")
+  // Armed runs only: a ticket the pilot never armed (backed out of the
+  // wallet) costs nothing.
+  const used = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM runs r JOIN run_arms a ON a.run_id = r.id
+     WHERE r.genesis_mint = ? AND r.day = ? AND r.ranked = 1`)
     .bind(gm, day).first("n");
   const extra = (await env.DB.prepare("SELECT count FROM extra_attempts WHERE genesis_mint = ? AND day = ?")
     .bind(gm, day).first("count")) ?? 0;

@@ -66,8 +66,9 @@ func _run() -> void:
 
 	# --- SKR (G4): order → payment with the order's memo → checked → granted ---
 	var shop := await Chain.refresh_shop()
-	_expect(shop.ok and shop.mint == Chain.skr_mint() and shop.treasury == Chain.TREASURY and Chain.owned().is_empty(),
-			"the Worker's shop names our mint and treasury; nothing owned yet")
+	_expect(shop.ok and shop.mint == Chain.skr_mint() and shop.treasury == Chain.TREASURY,
+			"the Worker's shop names our mint and treasury")
+	_expect(Chain.owned() == ["paint:skr_genesis"], "a Genesis pilot owns the Genesis livery, and nothing bought yet")
 	var paid: Array = []
 	Chain.notifier.paid.connect(func(what: String, _sig: String) -> void: paid.append(what))
 	r = await Chain.buy("paint:skr_gold")

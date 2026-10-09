@@ -131,6 +131,11 @@ func _main_rows() -> Array:
 		_spec("SHAKE", GraffitiStyle.VIOLET, func() -> String:
 			return "LESS" if JuiceSettings.reduce_motion else "FULL",
 			func() -> void: JuiceSettings.set_reduce_motion(not JuiceSettings.reduce_motion)),
+		_spec("BUZZ", GraffitiStyle.CYAN, func() -> String:
+			return "ON" if JuiceSettings.haptics else "OFF",
+			func() -> void:
+				_juice_toggle("haptics")
+				Juice.haptic(Juice.HapticKind.MEDIUM)),
 		_spec("GAMEPLAY", GraffitiStyle.SUN, func() -> String: return "CAMERA, CONTROLS  >",
 			func() -> void: _open_sub("GAMEPLAY")),
 		_spec("PERFORMANCE", GraffitiStyle.LIME, func() -> String: return "GRAPHICS, BATTERY  >",
@@ -202,6 +207,7 @@ func _sub_rows(which: String) -> Array:
 					return AIM_STYLE_WORDS[clampi(roundi(JuiceSettings.sling_aim_style), 0, 2)],
 					_juice_cycle.bind("sling_aim_style", [0.0, 1.0, 2.0])),
 				_dial("AIM INTO SCREEN", GraffitiStyle.LIME, "sling_aim_depth", [0.0, 0.4, 0.75, 1.0], "%.0f%%", 100.0),
+				_spec("TILT TO AIM", GraffitiStyle.CYAN, _juice_word.bind("gyro_aim"), _juice_toggle.bind("gyro_aim")),
 				_dial("GRAB AREA", GraffitiStyle.SUN, "grab_radius_scale", [0.7, 1.0, 1.3, 1.6], "×%.1f"),
 				_dial("LAUNCH MAGNET", GraffitiStyle.CYAN, "magnet_strength", [0.0, 0.4, 0.85, 1.0], "%.0f%%", 100.0),
 				_dial("CAMERA SWING SPEED", GraffitiStyle.VIOLET, "cam_gesture_speed", [0.6, 1.0, 1.4, 1.8], "×%.1f"),

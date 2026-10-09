@@ -203,11 +203,13 @@ func _on_practice() -> void:
 
 
 func _go(ranked: bool) -> void:
-	_note.text = ""
+	# A ranked run is armed in the wallet first (the fingerprint on a Seeker).
+	_note.text = "ARM THE SLING: approve the ranked run in your wallet" if ranked else ""
 	var r := await menu.launch_daily(ranked)
 	if not r.ok:
-		GameAudio.ui(&"locked")
 		_note.text = _say(String(r.code))
+		if _note.text != "":
+			GameAudio.ui(&"locked")
 
 
 func _on_extra() -> void:
@@ -237,6 +239,10 @@ func _say(code: String) -> String:
 			return "Your phone's date is off from the server's."
 		"no_session":
 			return "Sign in again (the Pilot ID on the home screen)."
+		"cancelled":
+			return "Not armed, so today's ranked run is still yours."
+		"bad_signature":
+			return "The wallet's signature didn't check out. Try again."
 	return "Couldn't start (%s)" % code
 
 

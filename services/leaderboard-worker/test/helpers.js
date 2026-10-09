@@ -96,6 +96,12 @@ export async function signIn(env, wallet, { tamper = (f) => f, name, signer } = 
   return call(env, "POST", "/auth/verify", { public_key: wallet.pubkey, signed_message: b64(bytes), signature: b64(sig), name });
 }
 
+/** Arm a ranked run: the wallet signs the ticket's arm message. */
+export async function arm(env, wallet, ticket, token, signer) {
+  const sig = await (signer ?? wallet).sign(new TextEncoder().encode(ticket.arm));
+  return call(env, "POST", "/run/arm", { run_id: ticket.run_id, signature: b64(sig) }, token);
+}
+
 /** Script the RPC so [owner] holds a Genesis Token (or a look-alike). */
 export function holdGenesis(env, owner, { mint = "GenesisMint111111111111111111111111111111111", group = GROUP } = {}) {
   env.rpc.on("getTokenAccountsByOwner", (p) => ({

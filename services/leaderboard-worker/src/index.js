@@ -12,7 +12,8 @@
 //
 // Daily Sortie (G3, src/daily.js):
 //   GET  /daily        (token optional)  → {day, ends_in_sec, me?: {streak, ranked_left, best}}
-//   POST /run/start    {day, ranked}     → {run_id, day, ranked}
+//   POST /run/start    {day, ranked}     → {run_id, day, ranked, arm?}
+//   POST /run/arm      {run_id, signature} → {armed}  (ranked: the wallet signed `arm`)
 //   POST /run/finish   {run_id, won, points, time, kills} → {board, points, best, rank, streak}
 //   GET  /leaderboard?day=&board=ranked|open (token optional) → {rows, me}
 //
@@ -71,6 +72,8 @@ async function route(request, env) {
       return json(await daily.today(env, now(env), await optionalPilot(request, env)));
     case "POST /run/start":
       return json(await daily.start(env, now(env), await requirePilot(request, env), await body(request)));
+    case "POST /run/arm":
+      return json(await daily.arm(env, now(env), await requirePilot(request, env), await body(request)));
     case "POST /run/finish":
       return json(await daily.finish(env, now(env), await requirePilot(request, env), await body(request)));
     case "GET /leaderboard":

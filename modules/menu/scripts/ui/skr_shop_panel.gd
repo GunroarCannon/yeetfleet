@@ -1,7 +1,8 @@
 ## SkrShopPanel: the STORE's SKR tab ([Chain]). One card per thing SKR buys:
 ## an extra ranked Daily Sortie run (Seeker Genesis pilots), three liveries
-## worn over every hull, three sling trails. A card's slab buys it ("50
-## SKR"), then wears it (WEAR / WORN).
+## worn over every hull, three sling trails, and the Genesis livery (free to
+## Seeker Genesis holders, not for sale). A card's slab buys it ("50 SKR"),
+## then wears it (WEAR / WORN).
 ##
 ## A buy is one wallet prompt; after it the slabs wait while the leaderboard
 ## finds the payment on chain. The line under the header says what's going
@@ -17,6 +18,7 @@ const ITEMS: Array[String] = [
 	"extra_attempt",
 	"paint:skr_solana", "paint:skr_seeker", "paint:skr_gold",
 	"trail:mint", "trail:violet", "trail:gold",
+	"paint:skr_genesis",
 ]
 
 var _head: Label
@@ -247,11 +249,16 @@ class _SkrCard:
 		_blocked = ""
 		if not signed:
 			_blocked = "SIGN IN"
-		elif item == "extra_attempt" and not Chain.has_genesis():
+		elif (item == "extra_attempt" or Chain.COSMETICS.get(item, {}).get("genesis", false)) and not Chain.has_genesis():
 			_blocked = "SEEKER GENESIS ONLY"
 		if owned:
 			_slab.text = "WORN ✓" if worn else "WEAR"
 			_slab.fill = GraffitiStyle.SUN if worn else GraffitiStyle.CYAN
+		elif Chain.COSMETICS.get(item, {}).get("genesis", false):
+			# Never sold: it comes with the Genesis Token.
+			_slab.text = "GENESIS"
+			_slab.fill = Color("3a3150")
+			_blocked = "SEEKER GENESIS ONLY" if signed else _blocked
 		else:
 			_slab.text = "%d SKR" % Chain.price_of(item)
 			_slab.fill = GraffitiStyle.LIME
@@ -283,6 +290,8 @@ class _SkrCard:
 				_draw_streak(look, Color(String(cols[0])))
 		if tall:
 			var kind := "TODAY'S DAILY" if item == "extra_attempt" else ("LIVERY, EVERY HULL" if item.begins_with("paint:") else "SLING TRAIL")
+			if Chain.COSMETICS.get(item, {}).get("genesis", false):
+				kind = "SEEKER GENESIS PILOTS"
 			GraffitiStyle.draw_text(self, kind, Vector2(size.x * 0.5, slab_top - h * 0.07), int(clampf(h * 0.05, 12.0, 22.0)), GraffitiStyle.DIM, 3)
 
 	## A livery: its three colours as slanted bands.

@@ -91,7 +91,19 @@ func _run() -> void:
 	await Chain.sign_in("Ace")
 	await DailySortie.refresh()
 	_expect(Chain.has_genesis() and DailySortie.ranked_left() == 1, "a Genesis pilot has one ranked run")
+	# Arm the sling: the wallet signs the ticket. Backing out costs nothing.
+	Chain.client().mock.next_error = "cancelled"
 	r = await DailySortie.start(true)
+	await DailySortie.refresh()
+	_expect(not r.ok and r.code == "cancelled" and DailySortie.ranked_left() == 1,
+			"backing out of the wallet's arm prompt keeps today's ranked run")
+	r = await DailySortie.start(true)
+	var signed := ""
+	for q: Array in Chain.client().mock.requests_seen:
+		if q[0] == "sign_messages":
+			signed = Marshalls.base64_to_utf8(String(q[1]["messages"][0]))
+	_expect(signed.begins_with("Yeetfleet: arm the sling") and signed.contains(Chain.pubkey()),
+			"the wallet signs the run's arm message")
 	_expect(r.ok and r.run_id != "" and bool(Session.pending_level.get("one_shot", false)), "ranked: a ticket, and no RETRY")
 	await create_timer(1.2).timeout
 	# A win under 3 s is refused by the Worker; inside the ticket's open time

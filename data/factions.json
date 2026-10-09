@@ -112,6 +112,13 @@
       "desc": "Bought with SKR. Polished gold with cream highlights and a deep bronze trim.",
       "palette": {"primary": "ffc21a", "accent": "fff1b0", "trim": "3a2a08"},
       "material": "gloss"
+        },
+    {
+      "id": "skr_genesis",
+      "name": "Genesis Livery",
+      "desc": "Seeker Genesis pilots only. Graphite hull, champagne-gold panels, a Seeker-teal trim.",
+      "palette": {"primary": "14161c", "accent": "e8c36a", "trim": "38f2d0"},
+      "material": "gloss"
     }
   ]
 }

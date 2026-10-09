@@ -53,7 +53,10 @@ for everything extra.
 | Payment check details | The Worker reads the transaction's token balances (treasury's gain in the configured mint ≥ the order), a memo `yeetfleet:<order>`, no error, and a signature used once (`orders.paid_sig` UNIQUE). Who paid isn't checked (gifting is fine). A payment the Worker hasn't seen yet stays on the phone and is asked about again; SKR taken is never lost | — |
 | Devnet RPC for the Worker | Keyless fallbacks (OnFinality, rpcpool, Tatum, then Solana's own), since `api.devnet.solana.com` refuses Cloudflare (HTTP 403) | when a Helius devnet key is set (`DEVNET_RPC_URL`) |
 | Sandbox unlock (2026-10-09) | After flight school **and** a win on campaign level 3 or later (`Campaign.sandbox_open`) | — |
-| Haptics | `Input.vibrate_handheld` (VIBRATE permission) behind a Juice dial, default on | No plugin needed; matches the dial convention | — |
+| Haptics | `Input.vibrate_handheld` (VIBRATE permission) behind a Juice dial (`JuiceSettings.haptics`, BUZZ in settings), default on | No plugin needed; matches the dial convention | — |
+| Arm the sling (2026-10-09) | A ranked ticket counts only once the wallet signs its arm message (`/run/arm`, Ed25519 checked). Backing out of the prompt costs nothing; an armed run that's abandoned still spends the attempt; the run's time window opens at arming | A person approves each ranked run (fingerprint on a Seeker) without a wallet popup mid-run; it's the "launch" itself | — |
+| Tilt to aim | Gyro turns the aim during a pull, ±25°, **off by default** (`JuiceSettings.gyro_aim`) | Untested feel; a bump shouldn't move a careful aim | after a phone playtest |
+| Genesis livery | `paint:skr_genesis`: owned by every Genesis holder (the Worker adds it to `owned`), never sold | The plan's Genesis Pilot hull, at no cost to Seeker owners | — |
 
 ## Module and API shape (planned)
 
@@ -88,7 +91,7 @@ the existing shop. The new screens get shots at both phone sizes.
 | G2 ✅ | Worker deployed: SIWS verify, Genesis Token check, session token; D1 schema; Worker tests. Live on devnet at `https://yeetfleet.yeetfleet-leaderboard-worker.workers.dev` (2026-10-09), `Chain.WORKER_URL` points there. **The mainnet Genesis check needs `MAINNET_RPC_URL`** (a Helius key): Solana's public RPC refuses Cloudflare, so until then only `DEV_GENESIS_OWNERS` count as Seekers |
 | G3 ✅ (code) | Daily Sortie: ranked ticket → run → submit → leaderboard; streaks; `daily_check` passes. `DailySortie` (modules/daily), the DAILY screen, Worker `/daily` `/run/start` `/run/finish` `/leaderboard` (25 Node tests). Ranked runs are one-shot (no RETRY). Live on the deployed Worker once G2 is deployed |
 | G4 ✅ (code) | SKR: order → transfer with memo → verify → grant (extra attempt, cosmetic); tip a pilot. Worker `/shop` `/order/new` `/order/verify` (34 Node tests); a **real dSKR payment on devnet verified by the live Worker** (`scripts/devnet_pay_check.mjs`); the STORE's SKR tab, +1 RANKED RUN and TIP on the daily board (`skr_shop_check`). The Phantom pass on the phone is still to do |
-| G5 | Hardware polish: "arm the sling" signature, haptics, gyro dial; menu shots at phone sizes |
+| G5 ✅ (code) | Hardware polish: **arm the sling** (each ranked ticket is signed by the wallet before the flight, the Seed Vault fingerprint on a Seeker; the Worker checks it at `/run/arm`); haptics on the sling's release, hits and a wreck (BUZZ setting, VIBRATE permission on); **tilt to aim** (gyro, GAMEPLAY settings, off by default); the Genesis livery for Seeker Genesis holders; menu shots at both phone sizes. On-device feel of haptics and tilt still to judge |
 | G6 | Ship: release keystore, mainnet config, dApp Store publish (publisher + app NFTs, needs SOL), demo video, deck |
 
 ## Open questions for the user

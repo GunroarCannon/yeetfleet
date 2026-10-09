@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeEnv, makeWallet, signIn, call, holdGenesis, transferTx, MINT, TREASURY } from "./helpers.js";
+import { makeEnv, makeWallet, signIn, call, holdGenesis, transferTx, arm, MINT, TREASURY } from "./helpers.js";
 import { memos, received } from "../src/shop.js";
 
 async function pilot(env, { seeker = false } = {}) {
@@ -40,6 +40,15 @@ test("/shop lists the catalog, the mint and the treasury; signed in, what's owne
   assert.deepEqual((await call(env, "GET", "/shop", undefined, p.token)).body.owned, []);
 });
 
+test("a Genesis holder owns the Genesis livery; nobody can buy it", async () => {
+  const env = makeEnv();
+  const seeker = await pilot(env, { seeker: true });
+  const plain = await pilot(env);
+  assert.deepEqual((await call(env, "GET", "/shop", undefined, seeker.token)).body.owned, ["paint:skr_genesis"]);
+  assert.deepEqual((await call(env, "GET", "/shop", undefined, plain.token)).body.owned, []);
+  assert.equal((await call(env, "POST", "/order/new", { item: "paint:skr_genesis" }, plain.token)).body.error, "no_item");
+});
+
 test("an order names the amount, the memo and where to pay", async () => {
   const env = makeEnv();
   const p = await pilot(env);
@@ -72,7 +81,8 @@ test("an extra attempt adds a ranked run today", async () => {
   const env = makeEnv();
   const txs = chain(env);
   const p = await pilot(env, { seeker: true });
-  assert.equal((await call(env, "POST", "/run/start", { ranked: true }, p.token)).status, 200);
+  const t = await call(env, "POST", "/run/start", { ranked: true }, p.token);
+  assert.equal((await arm(env, p.wallet, t.body, p.token)).status, 200);
   assert.equal((await call(env, "GET", "/daily", undefined, p.token)).body.me.ranked_left, 0);
   const o = await order(env, p, "extra_attempt");
   txs.S2 = transferTx({ from: p.wallet.pubkey, amount: o.amount, memo: o.memo, innerMemo: true });

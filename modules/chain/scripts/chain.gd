@@ -59,6 +59,8 @@ const COSMETICS := {
 	"paint:skr_solana": {"name": "SOLANA", "colors": ["9945ff", "14f195", "0e0e16"]},
 	"paint:skr_seeker": {"name": "SEEKER", "colors": ["f2f2ea", "1df2c4", "1b1d24"]},
 	"paint:skr_gold": {"name": "24 KARAT", "colors": ["ffc21a", "fff1b0", "3a2a08"]},
+	# Not for sale: a Seeker Genesis holder owns it (the Worker says so).
+	"paint:skr_genesis": {"name": "GENESIS", "colors": ["14161c", "e8c36a", "38f2d0"], "genesis": true},
 	"trail:mint": {"name": "MINT TRAIL", "colors": ["14f195"]},
 	"trail:violet": {"name": "VIOLET TRAIL", "colors": ["b061ff"]},
 	"trail:gold": {"name": "GOLD TRAIL", "colors": ["ffc21a"]},
@@ -285,6 +287,16 @@ static func sign_in(pilot_name := "") -> Dictionary:
 	# Anything paid for while the server was away, and what this pilot owns.
 	await retry_pending()
 	await refresh_shop()
+	return r
+
+
+## Have the wallet sign [param text] (on a Seeker: the Seed Vault's
+## fingerprint prompt). [code]{ok, signature}[/code], the signature in
+## base64; [param what] names it for [signal Notifier.failed].
+static func sign_message(text: String, what := "sign") -> Dictionary:
+	var r := _after(what, await client().sign_messages([text]))
+	if r.ok:
+		r["signature"] = String(r.signatures[0])
 	return r
 
 

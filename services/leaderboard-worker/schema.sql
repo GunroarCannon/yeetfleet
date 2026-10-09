@@ -40,6 +40,14 @@ CREATE INDEX IF NOT EXISTS runs_board ON runs (day, ranked, points);
 CREATE INDEX IF NOT EXISTS runs_pilot ON runs (pubkey, day);
 CREATE INDEX IF NOT EXISTS runs_genesis ON runs (genesis_mint, day, ranked);
 
+-- "Arm the sling": a ranked run counts once the pilot's wallet has signed
+-- its arm message (on a Seeker, the Seed Vault's fingerprint prompt).
+CREATE TABLE IF NOT EXISTS run_arms (
+  run_id TEXT PRIMARY KEY,
+  signature TEXT NOT NULL,
+  armed_at INTEGER NOT NULL             -- ms
+);
+
 -- Extra ranked attempts bought with SKR (G4), per Genesis Token and day.
 CREATE TABLE IF NOT EXISTS extra_attempts (
   genesis_mint TEXT NOT NULL,

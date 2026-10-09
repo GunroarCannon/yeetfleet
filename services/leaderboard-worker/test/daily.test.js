@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeEnv, makeWallet, signIn, call, holdGenesis } from "./helpers.js";
+import { makeEnv, makeWallet, signIn, call, holdGenesis, arm } from "./helpers.js";
 import { TICKET_TTL_MS } from "../src/daily.js";
 
 const DAY = 86400000;
@@ -17,10 +17,14 @@ async function pilot(env, { seeker = false, name = "" } = {}) {
   return { wallet, token: r.body.token };
 }
 
-/** Start a run, let [sec] pass, finish it. */
+/** Start a run (a ranked one armed by the wallet), let [sec] pass, finish it. */
 async function play(env, p, { ranked = false, won = true, points = 1500, time = 60, sec = 90, kills = 4 } = {}) {
   const s = await call(env, "POST", "/run/start", { ranked }, p.token);
   if (s.status !== 200) return s;
+  if (ranked) {
+    const a = await arm(env, p.wallet, s.body, p.token);
+    if (a.status !== 200) return a;
+  }
   env.clock += sec * 1000;
   return call(env, "POST", "/run/finish", { run_id: s.body.run_id, won, points, time, kills }, p.token);
 }
@@ -53,11 +57,50 @@ test("a Seeker gets one ranked run a day; others get none, practice is unlimited
   assert.equal((await play(env, seeker, { ranked: true })).status, 200);
 });
 
-test("a ranked ticket started and abandoned still uses the attempt", async () => {
+test("an armed ranked run uses the attempt even if abandoned; an unarmed ticket doesn't", async () => {
   const env = makeEnv();
   const p = await pilot(env, { seeker: true });
-  assert.equal((await call(env, "POST", "/run/start", { ranked: true }, p.token)).status, 200);
+  // Backed out of the wallet's prompt: nothing spent.
+  const t1 = await call(env, "POST", "/run/start", { ranked: true }, p.token);
+  assert.equal(t1.status, 200);
+  assert.match(t1.body.arm, /arm the sling/);
+  assert.equal((await call(env, "GET", "/daily", undefined, p.token)).body.me.ranked_left, 1);
+  const t2 = await call(env, "POST", "/run/start", { ranked: true }, p.token);
+  assert.equal((await arm(env, p.wallet, t2.body, p.token)).status, 200);
+  // Armed and never finished: spent.
   assert.equal((await call(env, "POST", "/run/start", { ranked: true }, p.token)).body.error, "no_attempts");
+  // The first ticket can't be armed now either.
+  assert.equal((await arm(env, p.wallet, t1.body, p.token)).body.error, "no_attempts");
+});
+
+test("arming needs the pilot's own signature over that run's message", async () => {
+  const env = makeEnv();
+  const p = await pilot(env, { seeker: true });
+  const other = await makeWallet();
+  const t = await call(env, "POST", "/run/start", { ranked: true }, p.token);
+  assert.equal((await arm(env, p.wallet, t.body, p.token, other)).body.error, "bad_signature");
+  assert.equal((await arm(env, p.wallet, { ...t.body, arm: t.body.arm + "x" }, p.token)).body.error, "bad_signature");
+  const practice = await call(env, "POST", "/run/start", {}, p.token);
+  assert.equal(practice.body.arm, undefined);
+  assert.equal((await arm(env, p.wallet, { ...practice.body, arm: "x" }, p.token)).body.error, "no_run");
+  assert.equal((await arm(env, p.wallet, t.body, p.token)).status, 200);
+  // Twice is fine (a lost reply).
+  assert.equal((await arm(env, p.wallet, t.body, p.token)).status, 200);
+});
+
+test("a ranked run can't finish unarmed, and its time counts from arming", async () => {
+  const env = makeEnv();
+  const p = await pilot(env, { seeker: true });
+  const t = await call(env, "POST", "/run/start", { ranked: true }, p.token);
+  env.clock += 600000;
+  const fin = { run_id: t.body.run_id, won: true, points: 1500, time: 60, kills: 1 };
+  assert.equal((await call(env, "POST", "/run/finish", fin, p.token)).body.error, "not_armed");
+  await arm(env, p.wallet, t.body, p.token);
+  env.clock += 20000;
+  // 10 minutes since the ticket, 20 s since arming: a 60 s run doesn't fit.
+  assert.equal((await call(env, "POST", "/run/finish", fin, p.token)).body.error, "bad_time");
+  env.clock += 45000;
+  assert.equal((await call(env, "POST", "/run/finish", fin, p.token)).status, 200);
 });
 
 test("bought attempts add ranked runs for that token and day", async () => {

@@ -137,9 +137,10 @@ static func roll_number(label: Label, from: float, to: float, fmt: String) -> vo
 	JuiceTween.roll_number(label, from, to, fmt)
 
 
-## Mobile only; a no-op everywhere else and under reduce_motion.
+## Mobile only; a no-op everywhere else, under reduce_motion, and with the
+## haptics dial off. (Needs the VIBRATE permission in the export.)
 static func haptic(kind: HapticKind) -> void:
-	if JuiceSettings.reduce_motion or not OS.has_feature("mobile"):
+	if JuiceSettings.reduce_motion or not JuiceSettings.haptics or not OS.has_feature("mobile"):
 		return
 	match kind:
 		HapticKind.LIGHT:

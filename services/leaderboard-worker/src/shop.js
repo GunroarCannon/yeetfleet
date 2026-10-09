@@ -50,6 +50,9 @@ export const CATALOG = {
   "trail:gold": { price: 100, kind: "trail" },
 };
 
+/** Not for sale: every Seeker Genesis holder owns it (the Genesis Pilot hull). */
+export const GENESIS_LIVERY = "paint:skr_genesis";
+
 /** GET /shop */
 export async function shop(env, pilot) {
   const out = {
@@ -59,7 +62,7 @@ export async function shop(env, pilot) {
     decimals: DECIMALS,
     catalog: Object.entries(CATALOG).map(([item, c]) => ({ item, price: c.price, kind: c.kind })),
   };
-  if (pilot) out.owned = await owned(env, pilot.pk);
+  if (pilot) out.owned = await owned(env, pilot);
   return out;
 }
 
@@ -70,7 +73,7 @@ export async function newOrder(env, now, pilot, b) {
   const c = CATALOG[item];
   if (!c) throw new HttpError(400, "no_item", `Nothing called '${item}' for sale`);
   if (c.kind === "attempt" && !pilot.gm) throw new HttpError(403, "not_seeker", "Extra ranked runs need a Seeker Genesis Token");
-  if (c.kind !== "attempt" && (await owned(env, pilot.pk)).includes(item)) throw new HttpError(409, "owned", "Already yours");
+  if (c.kind !== "attempt" && (await owned(env, pilot)).includes(item)) throw new HttpError(409, "owned", "Already yours");
   const id = [...crypto.getRandomValues(new Uint8Array(12))].map((x) => x.toString(16).padStart(2, "0")).join("");
   const amount = (BigInt(c.price) * 10n ** BigInt(DECIMALS)).toString();
   await env.DB.prepare(
@@ -131,14 +134,17 @@ export async function verifyOrder(env, now, pilot, b) {
 }
 
 async function granted(env, now, pilot, item) {
-  const out = { item, granted: true, owned: await owned(env, pilot.pk) };
+  const out = { item, granted: true, owned: await owned(env, pilot) };
   if (pilot.gm) out.ranked_left = await rankedLeft(env, pilot.gm, dayOf(now));
   return out;
 }
 
-async function owned(env, pk) {
-  const { results } = await env.DB.prepare("SELECT item FROM owned WHERE pubkey = ? ORDER BY granted_at").bind(pk).all();
-  return results.map((r) => r.item);
+/** What [pilot] owns: bought cosmetics, and the Genesis livery with a Genesis Token. */
+async function owned(env, pilot) {
+  const { results } = await env.DB.prepare("SELECT item FROM owned WHERE pubkey = ? ORDER BY granted_at").bind(pilot.pk).all();
+  const out = results.map((r) => r.item);
+  if (pilot.gm) out.unshift(GENESIS_LIVERY);
+  return out;
 }
 
 // --- Reading a transaction ---
