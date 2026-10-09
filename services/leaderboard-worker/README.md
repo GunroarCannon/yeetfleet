@@ -61,3 +61,23 @@ change, run the `d1 execute` line again (every statement is idempotent).
   refuses Cloudflare.
 - Daily runs: a ticket, one finish, the time window and the score's range.
   The run isn't replayed on the server.
+
+## Mainnet (real SKR)
+
+Not deployed yet. The game's "Android dApp Store" export preset (feature tag
+`mainnet`) uses mainnet SKR and `Chain.WORKER_URL_MAINNET`, which stays ""
+(offline, unranked) until this is done:
+
+```sh
+npx wrangler@4 d1 create yeetfleet-mainnet          # id into [env.mainnet] in wrangler.toml
+npx wrangler@4 d1 execute yeetfleet-mainnet --remote --file schema.sql --env mainnet
+node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))" | npx wrangler@4 secret put SESSION_SECRET --env mainnet
+npx wrangler@4 secret put MAINNET_RPC_URL --env mainnet   # a Helius mainnet URL: required, see below
+npx wrangler@4 deploy --env mainnet                 # prints https://yeetfleet-mainnet.<you>.workers.dev
+```
+
+Then set `Chain.WORKER_URL_MAINNET` to the printed URL. Without
+`MAINNET_RPC_URL` nothing works on mainnet: Solana's public RPC refuses
+Cloudflare, so neither the Genesis check nor the payment check can run.
+Before taking real SKR, consider moving the treasury to a hardware wallet or
+a Squads multisig (`docs/solana-wallets.md`).

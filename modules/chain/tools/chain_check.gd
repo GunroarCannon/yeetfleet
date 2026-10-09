@@ -83,7 +83,7 @@ func _run() -> void:
 	r = await Chain.connect_wallet()
 	_expect(not r.ok and r.code == "no_wallet", "no wallet installed -> no_wallet")
 
-	_expect(Chain.TREASURY.length() >= 32 and not Chain.USE_MAINNET, "treasury set, mainnet off")
+	_expect(Chain.TREASURY.length() >= 32 and not Chain.use_mainnet, "treasury set; mainnet only in a mainnet export")
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHECK_SAVE))
 	print("chain_check: %s" % ("PASS" if _fails == 0 else "FAIL (%d)" % _fails))

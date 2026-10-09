@@ -25,3 +25,24 @@ binding = "DB"
 database_name = "yeetfleet"
 # From `npx wrangler@4 d1 create yeetfleet`:
 database_id = "506b1acc-325b-484b-bb56-a83f4b45581d"
+
+# --- Mainnet (real SKR). Not deployed yet; steps in README.md ("Mainnet"). ---
+# npx wrangler@4 deploy --env mainnet
+[env.mainnet]
+name = "yeetfleet-mainnet"
+
+[env.mainnet.vars]
+CLUSTER = "mainnet-beta"
+SIWS_DOMAIN = "gunroarcannon.github.io"
+SIWS_STATEMENT = "Sign in to Yeetfleet as this pilot"
+GENESIS_GROUP = "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te"
+SKR_MINT = "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3"
+TREASURY = "2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1"
+# No test Seekers on mainnet (the Worker ignores this there anyway).
+DEV_GENESIS_OWNERS = ""
+
+[[env.mainnet.d1_databases]]
+binding = "DB"
+database_name = "yeetfleet-mainnet"
+# From `npx wrangler@4 d1 create yeetfleet-mainnet`:
+database_id = "REPLACE_WITH_MAINNET_D1_DATABASE_ID"

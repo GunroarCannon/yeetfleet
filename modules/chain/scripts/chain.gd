@@ -16,7 +16,12 @@
 ## again ([method retry_pending]), so SKR taken is never lost. Tips go
 ## straight from wallet to wallet.
 ##
-## With [constant WORKER_URL] set, [method sign_in] also opens a session with
+## The cluster is a build choice: an export with the [code]mainnet[/code]
+## feature tag (the "Android dApp Store" preset) uses mainnet SKR and
+## [constant WORKER_URL_MAINNET]; every other build is devnet, dSKR and
+## [constant WORKER_URL].
+##
+## With a Worker URL set, [method sign_in] also opens a session with
 ## the leaderboard Worker (a server nonce in the signed message, checked
 ## there, plus the Seeker Genesis Token check). Without it, or when the Worker
 ## can't be reached, the wallet still signs in and play is unranked.
@@ -25,8 +30,8 @@
 class_name Chain
 extends RefCounted
 
-## Off until the mainnet launch (G6): devnet and the test mint dSKR until then.
-const USE_MAINNET := false
+## The export feature tag that makes a mainnet build.
+const MAINNET_FEATURE := "mainnet"
 const APP_NAME := "Yeetfleet"
 ## The dApp identity wallets show, and the domain Sign-In-With-Solana names.
 ## It must serve /.well-known/assetlinks.json for the APK, or Phantom asks for
@@ -68,9 +73,11 @@ const COSMETICS := {
 ## The tip buttons on a leaderboard row, in whole SKR.
 const TIP_PRESETS: Array[int] = [10, 50, 100]
 const SAVE_PATH := "user://chain.cfg"
-## The leaderboard Worker (services/leaderboard-worker), deployed on
-## Cloudflare; "" keeps everything offline and unranked.
+## The leaderboard Worker (services/leaderboard-worker) on Cloudflare: the
+## devnet one, and the mainnet one ("" until it's deployed, which keeps a
+## mainnet build offline and unranked rather than pointed at devnet).
 const WORKER_URL := "https://yeetfleet.yeetfleet-leaderboard-worker.workers.dev"
+const WORKER_URL_MAINNET := ""
 
 const Api := preload("res://modules/chain/scripts/chain_api.gd")
 
@@ -93,9 +100,11 @@ class Notifier:
 static var notifier := Notifier.new()
 ## Where the session is kept between launches (the checks point it elsewhere).
 static var save_path := SAVE_PATH
-## The Worker's address ([constant WORKER_URL]; the checks point it at a
+## Mainnet (real SKR) in a build exported with [constant MAINNET_FEATURE].
+static var use_mainnet := OS.has_feature(MAINNET_FEATURE)
+## The Worker's address for this build's cluster (the checks point it at a
 ## local one).
-static var api_url := WORKER_URL
+static var api_url := WORKER_URL_MAINNET if use_mainnet else WORKER_URL
 static var _client: SolanaMobileClient = null
 ## The leaderboard session: {token, expires (unix s), seeker, name}; empty
 ## when there is none.
@@ -123,12 +132,12 @@ static func reset(force_mock := false) -> void:
 
 
 static func cluster() -> String:
-	return "mainnet-beta" if USE_MAINNET else "devnet"
+	return "mainnet-beta" if use_mainnet else "devnet"
 
 
 ## The SKR mint for [method cluster].
 static func skr_mint() -> String:
-	return SKR_MAINNET if USE_MAINNET else SKR_DEVNET
+	return SKR_MAINNET if use_mainnet else SKR_DEVNET
 
 
 static func pubkey() -> String:
@@ -234,7 +243,7 @@ static func say(code: String) -> String:
 		"not_submitted":
 			return "The wallet couldn't send it. Enough SKR and SOL?"
 		"cluster_not_supported":
-			return "Switch the wallet to devnet (Testnet mode)" if not USE_MAINNET else "Switch the wallet to mainnet"
+			return "Switch the wallet to devnet (Testnet mode)" if not use_mainnet else "Switch the wallet to mainnet"
 		"rpc_error":
 			return "No connection to Solana"
 	return "Wallet trouble (%s)" % code

@@ -1,0 +1,27 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.critbox.solanamobile.demo",
+      "sha256_cert_fingerprints": [
+        "4B:08:DB:CC:74:60:1D:D6:86:DE:AD:7E:31:21:6C:AB:F6:B1:D8:65:D6:5E:C0:9A:8E:30:88:43:9D:FD:E5:21"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.critbox.yeetfleet",
+      "sha256_cert_fingerprints": [
+        "4B:08:DB:CC:74:60:1D:D6:86:DE:AD:7E:31:21:6C:AB:F6:B1:D8:65:D6:5E:C0:9A:8E:30:88:43:9D:FD:E5:21",
+        "49:45:C4:6E:23:0E:C3:52:49:E6:00:DE:F8:9F:B0:70:67:E8:37:17:B0:B7:A8:79:AA:16:7B:3D:24:56:E6:D7"
+      ]
+    }
+  }
+]
