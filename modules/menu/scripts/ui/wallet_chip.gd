@@ -74,10 +74,10 @@ func _ask_name() -> void:
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", int(22 * u))
+	var plate := SlabCard.wrap(box, GraffitiStyle.LIME, u)
 	# Up the screen, clear of a phone's keyboard.
-	box.position = Vector2(vp.x * 0.5 - 260.0 * u, vp.y * 0.1)
-	box.size = Vector2(520.0 * u, 0)
-	_rename.add_child(box)
+	plate.position = Vector2(vp.x * 0.5 - 260.0 * u - plate.frame_width() * 0.5, vp.y * 0.08)
+	_rename.add_child(plate)
 	var head := GraffitiStyle.label("YOUR NAME", int(64 * u), GraffitiStyle.SUN, int(12 * u))
 	head.add_theme_font_override("font", GraffitiStyle.title_font())
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

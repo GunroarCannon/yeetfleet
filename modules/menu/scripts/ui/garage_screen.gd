@@ -68,6 +68,20 @@ func _ready() -> void:
 	_explain.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_explain.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_explain.modulate.a = 0.0
+	# A plate behind the line: words alone over the 3D pad were hard to read.
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.17, 0.13, 0.25, 0.94)
+	plate.border_color = GraffitiStyle.INK
+	plate.set_border_width_all(3)
+	plate.border_width_top = 6
+	plate.set_corner_radius_all(6)
+	plate.content_margin_left = 16
+	plate.content_margin_right = 16
+	plate.content_margin_top = 10
+	plate.content_margin_bottom = 10
+	plate.shadow_color = Color(0, 0, 0, 0.5)
+	plate.shadow_offset = Vector2(5, 6)
+	_explain.add_theme_stylebox_override("normal", plate)
 	add_child(_explain)
 	Campaign.notifier.changed.connect(func() -> void:
 		if visible:
@@ -170,7 +184,7 @@ func _explain_stat(stat: String) -> void:
 	# Measured from the font: a wrapping Label's own minimum size lags a
 	# frame behind its new width.
 	var font := _explain.get_theme_font("font")
-	var h := font.get_multiline_string_size(_explain.text, HORIZONTAL_ALIGNMENT_CENTER, w, fs).y + 12.0
+	var h := font.get_multiline_string_size(_explain.text, HORIZONTAL_ALIGNMENT_CENTER, w - 32.0, fs).y + 28.0
 	_explain.size = Vector2(w, h)
 	if portrait():
 		_explain.position = Vector2(20.0, _panel.position.y - h - 10.0)

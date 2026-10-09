@@ -200,7 +200,8 @@ func _open_card() -> void:
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", int(18 * u))
-	center.add_child(box)
+	var plate := SlabCard.wrap(box, GraffitiStyle.SUN, u)
+	center.add_child(plate)
 	var head := GraffitiStyle.label("PILOT ID", int(64 * u), GraffitiStyle.SUN, int(12 * u))
 	head.add_theme_font_override("font", GraffitiStyle.title_font())
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -209,7 +210,7 @@ func _open_card() -> void:
 	var key := GraffitiStyle.label(Chain.pubkey(), int(24 * u), GraffitiStyle.LIME, int(5 * u))
 	key.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	key.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	key.custom_minimum_size.x = minf(560.0 * u, vp.x * 0.86)
+	key.custom_minimum_size.x = minf(560.0 * u, vp.x * 0.86 - plate.frame_width())
 	box.add_child(key)
 	var facts := "%s SKR   ·   %s" % ["?" if _skr < 0.0 else _amount(_skr), Chain.cluster().to_upper()]
 	if _tag() != "":
@@ -236,9 +237,9 @@ func _open_card() -> void:
 	close.pressed.connect(close_card)
 	box.add_child(close)
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	box.pivot_offset = box.get_combined_minimum_size() * 0.5
-	box.scale = Vector2(0.7, 0.7)
-	box.create_tween().tween_property(box, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	plate.pivot_offset = plate.get_combined_minimum_size() * 0.5
+	plate.scale = Vector2(0.7, 0.7)
+	plate.create_tween().tween_property(plate, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	close.grab_focus.call_deferred()
 	refresh_balance()
 

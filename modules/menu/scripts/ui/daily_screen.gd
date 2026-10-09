@@ -317,17 +317,9 @@ func _open_tip(key: String, name: String) -> void:
 	close_tip()
 	var vp := viewport_size()
 	var u := unit()
-	var card := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("2b2140")
-	sb.set_border_width_all(4)
-	sb.border_color = GraffitiStyle.INK
-	sb.set_corner_radius_all(10)
-	sb.set_content_margin_all(18.0 * u)
-	card.add_theme_stylebox_override("panel", sb)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", int(12 * u))
-	card.add_child(box)
+	var card := SlabCard.wrap(box, GraffitiStyle.CYAN, u)
 	var fs := int(clampf(28.0 * u, 18.0, 34.0))
 	var head := _cell("TIP %s" % name, GraffitiStyle.SUN, fs)
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

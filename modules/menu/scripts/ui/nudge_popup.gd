@@ -7,6 +7,7 @@ extends Control
 signal chosen
 
 var _button: SlabButton
+var _plate: SlabCard
 var _head: Label
 var _text: Label
 var _hand := Control.new()
@@ -36,7 +37,8 @@ func _build(title: String, body: String, action: String, point: bool) -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 16)
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_child(box)
+	_plate = SlabCard.wrap(box, GraffitiStyle.SUN)
+	center.add_child(_plate)
 	_head = GraffitiStyle.label(title, 44, GraffitiStyle.SUN)
 	_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -69,10 +71,10 @@ func _ready() -> void:
 
 
 ## Size the card to the screen: a portrait phone is narrower than the card's
-## natural 560 px of text.
+## natural 560 px of text plus its frame.
 func _fit() -> void:
 	var vp := get_viewport_rect().size
-	var w := minf(560.0, vp.x - 48.0)
+	var w := minf(560.0, vp.x - 32.0 - _plate.frame_width())
 	var k := clampf(w / 560.0, 0.6, 1.0)
 	_head.custom_minimum_size.x = w
 	_head.add_theme_font_size_override("font_size", int(44 * k))
