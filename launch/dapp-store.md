@@ -82,5 +82,5 @@ Sources: [submit a new app](https://docs.solanamobile.com/dapp-publishing/submit
 - [x] Android APK using Mobile Wallet Adapter (release-signed)
 - [ ] Public repo (push `solana-integrated` and the plugin repo)
 - [ ] Demo video: shot list in `docs/demo-script.md`, recorded on the phone
-- [ ] Pitch deck
+- [x] Pitch deck: https://claude.ai/artifact/WNeRy32jTnQMgqxb7uio4m (private until shared from its Share menu)
 - [ ] dApp Store listing (the steps above)
