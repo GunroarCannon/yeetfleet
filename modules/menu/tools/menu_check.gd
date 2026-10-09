@@ -19,6 +19,8 @@ var _failures: Array[String] = []
 
 func _initialize() -> void:
 	Campaign.save_path = SCRATCH
+	# Offline: the checks never reach the deployed leaderboard.
+	Chain.api_url = ""
 	Campaign.reset()
 	_run.call_deferred()
 

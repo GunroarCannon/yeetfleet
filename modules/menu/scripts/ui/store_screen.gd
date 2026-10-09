@@ -1,13 +1,21 @@
-## StoreScreen: coin packs for real money ([CoinStore]) — a row of four
-## crates under the top bar (a 2×2 grid in portrait), each a big word, a
-## heap of coins and its price on a slab. A buy shows a toast and rolls the
-## wallet; a failed one says so in a word or two; a cancel says nothing.
+## StoreScreen: two tabs under the top bar. COINS: coin packs for real money
+## ([CoinStore]), a row of four crates (a 2×2 grid in portrait), each a big
+## word, a heap of coins and its price on a slab. SKR: what SKR buys
+## ([SkrShopPanel]: an extra ranked run, liveries, sling trails). A buy shows
+## a toast; a failed one says so in a word or two; a cancel says nothing.
+##
+## The SKR tab opens first wherever coin packs aren't on sale (the Seeker /
+## dApp Store build has no Google Play Billing).
 class_name StoreScreen
 extends MenuScreen
 
 var _bar: TopBar
 var _cards: Array[_PackCard] = []
 var _toast: Control = null
+var _tabs: Array[SlabButton] = []
+var _skr: SkrShopPanel
+## "coins" or "skr".
+var _tab := ""
 
 
 func _ready() -> void:
@@ -21,6 +29,16 @@ func _ready() -> void:
 		c.buy.connect(_on_buy)
 		add_child(c)
 		_cards.append(c)
+	for t in ["coins", "skr"]:
+		var b := SlabButton.new()
+		b.text = t.to_upper()
+		b.skew = 9.0
+		b.pressed.connect(show_tab.bind(t))
+		add_child(b)
+		_tabs.append(b)
+	_skr = SkrShopPanel.new()
+	_skr.toast.connect(_show_toast)
+	add_child(_skr)
 	CoinStore.notifier.purchased.connect(_on_purchased)
 	CoinStore.notifier.failed.connect(_on_failed)
 	CoinStore.notifier.prices_changed.connect(_refresh)
@@ -31,12 +49,31 @@ func opened() -> void:
 	CoinStore.start()
 	layout()
 	_refresh()
+	show_tab("coins" if CoinStore.purchases_enabled() else "skr")
+
+
+## Show the "coins" or "skr" tab.
+func show_tab(which: String) -> void:
+	var fresh := which != _tab or not visible
+	_tab = which
+	for i in _tabs.size():
+		var on: bool = ["coins", "skr"][i] == which
+		_tabs[i].fill = GraffitiStyle.SUN if on else GraffitiStyle.VIOLET
+		_tabs[i].text_color = GraffitiStyle.INK if on else Color.WHITE
+	for c in _cards:
+		c.visible = which == "coins"
+	_skr.visible = which == "skr"
+	if which == "skr":
+		_skr.opened()
+		_skr.focus.call_deferred()
+		return
 	for i in _cards.size():
 		var c := _cards[i]
-		c.modulate.a = 0.0
-		var tw := create_tween()
-		tw.tween_interval(0.06 + i * 0.07)
-		tw.tween_property(c, "modulate:a", 1.0, 0.18)
+		if fresh:
+			c.modulate.a = 0.0
+			var tw := create_tween()
+			tw.tween_interval(0.06 + i * 0.07)
+			tw.tween_property(c, "modulate:a", 1.0, 0.18)
 	if not _cards.is_empty():
 		_cards[0].focus.call_deferred()
 
@@ -48,8 +85,19 @@ func layout() -> void:
 	var bar_h := bar_height()
 	_bar.position = Vector2(0, 8)
 	_bar.size = Vector2(vp.x, bar_h)
-	var top := bar_h + 26.0
+	var u := unit()
+	var tab_y := bar_h + 18.0
+	for i in _tabs.size():
+		var b := _tabs[i]
+		b.custom_minimum_size = Vector2(160, 48) * u
+		b.size = b.custom_minimum_size
+		b.font_size = int(24 * u)
+		b.position = Vector2(18 + i * (b.size.x + 12.0 * u), tab_y)
+	var top := tab_y + 48.0 * u + 20.0
 	var area := Rect2(Vector2(18, top), Vector2(vp.x - 36, vp.y - top - 20))
+	_skr.position = area.position
+	_skr.size = area.size
+	_skr.place(u, portrait())
 	var cols := 2 if portrait() else 4
 	var rows := ceili(_cards.size() / float(cols))
 	var gap := 18.0 * unit()

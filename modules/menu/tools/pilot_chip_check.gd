@@ -19,6 +19,7 @@ func _run() -> void:
 	await process_frame
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHECK_SAVE))
 	Chain.save_path = CHECK_SAVE
+	Chain.api_url = ""
 	Chain.reset(true)
 	_tune()
 

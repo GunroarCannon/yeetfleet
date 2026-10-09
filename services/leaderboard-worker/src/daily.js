@@ -115,7 +115,7 @@ export async function board(env, now, pilot, params) {
 
 // --- Counting ---
 
-async function rankedLeft(env, gm, day) {
+export async function rankedLeft(env, gm, day) {
   const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM runs WHERE genesis_mint = ? AND day = ? AND ranked = 1")
     .bind(gm, day).first("n");
   const extra = (await env.DB.prepare("SELECT count FROM extra_attempts WHERE genesis_mint = ? AND day = ?")

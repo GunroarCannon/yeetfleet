@@ -330,9 +330,14 @@ static func flight_ship(id: String, loaner := false) -> Dictionary:
 	var mults := {}
 	for stat in ShipCatalog.STATS:
 		mults[stat] = ShipCatalog.stat_mult(id, stat, 0 if loaner else pips(id, stat)) * ShipCatalog.class_mult(id, stat)
+	# SKR cosmetics the pilot wears ([Chain]): a livery over every hull, and
+	# a sling trail.
+	var paint := Chain.livery()
+	var trail := Chain.trail_color()
 	return {
 		"id": id, "name": String(s.get("name", id)),
-		"preset": String(s.get("preset", "")), "paint": String(s.get("paint", "")),
+		"preset": String(s.get("preset", "")), "paint": paint if paint != "" else String(s.get("paint", "")),
+		"trail": trail.to_html(false) if trail.a > 0.0 else "",
 		"mults": mults,
 	}
 
@@ -534,6 +539,22 @@ static func launch_tutorial() -> void:
 	Session.pending_ship = flight_ship(current_ship())
 	Session.space_setup = {}
 	Session.level_result = {}
+
+
+## Sandbox opens once the pilot has won campaign level [constant
+## SANDBOX_AFTER] (or any later one): free flight is a reward, and a newcomer
+## gets the guided levels first.
+const SANDBOX_AFTER := 3
+
+
+static func sandbox_open() -> bool:
+	if not tutorial_done():
+		return false
+	ensure_loaded()
+	for key: String in (_data["levels"] as Dictionary):
+		if record(key)["wins"] > 0 and int(LevelGen.from_key(key).get("number", 0)) >= SANDBOX_AFTER:
+			return true
+	return false
 
 
 ## Sandbox: free flight in the player's own ship, no level.

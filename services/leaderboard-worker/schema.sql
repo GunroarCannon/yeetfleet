@@ -47,3 +47,27 @@ CREATE TABLE IF NOT EXISTS extra_attempts (
   count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (genesis_mint, day)
 );
+
+-- SKR orders (G4). An order names the item and the amount (base units); it
+-- is paid by a transfer to the treasury carrying the memo "yeetfleet:<id>",
+-- checked on chain. paid_sig is unique: one payment buys one thing.
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,
+  pubkey TEXT NOT NULL,
+  genesis_mint TEXT,
+  item TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  paid_sig TEXT UNIQUE,
+  paid_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS orders_pilot ON orders (pubkey, created_at);
+
+-- Cosmetics bought with SKR, kept for good.
+CREATE TABLE IF NOT EXISTS owned (
+  pubkey TEXT NOT NULL,
+  item TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  granted_at INTEGER NOT NULL,
+  PRIMARY KEY (pubkey, item)
+);

@@ -21,6 +21,7 @@ var _wallet: WalletChip
 ## Debug mode only (Settings > DEBUG): the jump-anywhere chip.
 var _debug: DebugJump = null
 var _campaign: SlabButton
+var _sandbox: SlabButton
 ## Bottom-left: coin packs for real money.
 var _store: SlabButton
 ## Right of STORE: the pilot's Solana wallet.
@@ -38,11 +39,9 @@ func _ready() -> void:
 	_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_column)
 	_campaign = _panel("CAMPAIGN", GraffitiStyle.HOT, _on_campaign)
-	var sandbox := _panel("SANDBOX", GraffitiStyle.CYAN, _on_sandbox)
-	# A brand-new pilot starts in flight school; the rest unlocks after it.
-	if not Campaign.tutorial_done():
-		sandbox.disabled = true
-		sandbox.tooltip_text = "Finish flight school first."
+	# Free flight is a reward: it opens after campaign level 3 (_lock_sandbox).
+	_sandbox = _panel("SANDBOX", GraffitiStyle.CYAN, _on_sandbox)
+	_lock_sandbox()
 	# The day's one level, the same for everyone: after flight school too.
 	var daily := _panel("DAILY SORTIE", GraffitiStyle.LIME, func() -> void: menu.go(MenuRoot.Screen.DAILY))
 	if not Campaign.tutorial_done():
@@ -89,7 +88,16 @@ func _panel(label: String, col: Color, on_press: Callable) -> SlabButton:
 	return b
 
 
+## SANDBOX waits for campaign level 3, and says so.
+func _lock_sandbox() -> void:
+	var open := Campaign.sandbox_open()
+	_sandbox.disabled = not open
+	_sandbox.sub = "" if open else "BEAT LEVEL %d" % Campaign.SANDBOX_AFTER
+	_sandbox.tooltip_text = "" if open else "Win campaign level %d to fly free." % Campaign.SANDBOX_AFTER
+
+
 func opened() -> void:
+	_lock_sandbox()
 	layout()
 	# Entrance: title drops in, panels slide in from the right one by one.
 	_title.pivot_offset = _title.size * 0.5

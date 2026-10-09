@@ -49,6 +49,10 @@ for everything extra.
 | Worker code | Plain JS, no dependencies; tests on Node's built-in runner + `node:sqlite` as a D1 stand-in; a local dev server for the game's headless checks | Nothing to install or keep updated; the same SQL runs in tests and in D1 | if the Worker outgrows one file per concern |
 | Daily scoring | A win scores 1000 + 1000 × `StarRating.score` (1000–2000); a loss 25 per wreck, under 900. The Worker checks the ranges, a ticket (one finish, 45 min), the claimed time against the ticket's open time, and ≥ 3 s for a win | Reuses the campaign's own grading; any win beats any loss | if cheating shows up: input-log replay |
 | Daily level | `LevelGen.level` on a route drawn from the date's seed, depth 2 (levels 13–18), keyed `daily:<day>` so the campaign never counts it | No download, same level on every phone, a fair mid-game difficulty | — |
+| SKR cosmetics (2026-10-09) | Three liveries (`skr_solana`, `skr_seeker`, `skr_gold` in `data/factions.json`, worn over every hull) and three sling trails (the player's trail colour in flight). **Decals dropped**: the game has no decal system, and liveries + trails cover the cosmetic slot | if a decal system lands |
+| Payment check details | The Worker reads the transaction's token balances (treasury's gain in the configured mint ≥ the order), a memo `yeetfleet:<order>`, no error, and a signature used once (`orders.paid_sig` UNIQUE). Who paid isn't checked (gifting is fine). A payment the Worker hasn't seen yet stays on the phone and is asked about again; SKR taken is never lost | — |
+| Devnet RPC for the Worker | Keyless fallbacks (OnFinality, rpcpool, Tatum, then Solana's own), since `api.devnet.solana.com` refuses Cloudflare (HTTP 403) | when a Helius devnet key is set (`DEVNET_RPC_URL`) |
+| Sandbox unlock (2026-10-09) | After flight school **and** a win on campaign level 3 or later (`Campaign.sandbox_open`) | — |
 | Haptics | `Input.vibrate_handheld` (VIBRATE permission) behind a Juice dial, default on | No plugin needed; matches the dial convention | — |
 
 ## Module and API shape (planned)
@@ -81,16 +85,16 @@ the existing shop. The new screens get shots at both phone sizes.
 |---|---|
 | G0 ✅ | Addon copied in; `Chain` façade over the addon client and its mock; `chain_check` passes headless (2026-10-08, 23 checks) |
 | G1 ✅ (code) | Pilot ID chip: connect / SIWS / disconnect / reconnect on the phone with Phantom; Seeker detection. Done headless (`pilot_chip_check`) and in shots; the on-phone pass is batched with G4's |
-| G2 ✅ (code) | Worker deployed: SIWS verify, Genesis Token check, session token; D1 schema; Worker tests. Written and tested (14 Node tests, `chain_server_check` end to end); **deploy waits on the user's Cloudflare login** (`services/leaderboard-worker/README.md`) |
+| G2 ✅ | Worker deployed: SIWS verify, Genesis Token check, session token; D1 schema; Worker tests. Live on devnet at `https://yeetfleet.yeetfleet-leaderboard-worker.workers.dev` (2026-10-09), `Chain.WORKER_URL` points there. **The mainnet Genesis check needs `MAINNET_RPC_URL`** (a Helius key): Solana's public RPC refuses Cloudflare, so until then only `DEV_GENESIS_OWNERS` count as Seekers |
 | G3 ✅ (code) | Daily Sortie: ranked ticket → run → submit → leaderboard; streaks; `daily_check` passes. `DailySortie` (modules/daily), the DAILY screen, Worker `/daily` `/run/start` `/run/finish` `/leaderboard` (25 Node tests). Ranked runs are one-shot (no RETRY). Live on the deployed Worker once G2 is deployed |
-| G4 | SKR: order → transfer with memo → verify → grant (extra attempt, cosmetic); tip a pilot. Devnet dSKR end to end |
+| G4 ✅ (code) | SKR: order → transfer with memo → verify → grant (extra attempt, cosmetic); tip a pilot. Worker `/shop` `/order/new` `/order/verify` (34 Node tests); a **real dSKR payment on devnet verified by the live Worker** (`scripts/devnet_pay_check.mjs`); the STORE's SKR tab, +1 RANKED RUN and TIP on the daily board (`skr_shop_check`). The Phantom pass on the phone is still to do |
 | G5 | Hardware polish: "arm the sling" signature, haptics, gyro dial; menu shots at phone sizes |
 | G6 | Ship: release keystore, mainnet config, dApp Store publish (publisher + app NFTs, needs SOL), demo video, deck |
 
 ## Open questions for the user
 
 - The hackathon deadline (it sets how much of G4's stretch and G5 fits).
-- G2 needs a Cloudflare account login (`npx wrangler@4 login`) and,
-  ideally, a Helius key for the mainnet Genesis check.
+- A Helius key (free tier) for the mainnet Genesis check:
+  `npx wrangler@4 secret put MAINNET_RPC_URL` in `services/leaderboard-worker`.
 - Answered 2026-10-08: app name **Yeetfleet**; SKR prices and burn share as
   above (revisit freely); treasury created.

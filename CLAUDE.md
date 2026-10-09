@@ -73,6 +73,12 @@ code must do the same. Decision records live in `docs/decisions/`.
   - Daily Sortie (level stable per date, its own key, points, offline practice, then one ranked
     run per Genesis pilot sent and ranked against the local Worker, the open board, the screen):
     `... --script modules/daily/tools/daily_check.gd` (the Worker part needs `node`).
+  - SKR shop UI (the STORE's SKR tab, buying and wearing a livery, +1 RANKED RUN, a tip
+    from the board) against the local Worker: `... --script modules/menu/tools/skr_shop_check.gd`.
+    A real dSKR payment on devnet, verified by the Worker's code (spends 50 dSKR, needs the
+    Solana CLI): `cd services/leaderboard-worker && node scripts/devnet_pay_check.mjs`
+    (`WORKER_URL=<live url>` checks the deployed one). Headless checks pin `Chain.api_url = ""`
+    or a local dev server: they never touch the live Worker.
   - shipped game defaults (layering, no headless bake, reset):
     `... --script modules/core/tools/game_defaults_check.gd`.
   - UI at any window size (portrait phones, small landscape): `modules/flight/tools/portrait_ui_shot.gd

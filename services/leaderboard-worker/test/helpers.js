@@ -7,6 +7,8 @@ import { FakeD1 } from "./d1.js";
 
 export const DOMAIN = "gunroarcannon.github.io";
 export const GROUP = "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te";
+export const MINT = "J1zbnVh8XFzjiBgXayMMxbg46zxZ5DVm1e8YWhxue6bK";
+export const TREASURY = "2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1";
 
 /** A Worker env with a clock the test moves and an RPC the test scripts. */
 export function makeEnv(extra = {}) {
@@ -16,6 +18,8 @@ export function makeEnv(extra = {}) {
     SIWS_STATEMENT: "Sign in to Yeetfleet as this pilot",
     GENESIS_GROUP: GROUP,
     CLUSTER: "devnet",
+    SKR_MINT: MINT,
+    TREASURY,
     SESSION_SECRET: "test-secret",
     MAINNET_RPC_URL: "https://rpc.test",
     clock: Date.parse("2026-10-08T12:00:00Z"),
@@ -104,4 +108,33 @@ export function holdGenesis(env, owner, { mint = "GenesisMint1111111111111111111
     })),
   }));
   return mint;
+}
+
+/**
+ * A landed SKR transfer as getTransaction (jsonParsed) shows it: [from] pays
+ * [amount] base units of [mint] to [to], with [memo] (in an inner
+ * instruction when [innerMemo]). [err] makes it a failed one.
+ */
+export function transferTx({ from, to = TREASURY, amount, mint = MINT, memo, err = null, innerMemo = false }) {
+  const memoIx = { program: "spl-memo", programId: "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", parsed: memo };
+  const bal = (owner, amt, idx) => ({ accountIndex: idx, mint, owner, uiTokenAmount: { amount: String(amt), decimals: 6 } });
+  return {
+    slot: 1234,
+    meta: {
+      err,
+      preTokenBalances: [bal(from, 1000000000n, 1), bal(to, 5000000n, 2)],
+      postTokenBalances: [bal(from, 1000000000n - BigInt(amount), 1), bal(to, 5000000n + BigInt(amount), 2)],
+      innerInstructions: innerMemo ? [{ index: 0, instructions: [memoIx] }] : [],
+    },
+    transaction: {
+      signatures: ["sig"],
+      message: {
+        accountKeys: [{ pubkey: from, signer: true }],
+        instructions: [
+          { program: "spl-token", programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", parsed: { type: "transferChecked" } },
+          ...(innerMemo ? [] : [memoIx]),
+        ],
+      },
+    },
+  };
 }

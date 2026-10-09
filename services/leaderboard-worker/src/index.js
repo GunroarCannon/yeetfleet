@@ -16,9 +16,14 @@
 //   POST /run/finish   {run_id, won, points, time, kills} → {board, points, best, rank, streak}
 //   GET  /leaderboard?day=&board=ranked|open (token optional) → {rows, me}
 //
+// SKR (G4, src/shop.js):
+//   GET  /shop         (token optional)  → {cluster, mint, treasury, decimals, catalog, owned?}
+//   POST /order/new    {item}            → {order_id, amount, memo, to, mint, …}
+//   POST /order/verify {order_id, signature} → {item, granted, owned, ranked_left?}
+//
 // Environment: DB (D1), SIWS_DOMAIN, SIWS_STATEMENT, GENESIS_GROUP, CLUSTER,
-// secrets SESSION_SECRET and MAINNET_RPC_URL (a Helius URL; the public RPC
-// otherwise). DEV_GENESIS_OWNERS (comma-separated keys counted as Seekers)
+// SKR_MINT, TREASURY, secrets SESSION_SECRET and MAINNET_RPC_URL (a Helius
+// URL; the public RPC otherwise), optional DEVNET_RPC_URL. DEV_GENESIS_OWNERS (comma-separated keys counted as Seekers)
 // is honoured off mainnet only, for testing ranked play on devnet.
 
 import { isPublicKey } from "./base58.js";
@@ -27,6 +32,7 @@ import * as session from "./session.js";
 import { genesisMint } from "./genesis.js";
 import { HttpError } from "./errors.js";
 import * as daily from "./daily.js";
+import * as shop from "./shop.js";
 
 export { HttpError };
 
@@ -69,6 +75,12 @@ async function route(request, env) {
       return json(await daily.finish(env, now(env), await requirePilot(request, env), await body(request)));
     case "GET /leaderboard":
       return json(await daily.board(env, now(env), await optionalPilot(request, env), url.searchParams));
+    case "GET /shop":
+      return json(await shop.shop(env, await optionalPilot(request, env)));
+    case "POST /order/new":
+      return json(await shop.newOrder(env, now(env), await requirePilot(request, env), await body(request)));
+    case "POST /order/verify":
+      return json(await shop.verifyOrder(env, now(env), await requirePilot(request, env), await body(request)));
   }
   throw new HttpError(404, "not_found", `No route ${key}`);
 }

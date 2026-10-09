@@ -64,7 +64,51 @@ func _run() -> void:
 	_tune()
 	_expect(Chain.has_session() and Chain.has_genesis(), "the session survives a relaunch")
 
+	# --- SKR (G4): order → payment with the order's memo → checked → granted ---
+	var shop := await Chain.refresh_shop()
+	_expect(shop.ok and shop.mint == Chain.skr_mint() and shop.treasury == Chain.TREASURY and Chain.owned().is_empty(),
+			"the Worker's shop names our mint and treasury; nothing owned yet")
+	var paid: Array = []
+	Chain.notifier.paid.connect(func(what: String, _sig: String) -> void: paid.append(what))
+	r = await Chain.buy("paint:skr_gold")
+	var spec := _last_transfer()
+	_expect(r.ok and Chain.owns("paint:skr_gold") and paid == ["paint:skr_gold"], "a livery is paid, checked and granted")
+	_expect(spec.get("to") == Chain.TREASURY and spec.get("mint") == Chain.SKR_DEVNET and spec.get("amount") == "50000000",
+			"50 dSKR to the treasury, in base units")
+	_expect(String(spec.get("memo", "")).begins_with("yeetfleet:") and String(spec.get("memo", "")).length() > 20,
+			"the memo is the Worker's order")
+	_expect(Chain.equip("paint:skr_gold") and Chain.livery() == "skr_gold", "worn: the livery every hull flies in")
+	_expect(String(Campaign.flight_ship("kestrel").get("paint", "")) == "skr_gold",
+			"a flight's ship wears it")
+	_expect(not Chain.equip("trail:mint"), "only owned things can be worn")
+	r = await Chain.buy("paint:skr_gold")
+	_expect(not r.ok and r.code == "owned", "a cosmetic is bought once")
+
+	Chain.client().mock.next_confirm_error = "tx_failed"
+	r = await Chain.buy("trail:violet")
+	_expect(not r.ok and r.code == "tx_failed" and not Chain.owns("trail:violet") and Chain.pending_count() == 0,
+			"a failed payment grants nothing and leaves nothing waiting")
+
+	var day: Dictionary = await Chain.server_get("/daily")
+	var before := int(day.me.ranked_left)
+	r = await Chain.buy("extra_attempt")
+	_expect(r.ok and int(r.ranked_left) == before + 1, "an extra ranked run is granted for today")
+
+	# Paid while the Worker was away: kept, and granted on the next try.
+	var o: Dictionary = await Chain.server_post("/order/new", {"item": "trail:gold"})
+	Chain._pending.append({"order_id": o.order_id, "signature": "MockSigPending", "item": "trail:gold"})
+	Chain._save()
+	Chain.reset(true)
+	_tune()
+	_expect(Chain.pending_count() == 1, "a payment not yet granted survives a relaunch")
+	_expect(await Chain.retry_pending() == 1 and Chain.owns("trail:gold") and Chain.pending_count() == 0,
+			"and is granted when the Worker sees it")
+	_expect(Chain.equip("trail:gold") and Chain.trail_color().is_equal_approx(Color("ffc21a")), "a trail is worn in its colour")
+	_expect(String(Campaign.flight_ship("kestrel").get("trail", "")) != "",
+			"a flight's ship carries the trail")
+
 	await Chain.disconnect_wallet()
+	_expect(Chain.livery() == "" and Chain.owned().is_empty(), "signed out, nothing is worn")
 	_expect(not Chain.has_session(), "disconnect ends the session")
 	Chain.reset(true)
 	_tune()
@@ -92,6 +136,15 @@ func _finish() -> void:
 func _tune() -> void:
 	Chain.client().mock.delay_sec = 0.05
 	Chain.client().rpc_url = "http://127.0.0.1:9"
+
+
+## The transfer spec of the mock's latest request.
+func _last_transfer() -> Dictionary:
+	var seen: Array = Chain.client().mock.requests_seen
+	for i in range(seen.size() - 1, -1, -1):
+		if seen[i][0] == "transfer":
+			return seen[i][1].get("transfer", {})
+	return {}
 
 
 func _on_failed(what: String, code: String) -> void:

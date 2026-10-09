@@ -5,7 +5,9 @@
 ## points and, once the Worker has it, the rank.
 ##
 ## RANKED RUN says why when it can't go: sign in (the Pilot ID), a Seeker
-## Genesis Token needed, or today's run used.
+## Genesis Token needed, or today's run used; then +1 RANKED RUN buys another
+## with SKR ([method Chain.buy]). Each other pilot's row on the board has a
+## TIP slab: SKR straight from this wallet to theirs ([method Chain.tip]).
 class_name DailyScreen
 extends MenuScreen
 
@@ -26,6 +28,8 @@ var _board: VBoxContainer
 var _tabs: Array[SlabButton] = []
 var _rows: VBoxContainer
 var _me: Label
+var _extra: SlabButton
+var _tip_card: Control = null
 var _which := "ranked"
 ## Bumped by every board fetch; an older answer arriving late is dropped.
 var _fetch := 0
@@ -55,6 +59,10 @@ func _ready() -> void:
 	_practice = _button("PRACTICE", GraffitiStyle.CYAN, _on_practice)
 	_practice.text_color = GraffitiStyle.INK
 	row.add_child(_practice)
+	_extra = _button("+1 RANKED RUN", GraffitiStyle.LIME, _on_extra)
+	_extra.text_color = GraffitiStyle.INK
+	_extra.sub = "%d SKR" % Chain.price_of("extra_attempt")
+	_card.add_child(_extra)
 	_note = _line(_card, GraffitiStyle.ORANGE)
 	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
@@ -110,8 +118,11 @@ func layout() -> void:
 	for b in [_ranked, _practice]:
 		b.custom_minimum_size = Vector2(bw, clampf(vp.y * 0.11, 56.0, 92.0 * u))
 		b.font_size = int(fs * 1.1)
+	_extra.custom_minimum_size = Vector2(bw, clampf(vp.y * 0.08, 48.0, 70.0 * u))
+	_extra.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_extra.font_size = int(fs)
 	if port:
-		_board.position = Vector2(18, top + _card.get_combined_minimum_size().y + 20.0)
+		_board.position = Vector2(18, top + _card.get_combined_minimum_size().y + 40.0 * u)
 		_board.size = Vector2(vp.x - 36.0, 0)
 	else:
 		_board.position = Vector2(vp.x * 0.5 + 36.0, top)
@@ -120,6 +131,20 @@ func layout() -> void:
 		b.custom_minimum_size = Vector2(150, 48) * u
 		b.font_size = int(fs)
 	_board.set_meta("fs", fs)
+	queue_redraw()
+
+
+## Dark cards behind the day and the board: the text sits on the menu's
+## live fight, which is too busy to read words off.
+func _draw() -> void:
+	if _card == null:
+		return
+	var bg := GraffitiStyle.INK
+	bg.a = 0.82
+	var pad := Vector2(14, 12) * unit()
+	for c: Control in [_card, _board]:
+		var r := Rect2(c.position - pad, Vector2(c.size.x, c.get_combined_minimum_size().y) + pad * 2.0)
+		GraffitiStyle.draw_slab(self, r, bg, 12.0, 4.0, Vector2(7, 8))
 
 
 # --- The day ---
@@ -140,6 +165,9 @@ func _refresh() -> void:
 	_ranked.disabled = why != ""
 	_ranked.sub = why if why != "" else "%d LEFT TODAY" % DailySortie.ranked_left()
 	_practice.sub = "AS MANY AS YOU LIKE"
+	_extra.visible = why == "USED TODAY"
+	_extra.disabled = Chain.busy()
+	queue_redraw.call_deferred()
 
 
 ## Why RANKED RUN can't go, in a few words, or "".
@@ -180,6 +208,21 @@ func _go(ranked: bool) -> void:
 	if not r.ok:
 		GameAudio.ui(&"locked")
 		_note.text = _say(String(r.code))
+
+
+func _on_extra() -> void:
+	_note.text = "Waiting for the wallet…"
+	_extra.disabled = true
+	var r := await Chain.buy("extra_attempt")
+	if r.ok:
+		GameAudio.ui(&"coin")
+		_note.text = "+1 ranked run. Good luck!"
+		await DailySortie.refresh()
+	else:
+		_note.text = Chain.say(String(r.code))
+		if _note.text != "":
+			GameAudio.ui(&"locked")
+	_refresh()
 
 
 func _say(code: String) -> String:
@@ -229,6 +272,8 @@ func _show_board(which: String) -> void:
 
 
 func _fill_rows(rows: Array, empty: String) -> void:
+	# The board's card follows its rows (freed ones go at the frame's end).
+	queue_redraw.call_deferred()
 	for c in _rows.get_children():
 		c.queue_free()
 	_me.text = ""
@@ -240,14 +285,97 @@ func _fill_rows(rows: Array, empty: String) -> void:
 		var name := String(row.get("name", ""))
 		if name == "":
 			name = Chain.short_key(String(row.get("pubkey", "")))
-		var mine := String(row.get("pubkey", "")) == Chain.pubkey()
+		var key := String(row.get("pubkey", ""))
+		var mine := key == Chain.pubkey()
 		var line := "%2d.  %s%s" % [int(row.rank), name, "  ◆" if row.get("seeker", false) else ""]
 		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 10)
 		var l := _cell(line, GraffitiStyle.LIME if mine else Color.WHITE, fs)
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		h.add_child(l)
 		h.add_child(_cell(str(int(row.points)), GraffitiStyle.SUN, fs))
+		if not mine and key != "":
+			var tip := _button("TIP", GraffitiStyle.CYAN, _open_tip.bind(key, name))
+			tip.text_color = GraffitiStyle.INK
+			tip.skew = 6.0
+			tip.font_size = int(fs * 0.8)
+			tip.custom_minimum_size = Vector2(fs * 3.4, fs * 1.6)
+			h.add_child(tip)
 		_rows.add_child(h)
+
+
+# --- Tips ---
+
+## A small card over the board: TIP <name>, the SKR presets, CANCEL.
+func _open_tip(key: String, name: String) -> void:
+	close_tip()
+	var vp := viewport_size()
+	var u := unit()
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("2b2140")
+	sb.set_border_width_all(4)
+	sb.border_color = GraffitiStyle.INK
+	sb.set_corner_radius_all(10)
+	sb.set_content_margin_all(18.0 * u)
+	card.add_theme_stylebox_override("panel", sb)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", int(12 * u))
+	card.add_child(box)
+	var fs := int(clampf(28.0 * u, 18.0, 34.0))
+	var head := _cell("TIP %s" % name, GraffitiStyle.SUN, fs)
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(head)
+	var sub := _cell("SKR, wallet to wallet", GraffitiStyle.DIM, int(fs * 0.7))
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(sub)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", int(10 * u))
+	box.add_child(row)
+	var first: SlabButton = null
+	for amount in Chain.TIP_PRESETS:
+		var b := _button("%d" % amount, GraffitiStyle.LIME, _send_tip.bind(key, name, amount))
+		b.text_color = GraffitiStyle.INK
+		b.sub = "SKR"
+		b.font_size = fs
+		b.custom_minimum_size = Vector2(110, 70) * u
+		row.add_child(b)
+		if first == null:
+			first = b
+	var cancel := _button("CANCEL", GraffitiStyle.VIOLET, close_tip)
+	cancel.font_size = int(fs * 0.8)
+	cancel.custom_minimum_size = Vector2(0, 50) * u
+	box.add_child(cancel)
+	add_child(card)
+	_tip_card = card
+	card.reset_size()
+	card.position = (vp - card.get_combined_minimum_size()) * 0.5
+	first.grab_focus.call_deferred()
+
+
+## Close the tip card; false when none was open (Back goes on).
+func close_tip() -> bool:
+	if _tip_card == null or not is_instance_valid(_tip_card):
+		_tip_card = null
+		return false
+	_tip_card.queue_free()
+	_tip_card = null
+	return true
+
+
+func back() -> bool:
+	return close_tip()
+
+
+func _send_tip(key: String, name: String, amount: int) -> void:
+	close_tip()
+	_note.text = "Waiting for the wallet…"
+	var r := await Chain.tip(key, amount)
+	if r.ok:
+		GameAudio.ui(&"coin")
+		_note.text = "Tipped %s %d SKR!" % [name, amount]
+	else:
+		_note.text = Chain.say(String(r.code))
 
 
 # --- Bits ---

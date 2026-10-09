@@ -196,7 +196,7 @@ func _draw() -> void:
 		if not centered:
 			x0 = h * 1.05 + (size.x - h * 1.05) * 0.5
 	var tc := text_color if not disabled else Color(0.75, 0.72, 0.8)
-	if rich and sub == "":
+	if rich and sub == "" and tc.get_luminance() >= 0.3:
 		# A stacked shadow in the slab's darker tone under the ink shadow.
 		var f := GraffitiStyle.head_font()
 		var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x

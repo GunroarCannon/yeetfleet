@@ -8,6 +8,10 @@ CLUSTER = "devnet"
 SIWS_DOMAIN = "gunroarcannon.github.io"
 SIWS_STATEMENT = "Sign in to Yeetfleet as this pilot"
 GENESIS_GROUP = "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te"
+# What SKR payments are checked against. Devnet: dSKR, our test mint. On
+# mainnet: SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3 and CLUSTER = "mainnet-beta".
+SKR_MINT = "J1zbnVh8XFzjiBgXayMMxbg46zxZ5DVm1e8YWhxue6bK"
+TREASURY = "2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1"
 # Devnet only: these wallets count as Seekers so ranked play can be tested
 # without a Seeker (the emulator's Phantom test pilot). Ignored on mainnet.
 DEV_GENESIS_OWNERS = "GE7bEoKnVEkPQ7U7sQswPqq2AbZfNWEgMxcQiYjyHLdK"
@@ -20,4 +24,4 @@ DEV_GENESIS_OWNERS = "GE7bEoKnVEkPQ7U7sQswPqq2AbZfNWEgMxcQiYjyHLdK"
 binding = "DB"
 database_name = "yeetfleet"
 # From `npx wrangler@4 d1 create yeetfleet`:
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "506b1acc-325b-484b-bb56-a83f4b45581d"

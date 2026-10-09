@@ -446,6 +446,7 @@ func _ready() -> void:
 	# survive in static state, but the trail nodes themselves were rebuilt.
 	set_trail_player(Session.trail_player)
 	set_trail_ships(Session.trail_ships)
+	_wear_bought_trail()
 	# Persisted drift field and planet pointer: rebuild the overlays the menus
 	# left on. The drift flag also gates the streak update each frame.
 	_mote_field_on = Session.drift_field
@@ -4246,6 +4247,8 @@ func drift_field_on() -> bool:
 ## state below — the trail nodes themselves — still belongs to this scene.
 ## The player's own trail node, lazily created.
 var _player_trail: Trail3D = null
+## The pilot wears a sling trail bought with SKR: it stays on.
+var _trail_bought := false
 ## One trail per live AI ship: AiShip -> Trail3D. Kept in sync with the spawner's
 ## roster each frame (created on spawn, freed on despawn).
 var _ship_trails: Dictionary = {}
@@ -4446,8 +4449,23 @@ func _make_aggro_marker() -> Sprite3D:
 	return marker
 
 
+## A sling trail bought with SKR ([member Session.pending_ship]'s "trail"):
+## the player's trail on, in that colour, whatever the display setting says.
+func _wear_bought_trail() -> void:
+	var html := String(Session.pending_ship.get("trail", ""))
+	if html == "":
+		return
+	_trail_bought = true
+	if _player_trail == null:
+		_player_trail = Trail3D.new()
+		_player_trail.name = "PlayerTrail"
+		add_child(_player_trail)
+	_player_trail.set_color(Color(html))
+	_player_trail.set_enabled(true)
+
+
 func _update_player_trail() -> void:
-	if Session.trail_player and _player_trail != null:
+	if (Session.trail_player or _trail_bought) and _player_trail != null:
 		# The player's own trail follows the player's ship only while it is the
 		# ship being flown; while piloting an AI ship the player's hull is parked.
 		if controlled_ai == null and model != null:

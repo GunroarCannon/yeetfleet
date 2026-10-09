@@ -57,11 +57,18 @@ func _ready() -> void:
 		row.stat = ShipCatalog.STATS[i]
 		row.label = ShipCatalog.STAT_NAMES[i]
 		row.buy.connect(_on_buy_pip)
+		row.explain.connect(_explain_stat)
 		_panel.add_child(row)
 		_rows.append(row)
 	_action = SlabButton.new()
 	_action.pressed.connect(_on_action)
 	_panel.add_child(_action)
+	_explain = GraffitiStyle.label("", 22, Color.WHITE, 5)
+	_explain.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_explain.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_explain.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_explain.modulate.a = 0.0
+	add_child(_explain)
 	Campaign.notifier.changed.connect(func() -> void:
 		if visible:
 			_refresh())
@@ -111,28 +118,70 @@ func opened() -> void:
 			"GOT IT", false))
 
 
-## Two first-visit cards: what coins buy here, then what each stat does and how
-## to win faster.
-func _intro_cards() -> void:
-	var first := NudgePopup.make("SPEND YOUR COINS",
-		"Coins earned in levels buy upgrades for your ship, one pip at a time, on the right. "
-		+ "The SHOP tab sells whole new ships. Every pip you buy makes the next level easier.",
-		"NEXT", false)
-	first.chosen.connect(func() -> void:
-		add_child(NudgePopup.make("WHAT THE BARS DO",
-			"HULL: how much damage you take before you wreck.
-"
-			+ "GUNS: how hard your shots hit.
-"
-			+ "SPEED: how fast you fly and how far a launch carries.
-"
-			+ "YEET: how hard you hit when you ram or fling into something.
+## What each upgrade track does, in one line (the first-visit cards, and a
+## tap on a track's name).
+const STAT_WORDS := {
+	"hull": "How much damage you take before you wreck.",
+	"guns": "How hard your shots hit.",
+	"speed": "How fast you fly, and how far a launch carries.",
+	"yeet": "How hard you hit when you ram or fling into something.",
+}
 
-"
-			+ "Win faster and cleaner for more stars: wreck enemies quickly, keep your hull high, "
-			+ "and protect whatever you are guarding. Three stars pay the most.",
-			"GOT IT", false)))
-	add_child(first)
+## The explain line over the panel (a tap on a track's name), and its fade.
+var _explain: Label
+var _explain_tw: Tween
+
+
+## First-visit cards, one idea each: what coins buy, then each bar, then
+## stars. Short on purpose: a phone screen of text is skipped, not read.
+func _intro_cards() -> void:
+	var cards: Array = [["SPEND YOUR COINS", "Coins from levels buy upgrades for your ship. The SHOP tab sells new ships."]]
+	for i in ShipCatalog.STATS.size():
+		var stat := String(ShipCatalog.STATS[i])
+		cards.append(["%s  %d/%d" % [ShipCatalog.STAT_NAMES[i], i + 1, ShipCatalog.STATS.size()], String(STAT_WORDS.get(stat, ""))])
+	cards.append(["MORE STARS, MORE COINS", "Win fast, keep your hull high and guard what you're given."])
+	_show_card(cards, 0)
+
+
+func _show_card(cards: Array, i: int) -> void:
+	var last := i == cards.size() - 1
+	var card := NudgePopup.make(String(cards[i][0]), String(cards[i][1]), "GOT IT" if last else "NEXT", false)
+	if not last:
+		card.chosen.connect(_show_card.bind(cards, i + 1))
+	add_child(card)
+
+
+## One line on what [param stat] does, just over the panel, fading after a
+## few seconds.
+func _explain_stat(stat: String) -> void:
+	var i := ShipCatalog.STATS.find(stat)
+	if i < 0:
+		return
+	GameAudio.ui(&"tap")
+	_explain.text = "%s: %s" % [ShipCatalog.STAT_NAMES[i], String(STAT_WORDS.get(stat, ""))]
+	# Over the pad, clear of the panel: under the ship in landscape, just
+	# above the panel in portrait.
+	var vp := viewport_size()
+	var fs := int(clampf(24.0 * unit(), 16.0, 30.0))
+	_explain.add_theme_font_size_override("font_size", fs)
+	var w := vp.x - 40.0 if portrait() else _panel.position.x - 60.0
+	_explain.custom_minimum_size = Vector2(w, 0)
+	_explain.size = Vector2(w, 0)
+	# Measured from the font: a wrapping Label's own minimum size lags a
+	# frame behind its new width.
+	var font := _explain.get_theme_font("font")
+	var h := font.get_multiline_string_size(_explain.text, HORIZONTAL_ALIGNMENT_CENTER, w, fs).y + 12.0
+	_explain.size = Vector2(w, h)
+	if portrait():
+		_explain.position = Vector2(20.0, _panel.position.y - h - 10.0)
+	else:
+		_explain.position = Vector2(30.0, vp.y - h - 24.0)
+	_explain.modulate.a = 1.0
+	if _explain_tw != null:
+		_explain_tw.kill()
+	_explain_tw = create_tween()
+	_explain_tw.tween_interval(3.5)
+	_explain_tw.tween_property(_explain, "modulate:a", 0.0, 0.4)
 
 
 func back() -> bool:
@@ -424,7 +473,8 @@ class _Panel:
 		else:
 			status = "LOCKED"
 			col = GraffitiStyle.HOT
-		GraffitiStyle.draw_text(self, status, Vector2(size.x - 70, size.y * 0.1), cfs, col, 4)
+		# On the type chip's row, clear of the rank stamp beside the name.
+		GraffitiStyle.draw_text(self, status, Vector2(size.x - 70, chip.get_center().y), cfs, col, 4)
 
 	# --- Rank stamp ---
 	## The rank step shown now, the one it replaces, and how far the swap is
@@ -493,6 +543,8 @@ class _Panel:
 class _StatRow:
 	extends Control
 	signal buy(stat: String)
+	## The track's name was tapped: say what it does.
+	signal explain(stat: String)
 	var stat := ""
 	var label := ""
 	var ship_id := ""
@@ -508,6 +560,13 @@ class _StatRow:
 		_plus.centered = false
 		_plus.pressed.connect(func() -> void: buy.emit(stat))
 		add_child(_plus)
+
+	func _gui_input(event: InputEvent) -> void:
+		# A tap on the name (left of the bar) explains the track.
+		var mb := event as InputEventMouseButton
+		if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and mb.position.x < size.x * 0.28:
+			explain.emit(stat)
+			accept_event()
 
 	func place() -> void:
 		if _plus == null:
@@ -543,6 +602,9 @@ class _StatRow:
 		var fs := int(h * 0.34)
 		draw_string_outline(f, Vector2(4, h * 0.62), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, GraffitiStyle.INK)
 		draw_string(f, Vector2(4, h * 0.62), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		# A small "?": the name explains itself when tapped.
+		var lw := f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(f, Vector2(8 + lw, h * 0.62), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs * 0.7), GraffitiStyle.CYAN)
 		var base := ShipCatalog.rating(ship_id, stat)
 		var pips := Campaign.pips(ship_id, stat)
 		var x := size.x * 0.28

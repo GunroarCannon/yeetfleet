@@ -140,12 +140,16 @@ static func draw_halftone(ci: CanvasItem, r: Rect2, color: Color, step := 9.0, f
 		y += step
 
 
-## Text centred on [param at] in the heading face with an ink outline.
+## Text centred on [param at] in the heading face with an ink outline. Dark
+## text (ink on a bright slab) gets a thin light rim instead: an ink outline
+## round ink letters fills their gaps and the word turns into a blob.
 static func draw_text(ci: CanvasItem, text: String, at: Vector2, size: int, color: Color, outline := 6, font: Font = null) -> void:
 	var f := font if font != null else head_font()
 	var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	var base := at + Vector2(-w * 0.5, f.get_ascent(size) * 0.5 - f.get_descent(size) * 0.35)
-	if outline > 0:
+	if outline > 0 and color.get_luminance() < 0.3:
+		ci.draw_string_outline(f, base, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, maxi(3, outline / 2), Color(1, 1, 1, 0.8))
+	elif outline > 0:
 		ci.draw_string_outline(f, base + Vector2(2, 3), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, outline, SHADOW)
 		ci.draw_string_outline(f, base, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, outline, INK)
 	ci.draw_string(f, base, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)

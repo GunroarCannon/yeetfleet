@@ -9,9 +9,12 @@
 ## Every wallet call is awaitable and returns the client's Dictionary:
 ## [code]{ok = true, …}[/code] or [code]{ok = false, code, message}[/code]. The
 ## same outcome also goes out on [member notifier], for UI that only listens.
-## SKR payments go to [constant TREASURY] and only count once they are
-## confirmed on chain; the leaderboard Worker re-checks each one before it
-## grants anything (milestone G4).
+## SKR purchases ([method buy]) go through the leaderboard Worker: it opens
+## an order (the price and a memo), the wallet pays [constant TREASURY] with
+## that memo, and the Worker finds the payment on chain before it grants
+## anything. A payment the Worker hasn't seen yet is kept and asked about
+## again ([method retry_pending]), so SKR taken is never lost. Tips go
+## straight from wallet to wallet.
 ##
 ## With [constant WORKER_URL] set, [method sign_in] also opens a session with
 ## the leaderboard Worker (a server nonce in the signed message, checked
@@ -41,20 +44,31 @@ const SKR_DECIMALS := 6
 ## Where SKR payments go: the same address on devnet and mainnet
 ## (docs/solana-wallets.md).
 const TREASURY := "2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1"
-## What things cost, in whole SKR (about $0.02 each on 2026-10-08; the
-## reasoning is in docs/decisions/2026-10-06-solana-seeker-plan.md).
+## What things cost, in whole SKR, by kind (about $0.02 each on 2026-10-08;
+## the reasoning is in docs/decisions/2026-10-06-solana-seeker-plan.md). The
+## Worker's order sets the real amount; these are for showing.
 const PRICES := {
 	"extra_attempt": 25,
 	"paint": 50,
-	"decal": 75,
 	"trail": 100,
+}
+## What SKR buys besides extra ranked runs: liveries (factions in
+## data/factions.json, worn over every hull) and sling trails (the player's
+## trail colour in flight). Kept for good once bought.
+const COSMETICS := {
+	"paint:skr_solana": {"name": "SOLANA", "colors": ["9945ff", "14f195", "0e0e16"]},
+	"paint:skr_seeker": {"name": "SEEKER", "colors": ["f2f2ea", "1df2c4", "1b1d24"]},
+	"paint:skr_gold": {"name": "24 KARAT", "colors": ["ffc21a", "fff1b0", "3a2a08"]},
+	"trail:mint": {"name": "MINT TRAIL", "colors": ["14f195"]},
+	"trail:violet": {"name": "VIOLET TRAIL", "colors": ["b061ff"]},
+	"trail:gold": {"name": "GOLD TRAIL", "colors": ["ffc21a"]},
 }
 ## The tip buttons on a leaderboard row, in whole SKR.
 const TIP_PRESETS: Array[int] = [10, 50, 100]
 const SAVE_PATH := "user://chain.cfg"
-## The leaderboard Worker (services/leaderboard-worker); "" until it is
-## deployed, which keeps everything offline and unranked.
-const WORKER_URL := ""
+## The leaderboard Worker (services/leaderboard-worker), deployed on
+## Cloudflare; "" keeps everything offline and unranked.
+const WORKER_URL := "https://yeetfleet.yeetfleet-leaderboard-worker.workers.dev"
 
 const Api := preload("res://modules/chain/scripts/chain_api.gd")
 
@@ -84,6 +98,13 @@ static var _client: SolanaMobileClient = null
 ## The leaderboard session: {token, expires (unix s), seeker, name}; empty
 ## when there is none.
 static var _session := {}
+## Payments made but not yet granted by the Worker: [{order_id, signature,
+## item}]. Kept on disk until the Worker answers either way.
+static var _pending: Array = []
+## Cosmetics the Worker says this pilot owns (COSMETICS keys), and the one
+## worn of each kind: {"paint": key or "", "trail": key or ""}.
+static var _owned: Array = []
+static var _equipped := {"paint": "", "trail": ""}
 
 
 ## The addon client, made on first use with the saved session restored.
@@ -196,6 +217,16 @@ static func say(code: String) -> String:
 			return "The leaderboard refused the sign-in. Try again"
 		"tx_failed":
 			return "The payment failed on chain. Nothing was taken"
+		"no_session":
+			return "Sign in first (the Pilot ID)"
+		"not_seeker":
+			return "Extra ranked runs are for Seeker Genesis pilots"
+		"owned":
+			return "Already yours"
+		"paid_pending":
+			return "Paid. It's added as soon as the leaderboard sees the payment"
+		"wrong_memo", "underpaid", "order_paid", "sig_used":
+			return "That payment didn't match the order. Nothing granted"
 		"not_confirmed":
 			return "Not confirmed yet. Check again soon"
 		"not_submitted":
@@ -251,6 +282,9 @@ static func sign_in(pilot_name := "") -> Dictionary:
 	_save()
 	notifier.session_changed.emit()
 	r["pilot"] = v.pilot
+	# Anything paid for while the server was away, and what this pilot owns.
+	await retry_pending()
+	await refresh_shop()
 	return r
 
 
@@ -269,23 +303,113 @@ static func skr_balance() -> float:
 
 # --- SKR ---
 
-## Pay [constant PRICES] of [param item] to the treasury. [param memo] carries
-## the Worker's order nonce once there is one (G4).
-static func buy(item: String, memo := "") -> Dictionary:
-	if not PRICES.has(item):
-		return _fail(item, "invalid_request", "No price for '%s'" % item)
-	return await pay_skr(item, int(PRICES[item]), memo)
+## Buy [param item] (a [constant COSMETICS] key, or "extra_attempt") with
+## SKR: an order from the Worker, the payment with its memo, then the Worker
+## checks it on chain and grants it. Needs the leaderboard session. Returns
+## [code]{ok, item, signature, owned, ranked_left?}[/code]. On "paid_pending"
+## the SKR went out but the Worker hasn't seen it yet: it is kept and asked
+## about again ([method retry_pending]).
+static func buy(item: String) -> Dictionary:
+	if not has_session():
+		return _fail(item, "no_session", "Sign in first")
+	var o := await server_post("/order/new", {"item": item})
+	if not o.ok:
+		return _fail(item, String(o.code), String(o.get("message", "")))
+	if String(o.mint) != skr_mint() or String(o.to) != TREASURY:
+		return _fail(item, "cluster_mismatch", "The leaderboard wants another token or treasury")
+	var r := await _send(item, String(o.to), int(o.price), String(o.memo))
+	if not r.ok:
+		return r
+	var pay := {"order_id": String(o.order_id), "signature": String(r.signatures[0]), "item": item}
+	_pending.append(pay)
+	_save()
+	return await _verify(pay)
 
 
-## Pay [param amount] whole SKR to the treasury, for [param what].
-static func pay_skr(what: String, amount: int, memo := "") -> Dictionary:
-	return await _send(what, TREASURY, amount, memo if memo != "" else "yeetfleet:" + what)
+## Ask the Worker again about payments it hadn't seen. Returns how many were
+## granted.
+static func retry_pending() -> int:
+	var n := 0
+	for pay: Dictionary in _pending.duplicate():
+		if has_session() and (await _verify(pay, 1)).ok:
+			n += 1
+	return n
+
+
+## Payments waiting for the Worker.
+static func pending_count() -> int:
+	return _pending.size()
+
+
+## The Worker's catalog and, signed in, what this pilot owns: [code]{ok,
+## catalog, owned?}[/code].
+static func refresh_shop() -> Dictionary:
+	var r := await server_get("/shop")
+	if r.ok and r.has("owned"):
+		_owned = r.owned
+		for kind: String in _equipped:
+			if _equipped[kind] != "" and not _owned.has(_equipped[kind]):
+				_equipped[kind] = ""
+		_save()
+	return r
+
+
+static func owns(item: String) -> bool:
+	return _owned.has(item)
+
+
+## Owned cosmetics, as [constant COSMETICS] keys.
+static func owned() -> Array:
+	return _owned.duplicate()
+
+
+## What [param item] costs, in whole SKR (its kind's price).
+static func price_of(item: String) -> int:
+	return int(PRICES.get(item.get_slice(":", 0), 0))
+
+
+## Wear [param item], an owned cosmetic (one of each kind at a time).
+static func equip(item: String) -> bool:
+	var kind := item.get_slice(":", 0)
+	if not _equipped.has(kind) or not owns(item):
+		return false
+	_equipped[kind] = item
+	_save()
+	return true
+
+
+## Take off the worn cosmetic of [param kind].
+static func unequip(kind: String) -> void:
+	if _equipped.has(kind):
+		_equipped[kind] = ""
+		_save()
+
+
+## The worn cosmetic of [param kind] ("paint" or "trail"): its key, or "".
+static func equipped(kind: String) -> String:
+	client()
+	return String(_equipped.get(kind, ""))
+
+
+## The worn livery's faction id ("skr_gold"), or "".
+static func livery() -> String:
+	var k := equipped("paint")
+	return k.get_slice(":", 1) if k != "" else ""
+
+
+## The worn sling trail's colour, or transparent without one.
+static func trail_color() -> Color:
+	var k := equipped("trail")
+	return Color(String(COSMETICS[k]["colors"][0])) if COSMETICS.has(k) else Color(0, 0, 0, 0)
 
 
 ## Send [param amount] whole SKR straight to another pilot: no custody, the
 ## treasury never touches it.
 static func tip(to: String, amount: int) -> Dictionary:
-	return await _send("tip", to, amount, "yeetfleet:tip")
+	var r := await _send("tip", to, amount, "yeetfleet:tip")
+	if r.ok:
+		notifier.paid.emit("tip", String(r.signatures[0]))
+	return r
 
 
 # --- Plumbing ---
@@ -295,6 +419,9 @@ static func _make(force_mock: bool) -> void:
 		_client.account_changed.disconnect(_on_account_changed)
 	_client = SolanaMobileClient.new(APP_NAME, IDENTITY_URI, ICON, cluster(), force_mock)
 	_session = {}
+	_pending = []
+	_owned = []
+	_equipped = {"paint": "", "trail": ""}
 	_load()
 	_client.account_changed.connect(_on_account_changed)
 
@@ -312,8 +439,36 @@ static func _send(what: String, to: String, amount: int, memo: String) -> Dictio
 	if not c.ok:
 		return _fail(what, c.code, c.message)
 	r["slot"] = c.slot
-	notifier.paid.emit(what, sig)
 	return r
+
+
+## Codes from /order/verify that mean "not seen yet, ask again later".
+const _NOT_YET := ["tx_not_found", "rpc_error", "offline", "server_error", "no_session"]
+
+
+## Ask the Worker to grant [param pay], up to [param tries] times while it
+## hasn't seen the payment (2 s apart). Emits paid once granted. A payment it
+## still hasn't seen stays pending; one it refuses is dropped.
+static func _verify(pay: Dictionary, tries := 8) -> Dictionary:
+	var item := String(pay["item"])
+	var v := {}
+	for i in tries:
+		v = await server_post("/order/verify", {"order_id": pay["order_id"], "signature": pay["signature"]})
+		if v.ok or not v.code in _NOT_YET:
+			break
+		if i < tries - 1:
+			await (Engine.get_main_loop() as SceneTree).create_timer(2.0, true, false, true).timeout
+	if not v.ok and v.code in _NOT_YET:
+		return _fail(item, "paid_pending", "Paid; not granted yet")
+	_pending.erase(pay)
+	if not v.ok:
+		_save()
+		return _fail(item, String(v.code), String(v.get("message", "")))
+	_owned = v.get("owned", _owned)
+	_save()
+	notifier.paid.emit(item, String(pay["signature"]))
+	v["signature"] = pay["signature"]
+	return v
 
 
 ## Save the session after any wallet call (its token may have changed) and
@@ -342,6 +497,9 @@ static func _on_account_changed(key: String) -> void:
 
 static func _save() -> void:
 	var cfg := ConfigFile.new()
+	cfg.set_value("shop", "pending", _pending)
+	cfg.set_value("shop", "owned", _owned)
+	cfg.set_value("shop", "equipped", _equipped)
 	cfg.set_value("wallet", "auth_token", _client.auth_token)
 	cfg.set_value("wallet", "public_key", _client.public_key)
 	if not _session.is_empty():
@@ -356,6 +514,11 @@ static func _load() -> void:
 		return
 	_client.auth_token = String(cfg.get_value("wallet", "auth_token", ""))
 	_client.public_key = String(cfg.get_value("wallet", "public_key", ""))
+	_pending = cfg.get_value("shop", "pending", [])
+	_owned = cfg.get_value("shop", "owned", [])
+	var eq: Variant = cfg.get_value("shop", "equipped", {})
+	if eq is Dictionary:
+		_equipped.merge(eq, true)
 	var saved: Variant = cfg.get_value("server", "session", {})
 	_session = saved if saved is Dictionary and saved.get("pubkey", "") == _client.public_key else {}
 
@@ -363,6 +526,9 @@ static func _load() -> void:
 static func _end_session() -> void:
 	var had := not _session.is_empty()
 	_session = {}
+	# What's owned is the signed-in pilot's; payments waiting stay (SKR spent).
+	_owned = []
+	_equipped = {"paint": "", "trail": ""}
 	if _client != null:
 		_save()
 	if had:

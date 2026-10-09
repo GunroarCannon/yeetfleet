@@ -7,6 +7,8 @@ extends Control
 signal chosen
 
 var _button: SlabButton
+var _head: Label
+var _text: Label
 var _hand := Control.new()
 var _t := 0.0
 
@@ -35,14 +37,15 @@ func _build(title: String, body: String, action: String, point: bool) -> void:
 	box.add_theme_constant_override("separation", 16)
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(box)
-	var head := GraffitiStyle.label(title, 44, GraffitiStyle.SUN)
-	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(head)
-	var text := GraffitiStyle.label(body, 26)
-	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	text.custom_minimum_size.x = 560.0
-	box.add_child(text)
+	_head = GraffitiStyle.label(title, 44, GraffitiStyle.SUN)
+	_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_head)
+	_text = GraffitiStyle.label(body, 26)
+	_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_text.visible = body != ""
+	box.add_child(_text)
 	_button = SlabButton.new()
 	_button.text = action
 	_button.fill = GraffitiStyle.LIME
@@ -58,6 +61,24 @@ func _build(title: String, body: String, action: String, point: bool) -> void:
 		_hand.draw.connect(_draw_hand)
 		add_child(_hand)
 	_button.grab_focus.call_deferred()
+
+
+func _ready() -> void:
+	_fit()
+	get_viewport().size_changed.connect(_fit)
+
+
+## Size the card to the screen: a portrait phone is narrower than the card's
+## natural 560 px of text.
+func _fit() -> void:
+	var vp := get_viewport_rect().size
+	var w := minf(560.0, vp.x - 48.0)
+	var k := clampf(w / 560.0, 0.6, 1.0)
+	_head.custom_minimum_size.x = w
+	_head.add_theme_font_size_override("font_size", int(44 * k))
+	_text.custom_minimum_size.x = w
+	_text.add_theme_font_size_override("font_size", int(26 * maxf(k, 0.75)))
+	_button.custom_minimum_size = Vector2(minf(300.0, w), 84.0 * maxf(k, 0.8))
 
 
 func _process(delta: float) -> void:

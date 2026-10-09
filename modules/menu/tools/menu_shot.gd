@@ -5,19 +5,24 @@
 ##         --script modules/menu/tools/menu_shot.gd -- <out_dir> [w h [canvas_w canvas_h]]
 ##
 ## Writes home.png, quit.png, map.png, report.png, pick.png (the garage as a
-## level's ship picker), fork.png, garage.png, shop.png, settings.png,
+## level's ship picker), fork.png, garage.png, shop.png, shop_explain.png (a
+## track's name tapped), garage_intro.png (the first-visit card), settings.png,
 ## settings_sub.png (the PERFORMANCE submenu), store.png, rename.png, loading.png, and
-## pilot.png / pilot_card.png (the Pilot ID signed in on the mock wallet) and daily.png
-## (the Daily Sortie, offline: its board says so). Runs on a scratch campaign save with a little progress
+## pilot.png / pilot_card.png (the Pilot ID signed in on the mock wallet), daily.png
+## (the Daily Sortie) and store_skr.png (the STORE's SKR tab, a livery worn).
+## With `node` on PATH the leaderboard is the Worker's dev server on
+## localhost (the mock wallet a Genesis pilot); without it, offline. Runs on a scratch campaign save with a little progress
 ## (first sector won, some coins) so the map and garage have something to
 ## show; the player's own save is never touched.
 extends SceneTree
 
 const SCRATCH := "user://menu_shot_scratch.json"
 const CHAIN_SCRATCH := "user://menu_shot_chain.cfg"
+const PORT := 8795
 
 var _out := "res://debug_shots/menu"
 var _menu: MenuRoot
+var _pid := -1
 
 
 func _initialize() -> void:
@@ -37,9 +42,13 @@ func _initialize() -> void:
 	Campaign.save_path = SCRATCH
 	Campaign.reset()
 	Campaign.add_coins(900)
+	# The garage's first-visit cards get their own shot (garage_intro).
+	for n in ["intro", "ships", "upgrade"]:
+		Campaign.mark_nudge(n)
 	# The mock wallet, signed out, with an RPC that fails at once.
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHAIN_SCRATCH))
 	Chain.save_path = CHAIN_SCRATCH
+	Chain.api_url = ""
 	Chain.reset(true)
 	Chain.client().mock.delay_sec = 0.05
 	Chain.client().rpc_url = "http://127.0.0.1:9"
@@ -63,7 +72,8 @@ func _run() -> void:
 	await _wait(0.5)
 	await _shot("quit")
 	home._close_quit()
-	await Chain.sign_in()
+	await _start_worker()
+	await Chain.sign_in("Ace")
 	await _wait(0.4)
 	home._pilot._skr = 1240.0
 	home._pilot.queue_redraw()
@@ -104,6 +114,16 @@ func _run() -> void:
 	garage._step(1)
 	await _wait(1.0)
 	await _shot("shop")
+	garage._explain_stat("yeet")
+	await _wait(0.3)
+	await _shot("shop_explain")
+	garage._intro_cards()
+	await _wait(0.5)
+	await _shot("garage_intro")
+	for c in garage.get_children():
+		if c is NudgePopup:
+			c.queue_free()
+	await _wait(0.2)
 	_menu.go(MenuRoot.Screen.SETTINGS)
 	await _wait(1.0)
 	await _shot("settings")
@@ -115,7 +135,19 @@ func _run() -> void:
 	await _wait(0.6)
 	_menu.go(MenuRoot.Screen.STORE)
 	await _wait(1.0)
+	var store := _menu._screens[MenuRoot.Screen.STORE] as StoreScreen
+	store.show_tab("coins")
+	await _wait(0.8)
 	await _shot("store")
+	if Chain.has_session():
+		await Chain.buy("paint:skr_gold")
+		Chain.equip("paint:skr_gold")
+		await Chain.buy("trail:mint")
+	store.show_tab("skr")
+	await _wait(1.0)
+	store._skr._balance = 1240.0
+	store._skr.refresh()
+	await _shot("store_skr")
 	_menu.go(MenuRoot.Screen.DAILY)
 	await _wait(1.2)
 	await _shot("daily")
@@ -134,7 +166,22 @@ func _run() -> void:
 	await _shot("loading")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHAIN_SCRATCH))
+	if _pid > 0:
+		OS.kill(_pid)
 	quit()
+
+
+## The Worker's dev server on localhost, when node is there.
+func _start_worker() -> void:
+	var out: Array = []
+	if OS.execute("node", ["--version"], out) != 0:
+		return
+	_pid = OS.create_process("node", [ProjectSettings.globalize_path("res://services/leaderboard-worker/test/dev_server.js"), str(PORT)])
+	for i in 40:
+		if (await Chain.Api.fetch("http://127.0.0.1:%d" % PORT, "/health")).ok:
+			Chain.api_url = "http://127.0.0.1:%d" % PORT
+			return
+		await _wait(0.25)
 
 
 func _wait(sec: float) -> void:

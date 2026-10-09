@@ -25,6 +25,7 @@ func _initialize() -> void:
 	_check_save_roundtrip()
 	_check_handoff()
 	_check_systems_and_next()
+	_check_sandbox_lock()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
 	if _failures.is_empty():
 		print("PASS campaign_check")
@@ -33,6 +34,26 @@ func _initialize() -> void:
 			print("  FAIL: " + f)
 		print("FAIL campaign_check (%d)" % _failures.size())
 	quit(0 if _failures.is_empty() else 1)
+
+
+## Sandbox waits for flight school and a win on level 3 or later.
+func _check_sandbox_lock() -> void:
+	Campaign.reset()
+	_check(not Campaign.sandbox_open(), "sandbox open on a fresh campaign")
+	Session.prefs["tutorial_done"] = true
+	var levels: Array = Campaign.sectors()[0]["levels"]
+	var by_number := {}
+	for l: Dictionary in levels:
+		by_number[int(l["number"])] = l
+	Campaign.apply_result(by_number[1], {"won": true, "time": 30.0, "kills": 3, "hull": 0.8})
+	Campaign.apply_result(by_number[2], {"won": true, "time": 30.0, "kills": 3, "hull": 0.8})
+	_check(not Campaign.sandbox_open(), "sandbox open before level 3 is won")
+	Campaign.apply_result(by_number[3], {"won": false, "time": 30.0, "kills": 1})
+	_check(not Campaign.sandbox_open(), "sandbox open after losing level 3")
+	Campaign.apply_result(by_number[3], {"won": true, "time": 30.0, "kills": 3, "hull": 0.8})
+	_check(Campaign.sandbox_open(), "sandbox still locked after winning level 3")
+	Campaign.reset()
+	_done("sandbox opens after level 3")
 
 
 func _check(cond: bool, msg: String) -> void:

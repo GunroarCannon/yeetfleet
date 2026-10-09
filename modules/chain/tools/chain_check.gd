@@ -1,7 +1,8 @@
 extends SceneTree
 ## Headless check of the Chain façade on the addon's mock wallet: Sign-In-With-
-## Solana, the session kept across launches, cancel, a failed confirmation, SKR
-## to the treasury, tips, no wallet, disconnect. No network, no phone.
+## Solana, the session kept across launches, cancel, a failed confirmation,
+## tips, buying needing the leaderboard, no wallet, disconnect. No network,
+## no phone. (Buying with the leaderboard: chain_server_check.)
 ##   "$GD" --headless --path . --audio-driver Dummy --script modules/chain/tools/chain_check.gd
 
 const CHECK_SAVE := "user://chain_check.cfg"
@@ -24,6 +25,7 @@ func _run() -> void:
 	await process_frame
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(CHECK_SAVE))
 	Chain.save_path = CHECK_SAVE
+	Chain.api_url = ""
 	Chain.reset(true)
 	Chain.notifier.connected.connect(_on_connected)
 	Chain.notifier.disconnected.connect(_on_disconnected)
@@ -46,33 +48,28 @@ func _run() -> void:
 	_tune()
 	_expect(Chain.pubkey() == key and Chain.client().auth_token != "", "the session survives a relaunch")
 
+	Chain.api_url = ""
+	r = await Chain.buy("paint:skr_gold")
+	_expect(not r.ok and r.code == "no_session" and _last_transfer().is_empty(),
+			"buying needs the leaderboard: nothing is paid without it")
+	_failed.clear()
+
 	Chain.client().mock.next_error = "cancelled"
-	r = await Chain.buy("extra_attempt")
+	r = await Chain.tip(OTHER, Chain.TIP_PRESETS[0])
 	_expect(not r.ok and r.code == "cancelled", "a cancelled payment reports cancelled")
-	_expect(_failed.size() == 1 and _failed[0] == ["extra_attempt", "cancelled"], "failed names the item and code")
+	_expect(_failed.size() == 1 and _failed[0] == ["tip", "cancelled"], "failed names what and the code")
 	_expect(_paid.is_empty(), "nothing is paid for a cancel")
 
-	r = await Chain.buy("extra_attempt")
-	var spec: Dictionary = _last_transfer()
-	_expect(r.ok and r.has("slot"), "a payment is confirmed before it counts")
-	_expect(spec.get("to") == Chain.TREASURY and spec.get("mint") == Chain.SKR_DEVNET,
-			"SKR goes to the treasury in dSKR")
-	_expect(spec.get("amount") == str(Chain.PRICES["extra_attempt"] * 1_000_000) and int(spec.get("decimals", 0)) == 6,
-			"the price is sent in base units")
-	_expect(spec.get("memo") == "yeetfleet:extra_attempt", "the memo names the item")
-	_expect(_paid.size() == 1 and _paid[0][0] == "extra_attempt", "paid is emitted once")
-
 	Chain.client().mock.next_confirm_error = "tx_failed"
-	r = await Chain.buy("paint", "order:42")
-	_expect(not r.ok and r.code == "tx_failed" and _paid.size() == 1, "a failed transaction grants nothing")
-	_expect(_last_transfer().get("memo") == "order:42", "an order memo is passed through")
-
-	r = await Chain.buy("no_such_thing")
-	_expect(not r.ok and r.code == "invalid_request", "an unknown item is refused")
+	r = await Chain.tip(OTHER, Chain.TIP_PRESETS[0])
+	_expect(not r.ok and r.code == "tx_failed" and _paid.is_empty(), "a failed transaction isn't paid")
 
 	r = await Chain.tip(OTHER, Chain.TIP_PRESETS[0])
-	spec = _last_transfer()
-	_expect(r.ok and spec.get("to") == OTHER and spec.get("amount") == "10000000", "a tip goes straight to the pilot")
+	var spec := _last_transfer()
+	_expect(r.ok and r.has("slot"), "a payment is confirmed before it counts")
+	_expect(spec.get("to") == OTHER and spec.get("mint") == Chain.SKR_DEVNET and spec.get("amount") == "10000000"
+			and int(spec.get("decimals", 0)) == 6, "a tip goes straight to the pilot, in dSKR base units")
+	_expect(_paid.size() == 1 and _paid[0][0] == "tip", "paid is emitted once")
 	r = await Chain.tip("not-a-key", 10)
 	_expect(not r.ok and r.code == "invalid_request", "a tip to a bad key is refused before the wallet opens")
 
