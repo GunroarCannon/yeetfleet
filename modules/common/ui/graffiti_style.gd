@@ -8,7 +8,8 @@
 class_name GraffitiStyle
 extends RefCounted
 
-const TITLE_FONT_PATH := "res://assets/fonts/From Street Art.ttf"
+## Raymond Larabie's Graffiti Treat (CC0, no rights reserved).
+const TITLE_FONT_PATH := "res://assets/fonts/graffiti/Graffiti Treat.otf"
 const HEAD_FONT_PATH := "res://assets/fonts/FOO.ttf"
 ## Numbers (coins, stars, scores) and level names: a bouncy marker face.
 const NUMBER_FONT_PATH := "res://assets/fonts/orange juice 2.0.ttf"

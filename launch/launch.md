@@ -128,7 +128,7 @@ Data safety form.
 
 ## Logo suggestion
 
-The in-game title — YEETFLEET in the "From Street Art" spray face, lime to
+The in-game title — YEETFLEET in the "Graffiti Treat" spray face, lime to
 teal fill, ink outline, drips and a halo — is the wordmark. For the **app
 icon** it is too long to read at 48 px, so the suggestion is:
 
@@ -178,7 +178,8 @@ icon** it is too long to read at 48 px, so the suggestion is:
 - [ ] Release build: the DEBUG chip on the home screen only exists in debug
       builds (`OS.is_debug_build()`), so check an exported release build
       doesn't show it.
-- [ ] Font licences: "From Street Art" ships with its own licence file in
-      `assets/fonts/`; check it allows commercial use, and the same for FOO
-      and any other face used in the shipped UI.
+- [ ] Font licences: the title face is Graffiti Treat (Raymond Larabie, CC0,
+      see `assets/fonts/graffiti/Graffiti Treat LICENSE.md`); check FOO,
+      orange juice, ka1 and every face in `assets/fonts/graffiti/` (the home
+      title cycles through them) allows commercial use.
 - [ ] Credit the star model: "Star Shape" by Suphanee (check its licence).

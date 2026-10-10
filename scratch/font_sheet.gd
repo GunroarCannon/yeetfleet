@@ -1,6 +1,6 @@
 extends SceneTree
 func _initialize() -> void:
-	var fonts := ["Graffiti.ttf", "From Street Art.ttf", "Vandal On The Fluid.ttf", "Nervous.ttf", "funkymuskrat.ttf", "FOO.ttf", "Bo_Toy.otf", "orange juice 2.0.ttf", "ka1.ttf"]
+	var fonts := ["Graffiti.ttf", "Vandal On The Fluid.ttf", "Nervous.ttf", "funkymuskrat.ttf", "FOO.ttf", "Bo_Toy.otf", "orange juice 2.0.ttf", "ka1.ttf"]
 	var bg := ColorRect.new(); bg.color = Color(0.1, 0.1, 0.2); bg.size = Vector2(1280, 1300); root.add_child(bg)
 	var y := 10.0
 	for f in fonts:

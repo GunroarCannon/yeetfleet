@@ -77,7 +77,7 @@ Playtest batch. What was picked, and what was turned down.
 
 ## Title faces
 - `GraffitiTitle.cycle`: every 4.5 s a squash-and-pop to another face from
-  From Street Art, Graffiti.ttf and `assets/fonts/graffiti/*`, never one of
+  Graffiti Treat, Graffiti.ttf and `assets/fonts/graffiti/*`, never one of
   the last two shown (static history, so it carries across screen visits).
 
 ## Phone layouts

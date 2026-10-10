@@ -22,10 +22,13 @@ const FILL_SHADER := "res://modules/menu/shaders/title_fill.gdshader"
 ## The graffiti faces the title cycles through: the default spray face, the
 ## Graffiti face and everything in the graffiti folder.
 const FACES: Array[String] = [
-	"res://assets/fonts/From Street Art.ttf",
+	"res://assets/fonts/graffiti/Graffiti Treat.otf",
 	"res://assets/fonts/Graffiti.ttf",
 ]
 const FACE_DIR := "res://assets/fonts/graffiti"
+## Faces in [constant FACE_DIR] that are only one layer of a stacked face
+## (Graffiti Treat's Front and Back), so never shown alone.
+const LAYER_FACES: Array[String] = ["Graffiti Treat Front.otf", "Graffiti Treat Back.otf"]
 const CYCLE_TIME := 1.2#4.5
 ## A face may come back only after this many others have been shown.
 const NO_REPEAT := 2
@@ -100,6 +103,8 @@ static func faces(for_text: String) -> Array[String]:
 	var all: Array[String] = FACES.duplicate()
 	for f in DirAccess.get_files_at(FACE_DIR):
 		var name := f.trim_suffix(".import").trim_suffix(".remap")
+		if name in LAYER_FACES:
+			continue
 		if name.get_extension().to_lower() in ["ttf", "otf"] and not (FACE_DIR.path_join(name) in all):
 			all.append(FACE_DIR.path_join(name))
 	for path in all:

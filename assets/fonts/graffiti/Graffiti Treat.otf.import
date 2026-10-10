@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://cpibdhn2dcd7g"
-path="res://.godot/imported/From Street Art.ttf-ffd5313e0203fc18df41f74d5edb9842.fontdata"
+uid="uid://d4cdle5rj425x"
+path="res://.godot/imported/Graffiti Treat.otf-bc29b6dcb43459426086853c3112d5f5.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/From Street Art.ttf"
-dest_files=["res://.godot/imported/From Street Art.ttf-ffd5313e0203fc18df41f74d5edb9842.fontdata"]
+source_file="res://assets/fonts/graffiti/Graffiti Treat.otf"
+dest_files=["res://.godot/imported/Graffiti Treat.otf-bc29b6dcb43459426086853c3112d5f5.fontdata"]
 
 [params]
 
@@ -22,7 +22,7 @@ msdf_size=48
 allow_system_fallback=true
 force_autohinter=false
 modulate_color_glyphs=false
-hinting=1
+hinting=3
 subpixel_positioning=4
 keep_rounding_remainders=true
 oversampling=0.0
