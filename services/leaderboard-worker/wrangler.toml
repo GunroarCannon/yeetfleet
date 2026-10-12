@@ -5,7 +5,7 @@ compatibility_date = "2026-09-01"
 
 [vars]
 CLUSTER = "devnet"
-SIWS_DOMAIN = "gunroarcannon.github.io"
+SIWS_DOMAIN = "yeetfleet.yeetfleet-leaderboard-worker.workers.dev"
 SIWS_STATEMENT = "Sign in to Yeetfleet as this pilot"
 GENESIS_GROUP = "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te"
 # What SKR payments are checked against. Devnet: dSKR, our test mint. On
@@ -14,7 +14,7 @@ SKR_MINT = "J1zbnVh8XFzjiBgXayMMxbg46zxZ5DVm1e8YWhxue6bK"
 TREASURY = "2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1"
 # Devnet only: these wallets count as Seekers so ranked play can be tested
 # without a Seeker (the emulator's Phantom test pilot). Ignored on mainnet.
-DEV_GENESIS_OWNERS = "GE7bEoKnVEkPQ7U7sQswPqq2AbZfNWEgMxcQiYjyHLdK"
+DEV_GENESIS_OWNERS = "GE7bEoKnVEkPQ7U7sQswPqq2AbZfNWEgMxcQiYjyHLdK,AMqMZWZY1bT9WKc7j1WwtNhw1iiw9P94gDKpS75AxDdS"
 
 # Secrets (never in this file): npx wrangler@4 secret put <NAME>
 #   SESSION_SECRET   random, e.g. `openssl rand -hex 32`
@@ -33,7 +33,7 @@ name = "yeetfleet-mainnet"
 
 [env.mainnet.vars]
 CLUSTER = "mainnet-beta"
-SIWS_DOMAIN = "gunroarcannon.github.io"
+SIWS_DOMAIN = "yeetfleet-mainnet.yeetfleet-leaderboard-worker.workers.dev"
 SIWS_STATEMENT = "Sign in to Yeetfleet as this pilot"
 GENESIS_GROUP = "GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te"
 SKR_MINT = "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3"
@@ -45,4 +45,4 @@ DEV_GENESIS_OWNERS = ""
 binding = "DB"
 database_name = "yeetfleet-mainnet"
 # From `npx wrangler@4 d1 create yeetfleet-mainnet`:
-database_id = "REPLACE_WITH_MAINNET_D1_DATABASE_ID"
+database_id = "52b2f6cf-1ac8-466f-9981-1be5bb4b21b0"

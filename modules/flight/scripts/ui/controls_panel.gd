@@ -62,6 +62,7 @@ func _build_rows(vbox: VBoxContainer) -> void:
 	_float_row(vbox, "Dynamic camera: furthest it pulls out (× normal distance)", "swipe_cam_max", 0.1, "×%.1f")
 	_check(vbox, "Two fingers pinch to zoom (mouse wheel on PC)", "cam_pinch_zoom", JuiceSettings.cam_pinch_zoom)
 	_check(vbox, "Drag off the ship / twist two fingers to swing the camera round it (right-drag on PC)", "cam_twist_rotate", JuiceSettings.cam_twist_rotate)
+	_check(vbox, "Swing the camera to the ship's front and it turns to face where you look (slingshot)", "cam_face_view", JuiceSettings.cam_face_view)
 	_float_row(vbox, "Swing speed", "cam_gesture_speed", 0.05, "×%.2f")
 	_check(vbox, "Glowing 3D arrows for the heading and the launch", "move_arrows", JuiceSettings.move_arrows)
 	_float_row(vbox, "\"On the ship\" grab area", "grab_radius_scale", 0.05, "×%.2f")

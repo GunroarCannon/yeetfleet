@@ -57,6 +57,8 @@ var _giant_clock := 10.0
 var _structures: Array[Dictionary] = []
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
+## The mini goals on the HUD (see [SandboxGoals]).
+var goals: SandboxGoals = null
 
 
 func setup(flight_root: FlightRoot, incident_director: IncidentDirector) -> void:
@@ -77,6 +79,38 @@ func _ready() -> void:
 		director.max_player_dist = 1600.0
 	# Once the ship has been placed and the opening shot has landed.
 	get_tree().create_timer(1.5, false).timeout.connect(_build_structures)
+	goals = SandboxGoals.new()
+	goals.setup(root, self)
+	root.add_hud_overlay(goals)
+
+
+## The player did [param event] (the tutorial's event names, plus "chain"):
+## the goals count it.
+func note(event: String, amount := 1.0) -> void:
+	if goals != null and is_instance_valid(goals):
+		goals.note(event, amount)
+
+
+## One line on what is going on out there, for the goals panel; "" when no
+## incident is running.
+func situation() -> String:
+	for job: Dictionary in _jobs:
+		if bool(job["done"]):
+			continue
+		match String(job["kind"]):
+			"pirate_raid":
+				if job["mega"] != null:
+					return "A WARSHIP IS COMING. SHOOT ITS GUNS OFF!"
+				return "PIRATES ARE HITTING A HAULER. SAVE IT!"
+			"faction_skirmish":
+				return "POLICE AND PIRATES ARE FIGHTING. JOIN IN!"
+			"meteor_strike":
+				return "METEORS INCOMING. KEEP MOVING!"
+			"distress_call":
+				return "A SHIP IS IN TROUBLE. FLY TO IT!"
+			_:
+				return "SOMETHING IS DRIFTING OUT THERE. FLY TO IT!"
+	return ""
 
 
 func _process(delta: float) -> void:
@@ -347,6 +381,10 @@ func _finish(job: Dictionary, how: String, points: int, word: String) -> void:
 	var inc: Incident = job["inc"]
 	if how != "" and not inc.is_resolved:
 		inc.resolve(how, "player" if points > 0 else null)
+	if how == "pirates_routed":
+		note("raid")
+	elif how == "player_rescued":
+		note("rescue")
 	if points > 0:
 		root.score += points
 		var at := root.active_model().global_position if root.active_model() != null else inc.origin

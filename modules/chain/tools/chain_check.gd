@@ -41,7 +41,7 @@ func _run() -> void:
 	_expect(r.ok and Chain.pubkey() == key, "sign in sets the pilot's key")
 	_expect(_connected == [key], "connected is emitted once")
 	var text := Marshalls.base64_to_utf8(r.sign_in.signed_message) if r.ok else ""
-	_expect(text.begins_with(Chain.SIWS_DOMAIN) and text.contains(Chain.SIWS_STATEMENT),
+	_expect(text.begins_with(Chain.siws_domain()) and text.contains(Chain.SIWS_STATEMENT),
 			"the SIWS message names our domain and statement")
 
 	Chain.reset(true)

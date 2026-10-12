@@ -95,6 +95,15 @@ func start_position() -> Vector2:
 func feed(event: InputEvent) -> bool:
 	if event is InputEventScreenTouch or event is InputEventScreenDrag:
 		_last_touch_ms = Time.get_ticks_msec()
+	# The mouse events a touchscreen emulates are tagged, and Godot sends the
+	# emulated press BEFORE the touch it came from. Waiting for a ScreenTouch to
+	# flag the device meant the very first touch of a session was read as a
+	# mouse press: the pull began on the mouse pointer, the real touch was then
+	# refused (a pointer was already down) and fell through to the camera look.
+	if event is InputEventMouse and event.device == InputEvent.DEVICE_ID_EMULATION:
+		_touch_device = true
+		_last_touch_ms = Time.get_ticks_msec()
+		return true
 	if event is InputEventScreenTouch:
 		_touch_device = true
 		var st := event as InputEventScreenTouch

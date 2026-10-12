@@ -33,13 +33,13 @@ extends RefCounted
 ## The export feature tag that makes a mainnet build.
 const MAINNET_FEATURE := "mainnet"
 const APP_NAME := "Yeetfleet"
-## The dApp identity wallets show, and the domain Sign-In-With-Solana names.
-## It must serve /.well-known/assetlinks.json for the APK, or Phantom asks for
-## approval again on every reconnect.
-const IDENTITY_URI := "https://gunroarcannon.github.io"
-const SIWS_DOMAIN := "gunroarcannon.github.io"
+## The dApp identity wallets show is the leaderboard Worker's own origin
+## ([method identity_uri]): a wallet verifies the app by fetching
+## /.well-known/assetlinks.json there, and insists on a Content-Type of exactly
+## application/json, which GitHub Pages can't send (it adds a charset). The
+## Worker serves it, and its SIWS_DOMAIN is the same host.
 const SIWS_STATEMENT := "Sign in to Yeetfleet as this pilot"
-## Relative to [constant IDENTITY_URI].
+## Relative to [method identity_uri].
 const ICON := "favicon.ico"
 ## SKR on mainnet (classic SPL Token, 6 decimals) and dSKR, our devnet stand-in
 ## with the same decimals (minted by us; see docs/solana-wallets.md).
@@ -74,10 +74,9 @@ const COSMETICS := {
 const TIP_PRESETS: Array[int] = [10, 50, 100]
 const SAVE_PATH := "user://chain.cfg"
 ## The leaderboard Worker (services/leaderboard-worker) on Cloudflare: the
-## devnet one, and the mainnet one ("" until it's deployed, which keeps a
-## mainnet build offline and unranked rather than pointed at devnet).
+## devnet one, and the mainnet one (`wrangler deploy --env mainnet`).
 const WORKER_URL := "https://yeetfleet.yeetfleet-leaderboard-worker.workers.dev"
-const WORKER_URL_MAINNET := ""
+const WORKER_URL_MAINNET := "https://yeetfleet-mainnet.yeetfleet-leaderboard-worker.workers.dev"
 
 const Api := preload("res://modules/chain/scripts/chain_api.gd")
 
@@ -133,6 +132,18 @@ static func reset(force_mock := false) -> void:
 
 static func cluster() -> String:
 	return "mainnet-beta" if use_mainnet else "devnet"
+
+
+## The dApp identity: the Worker's origin for [method cluster] (it serves the
+## assetlinks.json a wallet checks).
+static func identity_uri() -> String:
+	return WORKER_URL_MAINNET if use_mainnet else WORKER_URL
+
+
+## The domain Sign-In-With-Solana names: the identity's host, which is also the
+## Worker's SIWS_DOMAIN.
+static func siws_domain() -> String:
+	return identity_uri().trim_prefix("https://")
 
 
 ## The SKR mint for [method cluster].
@@ -263,10 +274,10 @@ static func connect_wallet() -> Dictionary:
 ## [code]server[/code] set to the reason, and play is unranked.
 static func sign_in(pilot_name := "") -> Dictionary:
 	if api_url == "":
-		return _after("sign_in", await client().sign_in(SIWS_DOMAIN, SIWS_STATEMENT))
+		return _after("sign_in", await client().sign_in(siws_domain(), SIWS_STATEMENT))
 	var ch := await Api.post(api_url, "/auth/challenge", {})
 	if not ch.ok:
-		var local := _after("sign_in", await client().sign_in(SIWS_DOMAIN, SIWS_STATEMENT))
+		var local := _after("sign_in", await client().sign_in(siws_domain(), SIWS_STATEMENT))
 		if local.ok:
 			local["server"] = ch.code
 			notifier.failed.emit("server", "server_offline")
@@ -274,12 +285,19 @@ static func sign_in(pilot_name := "") -> Dictionary:
 	var r := _after("sign_in", await client().sign_in(String(ch.domain), SIWS_STATEMENT, ch.fields))
 	if not r.ok:
 		return r
-	var v := await Api.post(api_url, "/auth/verify", {
+	var verify_body := {
 		"public_key": client().public_key,
 		"signed_message": r.sign_in.signed_message,
 		"signature": r.sign_in.signature,
 		"name": pilot_name,
-	})
+	}
+	var v := await Api.post(api_url, "/auth/verify", verify_body)
+	# The phone can hold the game's network back while the wallet is in front:
+	# ask again, now that the game is.
+	for _retry in 2:
+		if v.ok or v.code != "offline":
+			break
+		v = await Api.post(api_url, "/auth/verify", verify_body)
 	if not v.ok:
 		r["server"] = v.code
 		notifier.failed.emit("server", "server_offline" if v.code == "offline" else "server_refused")
@@ -438,7 +456,7 @@ static func tip(to: String, amount: int) -> Dictionary:
 static func _make(force_mock: bool) -> void:
 	if _client != null and _client.account_changed.is_connected(_on_account_changed):
 		_client.account_changed.disconnect(_on_account_changed)
-	_client = SolanaMobileClient.new(APP_NAME, IDENTITY_URI, ICON, cluster(), force_mock)
+	_client = SolanaMobileClient.new(APP_NAME, identity_uri(), ICON, cluster(), force_mock)
 	_session = {}
 	_pending = []
 	_owned = []

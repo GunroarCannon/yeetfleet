@@ -6,8 +6,12 @@
 
 export const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
+// A slow RPC must not hold a sign-in past the game's own request timeout.
+const RPC_TIMEOUT_MS = 6000;
+
 /**
- * A JSON-RPC call; throws on a transport or RPC error.
+ * A JSON-RPC call; throws on a transport or RPC error, or after
+ * [RPC_TIMEOUT_MS].
  * @param {string} url
  * @param {string} method
  * @param {any[]} params
@@ -18,6 +22,7 @@ export async function rpc(url, method, params, fetchFn = fetch) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`${method}: HTTP ${res.status}`);
   const body = await res.json();

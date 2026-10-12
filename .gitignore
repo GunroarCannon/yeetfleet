@@ -8,3 +8,10 @@ out/
 *.apk
 *.aab
 *.idsig
+
+# Demo video renders (big binaries)
+launch/video/takes/
+launch/video/out/
+launch/video/frames/
+launch/video/clips/
+launch/video/vendor/*.tgz

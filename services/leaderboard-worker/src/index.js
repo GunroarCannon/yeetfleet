@@ -34,6 +34,7 @@ import { genesisMint } from "./genesis.js";
 import { HttpError } from "./errors.js";
 import * as daily from "./daily.js";
 import * as shop from "./shop.js";
+import { assetLinks } from "./assetlinks.js";
 
 export { HttpError };
 
@@ -62,6 +63,8 @@ async function route(request, env) {
     case "GET /":
     case "GET /health":
       return json({ ok: true, cluster: env.CLUSTER ?? "devnet" });
+    case "GET /.well-known/assetlinks.json":
+      return json(assetLinks());
     case "POST /auth/challenge":
       return json(await challenge(env));
     case "POST /auth/verify":

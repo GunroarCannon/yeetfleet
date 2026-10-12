@@ -77,10 +77,44 @@ Sources: [submit a new app](https://docs.solanamobile.com/dapp-publishing/submit
 [build and sign an APK](https://docs.solanamobile.com/dapp-store/build-and-sign-an-apk),
 [publishing releases](https://docs.solanamobile.com/dapp-store/publishing_releases).
 
+## Going to mainnet: the order, and what it costs
+
+1. **Worker (free).** Cloudflare's free plan runs the Worker and its D1
+   database at this scale. Get a free Helius key (Solana's public RPC
+   refuses Cloudflare), then in a Git Bash:
+   `bash services/leaderboard-worker/scripts/deploy_mainnet.sh <helius-key>`.
+   It sets the RPC URL and a random `SESSION_SECRET`, and deploys. Check
+   `curl <mainnet worker>/shop` says `"cluster":"mainnet"`, and
+   `curl -i <mainnet worker>/.well-known/assetlinks.json` answers
+   `Content-Type: application/json` (that is what clears Phantom's
+   "identity could not be verified" banner). Redeploy the devnet Worker
+   (`npx wrangler@4 deploy`) for the same route.
+2. **Treasury (no SOL needed).** `2ZGn8kxk…n4R1` receives the SKR. The
+   payer's wallet creates the treasury's SKR token account on the first
+   purchase (`create_ata` defaults to true, payer = the buyer), so the
+   treasury needs no SOL and you pay nothing. Back its key up, or better
+   point `Chain.TREASURY` and `TREASURY` in `wrangler.toml` at an address
+   from a wallet you already keep safe (Phantom, a hardware wallet): the
+   Worker only needs the public address, never a key. Real SKR only: do a
+   25 SKR test purchase from a second wallet before launch.
+3. **Mainnet APK (free).** `"$GD" --headless --path . --export-release
+   "Android dApp Store" ../Yeetfleet-dappstore-mainnet-1.apk` (the preset with
+   the `mainnet` feature, signed with the dApp Store key). Bump
+   `version/code` for every later release.
+4. **Test on a real phone.** Phantom's Testnet Mode OFF. On mainnet only a
+   real Seeker Genesis Token ranks (`DEV_GENESIS_OWNERS` is devnet only), so
+   the ranked run needs a Seeker or a wallet that holds one.
+5. **Publisher portal.** KYC/KYB, then the publisher wallet with about
+   **0.2 SOL** as a cushion (the only real cost: the NFT mints, a small
+   priority fee, and the ArDrive upload sized by the APK, 93 MB; what isn't
+   spent stays in the wallet),
+   upload APK, icon, screenshots, copy. Review is 3-5 business days. Solana
+   Mobile takes no fee on in-app purchases (their FAQ, checked 2026-10-12).
+
 ## Hackathon checklist (CLOCK IN)
 
 - [x] Android APK using Mobile Wallet Adapter (release-signed)
 - [ ] Public repo (push `solana-integrated` and the plugin repo)
-- [ ] Demo video: shot list in `docs/demo-script.md`, recorded on the phone
+- [x] Demo video: `launch/video/out/yeetfleet_demo.mp4` (with your voice: `VOICEOVER.md`) and `yeetfleet_demo_music.mp4` (trailer); phone parts recorded on the Redmi. Re-record the wallet clip after the devnet Worker redeploy to drop the red banner
 - [x] Pitch deck: https://claude.ai/artifact/WNeRy32jTnQMgqxb7uio4m (private until shared from its Share menu)
 - [ ] dApp Store listing (the steps above)

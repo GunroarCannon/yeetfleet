@@ -49,6 +49,8 @@ var _bank := 0
 ## Points per second alive in the sandbox, and points per coin.
 const POINTS_PER_SEC := 3.0
 const POINTS_PER_COIN := 20
+## How long into a sandbox flight its one-line brief shows.
+const SANDBOX_HINT_DELAY := 2.5
 
 
 func setup(root: FlightRoot) -> void:
@@ -85,6 +87,15 @@ func _ready() -> void:
 		_root.scenarios.changed.connect(_on_scenario_changed)
 		get_tree().create_timer(START_DELAY, false, false, true).timeout.connect(_start_level)
 		_show_banner()
+	else:
+		# Free flight has no brief: say what it is for once the view is up.
+		get_tree().create_timer(SANDBOX_HINT_DELAY, false, false, true).timeout.connect(_say_sandbox)
+
+
+## The sandbox's one-line brief (the hint line on the HUD).
+func _say_sandbox() -> void:
+	if is_instance_valid(_root) and not _root.is_player_dead():
+		_root.announce("FREE FLIGHT. Do the goals on the left, hunt pirates, help ships, score points for coins")
 
 
 ## Draw every blast look once in front of the camera, under the loading card

@@ -42,7 +42,7 @@ const EMP_SPREAD := 0.9
 signal picked(kind: int)
 
 var _root: FlightRoot = null
-## Live orbs: {node, kind, t, radius}.
+## Live orbs: {node, kind, t, radius, mat, base, beacon}.
 var _orbs: Array[Dictionary] = []
 ## Orbs stay put and never blink out (the tutorial's orb waits for the player).
 var hold := false
@@ -77,12 +77,14 @@ func maybe_drop(pos: Vector3) -> void:
 	drop(randi() % NAMES.size(), pos)
 
 
-## Float a [param kind] orb at [param pos].
-func drop(kind: int, pos: Vector3) -> Node3D:
+## Float a [param kind] orb at [param pos]. A [param beacon] orb (the
+## tutorial's) is bigger and wears a wide, steady glow, so a first-time player
+## can't miss it.
+func drop(kind: int, pos: Vector3, beacon := false) -> Node3D:
 	var hull_r := _root.camera_rig.hull_radius if _root != null and _root.camera_rig != null else 3.0
 	# Bigger than the ship's own hull and glowing, so one is easy to spot
 	# before it is grabbed.
-	var radius := maxf(hull_r * 1.25, 4.0)
+	var radius := maxf(hull_r * 1.25, 4.0) * (1.5 if beacon else 1.0)
 	var orb := Node3D.new()
 	orb.name = "PowerUp_" + String(NAMES[kind])
 	var shell := MeshInstance3D.new()
@@ -115,7 +117,7 @@ func drop(kind: int, pos: Vector3) -> Node3D:
 	halo.shaded = false
 	halo.transparent = true
 	halo.modulate = Color(TINT, 0.8)
-	halo.pixel_size = radius * 3.2 / 128.0
+	halo.pixel_size = radius * (5.0 if beacon else 3.2) / 128.0
 	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	orb.add_child(halo)
 	add_child(orb)
@@ -123,7 +125,7 @@ func drop(kind: int, pos: Vector3) -> Node3D:
 	orb.scale = Vector3.ONE * 0.05
 	var tw := orb.create_tween()
 	tw.tween_property(orb, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_orbs.append({"node": orb, "kind": kind, "t": 0.0, "radius": radius, "mat": mat, "base": pos})
+	_orbs.append({"node": orb, "kind": kind, "t": 0.0, "radius": radius, "mat": mat, "base": pos, "beacon": beacon})
 	while _orbs.size() > MAX_ORBS:
 		var old: Dictionary = _orbs.pop_front()
 		(old["node"] as Node3D).queue_free()
@@ -332,7 +334,10 @@ func _tick_orbs(delta: float) -> void:
 		(o["mat"] as ShaderMaterial).set_shader_parameter("fade", fade)
 		var halo := node.get_node_or_null("Halo") as Sprite3D
 		if halo != null:
-			halo.modulate.a = (0.55 + 0.35 * sin(t * 4.0)) * fade
+			var glow := 0.55 + 0.35 * sin(t * 4.0)
+			if bool(o.get("beacon", false)):
+				glow = 0.8 + 0.2 * sin(t * 4.0)
+			halo.modulate.a = glow * fade
 		keep.append(o)
 	_orbs = keep
 

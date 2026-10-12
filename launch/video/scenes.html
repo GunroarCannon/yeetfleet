@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yeetfleet Video Scenes</title>
+<!--
+  Every animated part of the Yeetfleet demo video, in the game's own look
+  (GraffitiStyle: spray-paint title, chunky comic headings, loud flat colours,
+  thick ink outlines, slanted slabs with an offset shadow, drips, halftone).
+  One scene per ?scene=<name>; each is a paused GSAP timeline that
+  window.seek(seconds) draws frame-exact (launch/video/render.mjs). Overlay
+  scenes leave the phone's screen transparent: gameplay goes under them.
+  Opened without ?render, it plays the scene on a loop; ?scene= picks it.
+-->
+<style>
+@font-face { font-family: "Treat Back"; src: url("/assets/fonts/graffiti/Graffiti Treat Back.otf"); }
+@font-face { font-family: "Treat Front"; src: url("/assets/fonts/graffiti/Graffiti Treat Front.otf"); }
+@font-face { font-family: "Treat"; src: url("/assets/fonts/graffiti/Graffiti Treat.otf"); }
+@font-face { font-family: "SA"; src: url("vendor/FromStreetArt.ttf"); }
+@font-face { font-family: "FOO"; src: url("/assets/fonts/FOO.ttf"); }
+@font-face { font-family: "OJ"; src: url("/assets/fonts/orange juice 2.0.ttf"); }
+@font-face { font-family: "KA1"; src: url("/assets/fonts/ka1.ttf"); }
+@font-face { font-family: "Term"; src: url("/assets/fonts/Terminus.ttf"); }
+
+:root {
+  --ink: #15101f; --paper: #f3ead6; --hot: #ff3a6e; --lime: #b6ff3a; --cyan: #35e0ff;
+  --sun: #ffc61a; --violet: #9d6bff; --orange: #ff8a1f; --dim: #8f86a8;
+  --wall: #22173c; --brick: #1a1130;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body.preview { background: #000; }
+#stage { position: absolute; inset: 0; overflow: hidden; }
+.abs { position: absolute; }
+.ink { -webkit-text-stroke: 12px var(--ink); paint-order: stroke fill; }
+.ink-s { -webkit-text-stroke: 7px var(--ink); paint-order: stroke fill; }
+
+/* The wall: dark violet bricks, spray splats, faint tags, a vignette. */
+.wall { position: absolute; inset: 0; background: var(--wall); overflow: hidden; }
+.wall .bricks { position: absolute; inset: -60px; opacity: .9; }
+.wall .vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(8,4,16,.75) 100%); }
+.wall .tag { position: absolute; font-family: "Treat"; color: rgba(255,255,255,.07); white-space: nowrap; }
+.dots { position: absolute; background-image: radial-gradient(circle, rgba(255,255,255,.22) 28%, transparent 30%); background-size: 16px 16px; }
+
+/* A slanted slab with an ink outline, an offset shadow, halftone and drips. */
+.slab { position: absolute; transform-origin: 50% 50%; }
+.slab .face { position: relative; padding: 18px 56px 16px; border: 7px solid var(--ink); transform: skewX(-12deg);
+  box-shadow: 14px 14px 0 rgba(0,0,0,.55); overflow: hidden; }
+.slab .face::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 42%;
+  background-image: radial-gradient(circle, rgba(255,255,255,.28) 30%, transparent 33%); background-size: 14px 14px;
+  -webkit-mask: linear-gradient(90deg, transparent, #000 70%); }
+.slab .txt { position: relative; z-index: 1; transform: skewX(12deg); font-family: "FOO"; color: #fff; white-space: nowrap; text-align: center; }
+.slab .drips { position: absolute; left: 0; right: 0; top: 100%; height: 60px; }
+.slab .drip { position: absolute; top: -8px; width: 10px; border-radius: 0 0 6px 6px; transform-origin: top; }
+.slab .drip::after { content: ""; position: absolute; bottom: -6px; left: -2px; width: 14px; height: 14px; border-radius: 50%; background: inherit; }
+
+.chip { position: absolute; font-family: "FOO"; font-size: 26px; letter-spacing: 1px; color: var(--lime); background: var(--ink);
+  padding: 10px 18px 8px; border: 4px solid var(--ink); transform: skewX(-12deg); box-shadow: 8px 8px 0 rgba(0,0,0,.5); white-space: nowrap; }
+.chip > span { display: inline-block; transform: skewX(12deg); }
+
+/* The phone: an ink bezel round a 20:9 screen (the gameplay goes under it). */
+.bezel { position: absolute; border: 22px solid #0c0913; border-radius: 52px; box-shadow: 0 0 0 5px #2e2546, 22px 22px 0 rgba(0,0,0,.55); }
+.bezel .cam { position: absolute; left: -15px; top: 50%; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: #2a2340; }
+
+.big-title { position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; }
+.big-title span { display: inline-block; }
+.card { position: absolute; background: var(--paper); border: 7px solid var(--ink); box-shadow: 14px 14px 0 rgba(0,0,0,.55); }
+.mono { font-family: "Term"; }
+/* YEET and YEETFLEET are always lettered in From Street Art. */
+.sa { font-family: "SA"; font-weight: normal; }
+/* Inside an inked slab its own detail would fill with the stroke: no stroke,
+   a thin ink edge round the outside only. */
+.ink .sa, .ink-s .sa { font-size: 1.5em; line-height: 0.8; vertical-align: -0.06em; color: var(--sun); -webkit-text-stroke: 0; text-shadow: -3px 0 var(--ink), 3px 0 var(--ink), 0 -3px var(--ink), 0 3px var(--ink), 3px 3px 0 var(--ink), -3px -3px 0 var(--ink), 3px -3px 0 var(--ink), -3px 3px 0 var(--ink); }
+.wall .tag.sa { font-family: "SA"; }
+svg text { font-family: "FOO"; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script src="vendor/gsap.min.js"></script>
+<script>
+"use strict";
+const W = 1920, H = 1080;
+// The phone's screen in the frame: 20:9 (a phone held sideways), the size
+// ffmpeg scales the gameplay to (launch/video/assemble.sh reads these).
+const HOLE = { x: 160, y: 64, w: 1600, h: 720 };
+const C = { ink: "#15101f", paper: "#f3ead6", hot: "#ff3a6e", lime: "#b6ff3a", cyan: "#35e0ff",
+  sun: "#ffc61a", violet: "#9d6bff", orange: "#ff8a1f", dim: "#8f86a8" };
+// Text on a slab: ink on the light ones.
+const ON = { [C.sun]: C.ink, [C.lime]: C.ink, [C.cyan]: C.ink, [C.paper]: C.ink };
+const params = new URLSearchParams(location.search);
+const RENDER = params.has("render");
+const stage = document.getElementById("stage");
+if (!RENDER) document.body.classList.add("preview");
+
+// Seeded randomness: the same picture every render.
+let _seed = 1234567;
+function rnd() { _seed = (_seed * 16807) % 2147483647; return (_seed - 1) / 2147483646; }
+function rr(a, b) { return a + rnd() * (b - a); }
+
+// --- Sound cues ----------------------------------------------------------------
+// Every move that should make a sound logs a cue: what kind, when, its place in
+// a run (rising pitch). render.mjs --cues reads them; sfx.mjs mixes the game's
+// own sounds (assets/sounds) in at those times. No rnd() here: the pictures
+// must stay the same.
+const CUES = [];
+function sfx(kind, at, i = 0) { CUES.push({ kind, at: Math.max(0, Math.round(at * 1000) / 1000), i }); }
+
+function el(tag, cls, parent, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  (parent || stage).appendChild(e);
+  return e;
+}
+function css(e, o) { Object.assign(e.style, o); return e; }
+function svgEl(tag, attrs, parent) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+// --- The wall ---------------------------------------------------------------
+
+// A spray splat: a soft blob with a few drips running down.
+function splatSvg(color, r) {
+  const n = 9, pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2, k = rr(0.72, 1.12);
+    pts.push([Math.cos(a) * r * k, Math.sin(a) * r * k]);
+  }
+  let d = "";
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], q = pts[(i + 1) % n];
+    const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+    d += (i === 0 ? `M${mx},${my}` : "") + ` Q${q[0]},${q[1]} ${(q[0] + pts[(i + 2) % n][0]) / 2},${(q[1] + pts[(i + 2) % n][1]) / 2}`;
+  }
+  let drips = "";
+  for (let i = 0; i < 3; i++) {
+    const x = rr(-r * 0.6, r * 0.6), len = rr(r * 0.5, r * 1.4), w = rr(5, 10);
+    drips += `<rect x="${x - w / 2}" y="0" width="${w}" height="${r * 0.6 + len}" rx="${w / 2}" fill="${color}"/>`;
+  }
+  const s = r * 3.2;
+  return `<svg width="${s}" height="${s * 1.2}" viewBox="${-s / 2} ${-s / 2} ${s} ${s * 1.2}" style="overflow:visible">
+    <g filter="url(#soft)"><path d="${d}Z" fill="${color}"/>${drips}</g></svg>`;
+}
+
+// The wall behind everything. With hole, the phone's screen stays clear.
+function wall(tl, opts = {}) {
+  const w = el("div", "wall");
+  if (opts.hole) {
+    const { x, y, w: hw, h: hh } = HOLE;
+    w.style.clipPath = `path(evenodd, "M0 0H${W}V${H}H0Z M${x + 6} ${y + 6}H${x + hw - 6}V${y + hh - 6}H${x + 6}Z")`;
+  }
+  const bricks = el("div", "bricks", w);
+  bricks.innerHTML = `<svg width="${W + 120}" height="${H + 120}"><defs>
+    <pattern id="brick" width="120" height="60" patternUnits="userSpaceOnUse">
+      <rect width="120" height="60" fill="${"#22173c"}"/>
+      <path d="M0 0.5H120 M0 30.5H120 M60 0V30 M0 30V60 M120 30V60" stroke="#170f2b" stroke-width="5"/>
+      <path d="M2 4H58 M62 34H118" stroke="#2c2049" stroke-width="2"/>
+    </pattern>
+    <filter id="soft"><feGaussianBlur stdDeviation="1.4"/></filter></defs>
+    <rect width="100%" height="100%" fill="url(#brick)"/></svg>`;
+  const splats = [
+    [C.cyan, 70, 0.06, 0.18], [C.sun, 54, 0.9, 0.12], [C.hot, 62, 0.82, 0.86], [C.lime, 46, 0.12, 0.84],
+    [C.violet, 80, 0.5, 0.95], [C.cyan, 40, 0.97, 0.55], [C.orange, 36, 0.03, 0.52],
+  ];
+  for (const [col, r, fx, fy] of splats) {
+    const s = el("div", "abs", w, splatSvg(col, r));
+    css(s, { left: `${fx * W - r * 1.6}px`, top: `${fy * H - r * 1.6}px`, opacity: 0.55 });
+    if (tl) tl.fromTo(s, { y: 0 }, { y: rr(-10, 10), x: rr(-12, 12), duration: rr(3, 5), ease: "sine.inOut", repeat: 20, yoyo: true }, 0);
+  }
+  for (const [word, fx, fy, sz, rot] of [["POW", 0.03, 0.04, 90, -8], ["BOOM", 0.86, 0.9, 80, 6], ["YEET", 0.7, 0.02, 70, 4], ["KRAK", 0.01, 0.66, 64, -4]]) {
+    const t = el("div", word.startsWith("YEET") ? "tag sa" : "tag", w, word);
+    css(t, { left: `${fx * W}px`, top: `${fy * H}px`, fontSize: `${sz}px`, transform: `rotate(${rot}deg)` });
+  }
+  el("div", "vig", w);
+  if (tl) tl.fromTo(bricks, { x: 0 }, { x: -24, y: -10, duration: 14, ease: "sine.inOut", repeat: 4, yoyo: true }, 0);
+  return w;
+}
+
+// The phone bezel over the hole, and a camera dot.
+function bezel() {
+  const b = el("div", "bezel");
+  css(b, { left: `${HOLE.x - 22}px`, top: `${HOLE.y - 22}px`, width: `${HOLE.w + 44}px`, height: `${HOLE.h + 44}px` });
+  el("div", "cam", b);
+  return b;
+}
+
+// --- Slabs, chips, captions ----------------------------------------------------
+
+// Wrap the YEET / YEETFLEET words in the From Street Art face.
+function yeetify(text) { return String(text).replace(/YEETFLEET|YEET/g, (m) => `<span class="sa">${m}</span>`); }
+
+function slab(text, color, size, opts = {}) {
+  const s = el("div", "slab", opts.parent);
+  const f = el("div", "face", s);
+  f.style.background = color;
+  const t = el("div", "txt" + (opts.ink === false ? "" : " ink"), f, yeetify(text));
+  css(t, { fontSize: `${size}px`, color: opts.fg || ON[color] || "#fff" });
+  if (ON[color] && opts.ink !== false) t.classList.remove("ink");
+  if (opts.pad) f.style.padding = opts.pad;
+  const drips = el("div", "drips", s);
+  const ds = [];
+  for (const fx of opts.drips || [0.22, 0.5, 0.81]) {
+    const d = el("div", "drip", drips);
+    css(d, { left: `${fx * 100}%`, height: `${rr(18, 46)}px`, background: color });
+    ds.push(d);
+  }
+  s._drips = ds;
+  s._size = size;
+  return s;
+}
+
+// Put an element centred at (cx, cy) once it has a size.
+function centre(e, cx, cy) {
+  const r = e.getBoundingClientRect();
+  css(e, { left: `${cx - r.width / 2}px`, top: `${cy - r.height / 2}px` });
+  return e;
+}
+
+// Lay elements out in a centred row, [gap] px apart.
+function row(list, cx, cy, gap) {
+  const ws = list.map((e) => e.getBoundingClientRect().width);
+  let x = cx - (ws.reduce((a, b) => a + b, 0) + gap * (list.length - 1)) / 2;
+  list.forEach((e, i) => { centre(e, x + ws[i] / 2, cy); x += ws[i] + gap; });
+}
+
+// The slam: in big and tilted, lands with a bounce; drips run after.
+function slamIn(tl, e, at, opts = {}) {
+  tl.fromTo(e, { scale: opts.from ?? 1.6, rotation: opts.rot ?? -7, opacity: 0, y: opts.y ?? -30 },
+    { scale: 1, rotation: opts.end ?? 0, opacity: 1, y: 0, duration: 0.32, ease: "back.out(2.2)" }, at);
+  if (e._drips) tl.fromTo(e._drips, { scaleY: 0 }, { scaleY: 1, duration: 0.7, ease: "power2.out", stagger: 0.07 }, at + 0.2);
+  sfx(opts.sfx ?? ((e._size ?? 0) >= 60 ? "slam_big" : "slam"), at);
+}
+function slamOut(tl, e, at, dir = 1) {
+  tl.to(e, { x: 90 * dir, opacity: 0, scale: 0.9, duration: 0.2, ease: "power2.in" }, at);
+  sfx("out", at);
+}
+
+// Captions under the phone, one after another: [start, end, text, colour].
+function captions(tl, list, y = 935, size = 46) {
+  for (const [a, b, text, col] of list) {
+    const s = slab(text, col, size);
+    centre(s, W / 2, y);
+    slamIn(tl, s, a, { rot: rr(-6, 6) });
+    if (b !== null) slamOut(tl, s, b - 0.2, rnd() < 0.5 ? -1 : 1);
+  }
+}
+
+function chip(text, x, y, color, tl, at = 0.15) {
+  const c = el("div", "chip", null, `<span>${text}</span>`);
+  css(c, { left: `${x}px`, top: `${y}px`, color: color || C.lime });
+  if (tl) {
+    tl.from(c, { x: -40, opacity: 0, duration: 0.3, ease: "power3.out" }, at);
+    sfx("chip", at);
+  }
+  return c;
+}
+
+// --- The title ----------------------------------------------------------------
+
+// YEETFLEET in the game's title face: the Back layer in ink, the Front in a
+// lime-to-cyan fill, letter by letter; a lime halo over the Y.
+function title(tl, cx, cy, size, at = 0) {
+  const box = el("div", "abs");
+  const word = "YEETFLEET";
+  const back = el("div", "big-title", box), front = el("div", "big-title", box);
+  css(box, { left: "0", width: `${W}px`, top: `${cy - size * 0.62}px`, height: `${size * 1.3}px` });
+  for (const layer of [back, front]) {
+    css(layer, { fontFamily: '"SA"', fontSize: `${size}px`, lineHeight: 1.2, top: 0 });
+  }
+  back.style.color = C.ink;
+  back.style.webkitTextStroke = `${Math.round(size * 0.13)}px ${C.ink}`;
+  back.style.filter = "drop-shadow(12px 12px 0 rgba(0,0,0,.55))";
+  const letters = [];
+  for (let i = 0; i < word.length; i++) {
+    const b = el("span", "", back, word[i]);
+    const f = el("span", "", front, word[i]);
+    css(f, { background: `linear-gradient(180deg, ${C.lime} 15%, #3fe6c0 85%)`, webkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" });
+    letters.push([b, f]);
+  }
+  // Measure the Y before anything is scaled away.
+  const yr = letters[0][1].getBoundingClientRect();
+  const halo = el("div", "abs");
+  css(halo, { width: `${yr.width * 1.15}px`, height: `${size * 0.22}px`, border: `${size * 0.045}px solid ${C.lime}`, borderRadius: "50%",
+    boxShadow: `0 0 0 ${size * 0.02}px ${C.ink}, inset 0 0 0 ${size * 0.02}px ${C.ink}`,
+    left: `${yr.left - yr.width * 0.12}px`, top: `${yr.top - size * 0.12}px`, transform: "rotate(-10deg)" });
+  letters.forEach(([b, f], i) => {
+    const rot = rr(-25, 25);
+    tl.fromTo([b, f], { scale: 0, rotation: rot, y: -60 }, { scale: 1, rotation: rr(-4, 4), y: 0, duration: 0.42, ease: "back.out(2.6)" }, at + i * 0.05);
+    sfx("letter", at + i * 0.05 + 0.04, i);
+  });
+  tl.fromTo(halo, { y: -120, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "back.out(1.8)" }, at + 0.5);
+  sfx("halo", at + 0.62);
+  tl.to(halo, { y: -14, duration: 1.1, ease: "sine.inOut", repeat: 12, yoyo: true }, at + 1.0);
+  return box;
+}
+
+// A comic starburst with a word in it.
+function burst(word, color, size, cx, cy) {
+  const g = el("div", "abs");
+  const pts = [];
+  const n = 18;
+  for (let i = 0; i < n * 2; i++) {
+    const a = (i / (n * 2)) * Math.PI * 2, r = (i % 2 ? 0.62 : 1) * size * rr(0.92, 1.08);
+    pts.push(`${(Math.cos(a) * r).toFixed(1)},${(Math.sin(a) * r * 0.72).toFixed(1)}`);
+  }
+  g.innerHTML = `<svg width="${size * 2.4}" height="${size * 2}" viewBox="${-size * 1.2} ${-size} ${size * 2.4} ${size * 2}" style="overflow:visible">
+    <polygon points="${pts.join(" ")}" fill="rgba(0,0,0,.5)" transform="translate(16,16)"/>
+    <polygon points="${pts.join(" ")}" fill="${color}" stroke="${C.ink}" stroke-width="10" stroke-linejoin="round"/></svg>`;
+  // YEET is in From Street Art: an ink layer under it, fat-stroked, then the
+  // colour (a stroke straight on the letters would fill their detail).
+  const sa = /YEET/.test(word);
+  const lay = { fontFamily: sa ? '"SA"' : '"Treat Front"', fontSize: `${size * 0.46}px`, width: `${size * 2.4}px`, textAlign: "center",
+    top: `${size * 0.66}px`, left: "-10px" };
+  if (sa) {
+    const tb = el("div", "abs", g, word);
+    css(tb, { ...lay, color: C.ink, webkitTextStroke: `${Math.round(size * 0.075)}px ${C.ink}` });
+  }
+  const t = el("div", sa ? "abs" : "abs ink", g, word);
+  css(t, { ...lay, color: C.hot });
+  css(g, { left: `${cx - size * 1.2}px`, top: `${cy - size}px`, width: `${size * 2.4}px`, height: `${size * 2}px` });
+  return g;
+}
+
+// --- Scenes -------------------------------------------------------------------
+
+const SCENES = {};
+
+// Hook, over gameplay: PULL BACK. / LET GO. / YEET!
+SCENES.hook = (tl) => {
+  wall(tl, { hole: true });
+  bezel();
+  const a = slab("PULL BACK.", C.hot, 92);
+  centre(a, 560, 300);
+  const b = slab("LET GO.", C.cyan, 92);
+  centre(b, 1340, 520);
+  slamIn(tl, a, 0.2, { rot: -9, end: -4 });
+  slamIn(tl, b, 0.9, { rot: 8, end: 3 });
+  slamOut(tl, a, 1.55, -1);
+  slamOut(tl, b, 1.6, 1);
+  const y = burst("YEET!", C.sun, 260, W / 2, 420);
+  tl.fromTo(y, { scale: 0, rotation: -20 }, { scale: 1, rotation: -4, duration: 0.36, ease: "back.out(2.6)" }, 1.75);
+  sfx("burst", 1.75);
+  tl.to(y, { x: "+=10", duration: 0.05, ease: "none", repeat: 7, yoyo: true }, 2.1);
+  tl.to(y, { scale: 1.08, duration: 0.5, ease: "sine.inOut", repeat: 1, yoyo: true }, 2.55);
+  tl.to(y, { scale: 0, rotation: 15, opacity: 0, duration: 0.25, ease: "back.in(2)" }, 3.75);
+  sfx("out", 3.75);
+  captions(tl, [[0.3, null, "A ONE-THUMB SPACE BRAWLER", C.violet]]);
+  return 4.2;
+};
+
+// The title card, full frame.
+SCENES.title = (tl) => {
+  wall(tl);
+  title(tl, W / 2, 430, 250, 0.1);
+  const s = slab("A ONE-THUMB SPACE BRAWLER", C.hot, 64);
+  centre(s, W / 2, 720);
+  slamIn(tl, s, 0.6, { rot: -5, end: -2 });
+  const c = el("div", "chip", null, `<span>BUILT FOR SOLANA SEEKER</span>`);
+  css(c, { fontSize: "40px", color: C.lime, padding: "16px 30px 12px" });
+  centre(c, W / 2, 875);
+  tl.from(c, { y: 40, opacity: 0, duration: 0.3, ease: "back.out(2)" }, 1.0);
+  sfx("pop", 1.0);
+  return 2.6;
+};
+
+// Gameplay, with how it plays.
+SCENES.play = (tl) => {
+  wall(tl, { hole: true });
+  bezel();
+  chip("IN-GAME FOOTAGE", HOLE.x + 24, HOLE.y + HOLE.h - 70, C.lime, tl);
+  captions(tl, [
+    [0.15, 2.6, "PUT A THUMB ON THE SHIP. PULL BACK. LET GO.", C.hot],
+    [2.6, 5.0, "IT PING-PONGS OFF EVERYTHING IT HITS", C.cyan],
+    [5.0, null, "EVERY SECTOR ENDS ON A BOSS", C.sun],
+  ]);
+  return 7.5;
+};
+
+// The home screen, into the wallet part.
+SCENES.home = (tl) => {
+  wall(tl, { hole: true });
+  bezel();
+  captions(tl, [[0.15, null, "ONE TAP: CONNECT WALLET", C.violet]]);
+  return 2.2;
+};
+
+// The phone parts the player films (scrcpy). The screen stays clear for the
+// clip; the captions are the demo script's lines.
+const SLOTS = {
+  wallet: { len: 9, chip: "REAL PHONE · PHANTOM", lines: [
+    [0.15, 5.3, "ONE SIGN-IN-WITH-SOLANA PROMPT", C.violet],
+    [5.3, null, "THE SEEKER GENESIS TOKEN IS THE RANKED PASS", C.lime]],
+    ph: "CONNECT WALLET → PHANTOM: CONNECT + SIGN IN → THE CHIP: KEY, SKR, GENESIS → PILOT ID CARD" },
+  daily: { len: 10, chip: "REAL PHONE · DAILY SORTIE", lines: [
+    [0.15, 2.9, "ONE LEVEL A DAY. PRACTISE ALL YOU LIKE.", C.sun],
+    [2.9, 6.15, "RANKED RUNS ARE ARMED IN THE SEED VAULT", C.hot],
+    [6.15, null, "SIGNED. ONE SHOT, NO RETRY.", C.cyan]],
+    ph: "DAILY SORTIE: LEVEL, COUNTDOWN, STREAK, BOARDS → RANKED RUN → SIGN \"ARM THE SLING\" (FINGERPRINT)" },
+  board: { len: 5, chip: "REAL PHONE · LEADERBOARD", lines: [
+    [0.15, null, "ONE SHOT AT IT. THE BOARD UPDATES STRAIGHT AWAY.", C.lime]],
+    ph: "BACK TO THE BOARD: POINTS AND RANK" },
+  shop: { len: 10, chip: "REAL PHONE · SKR", lines: [
+    [0.15, 4.0, "SKR BUYS RANKED RUNS, LIVERIES, TRAILS", C.sun],
+    [4.0, 6.9, "PAID IN SKR, CHECKED ON CHAIN", C.violet],
+    [6.9, null, "GRANTED. THE EXTRA RUN IS YOURS.", C.hot]],
+    ph: "+1 RANKED RUN · 25 SKR → PHANTOM → CHECKING ON CHAIN → GRANTED · STORE SKR TAB: 24 KARAT → TIP A RIVAL" },
+  settings: { len: 4, chip: "REAL PHONE · SETTINGS", lines: [
+    [0.2, null, "BUZZ AND TILT TO AIM", C.cyan]],
+    ph: "SETTINGS: BUZZ, TILT TO AIM" },
+};
+for (const [name, s] of Object.entries(SLOTS)) {
+  SCENES["slot_" + name] = (tl) => {
+    wall(tl, { hole: true });
+    bezel();
+    chip(s.chip, HOLE.x + 24, HOLE.y + HOLE.h - 70, C.lime, tl);
+    captions(tl, s.lines);
+    return s.len;
+  };
+  // What the rough cut shows in the screen until the clip is in (a still).
+  SCENES["ph_" + name] = (tl) => {
+    const p = el("div", "abs");
+    css(p, { left: `${HOLE.x}px`, top: `${HOLE.y}px`, width: `${HOLE.w}px`, height: `${HOLE.h}px`,
+      background: `repeating-linear-gradient(-45deg, #1b1430 0 40px, #241a3e 40px 80px)` });
+    const t = el("div", "abs", p, `<div style="font-family:KA1;font-size:30px;color:${C.sun};margin-bottom:26px">YOUR PHONE CLIP HERE · ${s.len} S</div>
+      <div style="font-family:FOO;font-size:40px;color:#fff;line-height:1.35">${s.ph}</div>`);
+    css(t, { left: "120px", right: "120px", top: "200px", textAlign: "center" });
+    return 0.1;
+  };
+}
+
+// A chapter card: big slab and three chips.
+function chapter(tl, head, color, chips) {
+  wall(tl);
+  const s = slab(head, color, 120);
+  centre(s, W / 2, 420);
+  slamIn(tl, s, 0.05, { rot: -6, end: -2 });
+  const cs = chips.map(([text, col]) => css(el("div", "chip", null, `<span>${text}</span>`), { fontSize: "36px", color: col, padding: "16px 30px 12px" }));
+  row(cs, W / 2, 690, 60);
+  cs.forEach((c, i) => {
+    tl.fromTo(c, { y: 50, opacity: 0, scale: 0.8 }, { y: 0, opacity: 1, scale: 1, duration: 0.25, ease: "back.out(2.2)" }, 0.35 + i * 0.1);
+    sfx("pop", 0.35 + i * 0.1, i);
+  });
+}
+SCENES.daily = (tl) => {
+  chapter(tl, "DAILY SORTIE", C.sun, [["ONE LEVEL A DAY", C.sun], ["SAME FOR EVERY PILOT", C.cyan], ["ONE RANKED RUN PER SEEKER", C.hot]]);
+  return 1.9;
+};
+
+// A ranked run, over gameplay.
+SCENES.ranked = (tl) => {
+  wall(tl, { hole: true });
+  bezel();
+  chip("RANKED RUN", HOLE.x + 24, HOLE.y + HOLE.h - 70, C.hot, tl);
+  captions(tl, [
+    [0.15, 3.1, "NO RETRY ON A RANKED RUN", C.hot],
+    [3.1, null, "EVERY LAUNCH AND HIT BUZZES THE PHONE", C.lime],
+  ]);
+  return 6;
+};
+
+// --- How SKR pays ------------------------------------------------------------------
+
+function stepCard(n, head, color, body, cx, cy, w = 420) {
+  const card = el("div", "card");
+  css(card, { width: `${w}px`, left: `${cx - w / 2}px`, top: `${cy}px`, padding: "70px 26px 26px", transform: "rotate(-1.5deg)" });
+  const num = el("div", "abs ink-s", card, String(n));
+  css(num, { fontFamily: "OJ", fontSize: "84px", color, left: "-26px", top: "-58px" });
+  const h = slab(head, color, 40, { parent: card, drips: [] });
+  css(h, { left: "60px", top: "-34px" });
+  const b = el("div", "", card, body);
+  css(b, { fontFamily: "FOO", fontSize: "32px", color: C.ink, lineHeight: 1.3 });
+  return card;
+}
+SCENES.skr = (tl) => {
+  wall(tl);
+  const head = slab("HOW AN SKR PAYMENT WORKS", C.sun, 66);
+  centre(head, W / 2, 120);
+  slamIn(tl, head, 0.1, { rot: -5, end: -1.5 });
+  const xs = [270, 727, 1184, 1641], y = 300;
+  const cards = [
+    stepCard(1, "ORDER", C.cyan, `The game asks the leaderboard for an order. It answers with the price and a memo:<div class="mono" style="margin-top:12px;font-size:28px;background:${C.ink};color:${C.lime};padding:8px 12px">yeetfleet:&lt;order&gt;</div>`, xs[0], y),
+    stepCard(2, "PAY", C.violet, "Phantom signs one SKR transfer to the treasury, the memo attached, over the Mobile Wallet Adapter.", xs[1], y),
+    stepCard(3, "CHECK", C.hot, "", xs[2], y),
+    stepCard(4, "GRANTED", C.lime, "Only then: the extra ranked run, the livery, the trail.", xs[3], y),
+  ];
+  // Step 3: the checks, ticked one by one.
+  const checks = ["the memo is this order's", "the mint is SKR", "the treasury got the price", "landed with no error", "the signature never bought anything"];
+  const list = cards[2].lastChild;
+  list.innerHTML = `<div style="margin-bottom:10px">The leaderboard reads the transaction from Solana:</div>`;
+  const ticks = checks.map((c) => {
+    const row = el("div", "", list, `<span class="tk" style="display:inline-block;width:34px;color:#1a9e4a;font-family:OJ">✓</span>${c}`);
+    css(row, { fontSize: "29px", lineHeight: 1.25 });
+    return row;
+  });
+  cards.forEach((c, i) => {
+    tl.fromTo(c, { y: 80, opacity: 0, rotation: -6 }, { y: 0, opacity: 1, rotation: -1.5, duration: 0.35, ease: "back.out(1.8)" }, 0.45 + i * 1.0);
+    sfx("card", 0.45 + i * 1.0, i);
+  });
+  ticks.forEach((r, i) => {
+    tl.from(r, { opacity: 0, x: -20, duration: 0.15, ease: "power2.out" }, 3.0 + i * 0.22);
+    tl.fromTo(r.querySelector(".tk"), { scale: 3 }, { scale: 1, duration: 0.2, ease: "back.out(3)" }, 3.0 + i * 0.22);
+    sfx("tick", 3.0 + i * 0.22, i);
+  });
+  // An SKR coin rides from the wallet to the treasury, arcing.
+  const coin = el("div", "abs");
+  coin.innerHTML = `<svg width="150" height="150" viewBox="-55 -55 110 110"><circle r="48" fill="${C.sun}" stroke="${C.ink}" stroke-width="8"/>
+    <circle r="34" fill="none" stroke="#ffe37a" stroke-width="5"/><text y="12" text-anchor="middle" font-size="32" fill="${C.ink}">SKR</text></svg>`;
+  // Under the cards: from below the wallet's card to below the check's.
+  css(coin, { left: `${xs[1] - 75}px`, top: `${y + 420}px` });
+  tl.fromTo(coin, { opacity: 0, scale: 0 }, { opacity: 1, scale: 1, duration: 0.25, ease: "back.out(2)" }, 1.95);
+  sfx("coin", 1.95);
+  sfx("whoosh", 2.2);
+  tl.to(coin, { x: xs[2] - xs[1] - 260, duration: 0.7, ease: "power2.inOut" }, 2.2);
+  tl.to(coin, { y: -70, duration: 0.35, ease: "power2.out", yoyo: true, repeat: 1 }, 2.2);
+  tl.to(coin, { rotation: 360, duration: 0.7, ease: "power1.inOut" }, 2.2);
+  tl.to(coin, { scale: 0, opacity: 0, duration: 0.2, ease: "back.in(2)" }, 2.85);
+  sfx("chip", 2.9);
+  // Granted: a stamp.
+  const stamp = slab("+1 RANKED RUN", C.lime, 44, { drips: [] });
+  centre(stamp, xs[3], y + 400);
+  slamIn(tl, stamp, 4.3, { from: 2.2, rot: -14, end: -6, sfx: "stamp" });
+  const foot = slab("WE NEVER HOLD ANYONE'S SKR: WALLET TO TREASURY, TIPS WALLET TO WALLET", C.ink, 32, { drips: [] });
+  centre(foot, W / 2, 985);
+  slamIn(tl, foot, 5.2, { rot: 3, end: 0 });
+  return 7.2;
+};
+
+// --- Architecture ------------------------------------------------------------------
+
+function node(head, color, lines, x, y, w) {
+  const n = el("div", "card");
+  css(n, { left: `${x}px`, top: `${y}px`, width: `${w}px`, padding: "62px 22px 20px" });
+  const h = slab(head, color, 38, { parent: n, drips: [] });
+  css(h, { left: "22px", top: "-32px" });
+  const b = el("div", "", n, lines.map((l) => `<div>${l}</div>`).join(""));
+  css(b, { fontFamily: "FOO", fontSize: "31px", color: C.ink, lineHeight: 1.35 });
+  return n;
+}
+SCENES.arch = (tl) => {
+  wall(tl);
+  const head = slab("UNDER THE HOOD", C.cyan, 66);
+  centre(head, W / 2, 110);
+  slamIn(tl, head, 0.1, { rot: -5, end: -1.5 });
+  const svg = svgEl("svg", { width: W, height: H, style: "position:absolute;left:0;top:0;overflow:visible" }, stage);
+  const N = {
+    game: node("YEETFLEET", C.hot, ["Godot 4, GDScript", "Android, built for Seeker", "haptics, tilt to aim"], 70, 290, 470),
+    mwa: node("MOBILE WALLET ADAPTER", C.violet, ["our Godot Android plugin", "connect, sign in, sign, send"], 70, 650, 470),
+    wallet: node("PHANTOM · SEED VAULT", C.sun, ["the keys never leave", "the wallet"], 700, 800, 470),
+    worker: node("CLOUDFLARE WORKER + D1", C.cyan, ["Sign-In-With-Solana sessions", "Daily Sortie boards, streaks", "SKR orders, checked on chain"], 680, 290, 560),
+    rpc: node("HELIUS RPC", C.orange, ["mainnet reads"], 1400, 290, 450),
+    sol: node("SOLANA MAINNET", C.lime, ["Seeker Genesis Token check", "SKR transfers with memos"], 1370, 650, 480),
+  };
+  const box = (n) => { const r = n.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, cx: (r.left + r.right) / 2, cy: (r.top + r.bottom) / 2 }; };
+  const B = Object.fromEntries(Object.entries(N).map(([k, n]) => [k, box(n)]));
+  // Spray-paint links, drawn on in order.
+  const links = [
+    [`M${B.game.r} ${B.game.cy} C ${B.game.r + 90} ${B.game.cy}, ${B.worker.l - 90} ${B.worker.cy}, ${B.worker.l} ${B.worker.cy}`, C.cyan, "HTTPS", 0],
+    [`M${B.game.cx} ${B.game.b} L ${B.mwa.cx} ${B.mwa.t}`, C.violet, "", 1],
+    [`M${B.mwa.r} ${B.mwa.cy + 30} C ${B.mwa.r + 80} ${B.mwa.cy + 30}, ${B.wallet.l - 80} ${B.wallet.cy}, ${B.wallet.l} ${B.wallet.cy}`, C.sun, "", 2],
+    [`M${B.wallet.r} ${B.wallet.cy} C ${B.wallet.r + 120} ${B.wallet.cy}, ${B.sol.l - 120} ${B.sol.cy + 40}, ${B.sol.l} ${B.sol.cy + 40}`, C.lime, "SIGNED TX", 3],
+    [`M${B.worker.r} ${B.worker.cy} L ${B.rpc.l} ${B.rpc.cy}`, C.orange, "", 4],
+    [`M${B.rpc.cx} ${B.rpc.b} L ${B.sol.cx} ${B.sol.t}`, C.lime, "", 5],
+  ];
+  const order = ["game", "worker", "mwa", "wallet", "rpc", "sol"];
+  order.forEach((k, i) => {
+    tl.fromTo(N[k], { scale: 0.6, opacity: 0, rotation: rr(-8, 8) }, { scale: 1, opacity: 1, rotation: rr(-1.5, 1.5), duration: 0.3, ease: "back.out(2)" }, 0.35 + i * 0.25);
+    sfx("card", 0.35 + i * 0.25, i);
+  });
+  for (const [d, col, label, i] of links) {
+    const under = svgEl("path", { d, fill: "none", stroke: C.ink, "stroke-width": 20, "stroke-linecap": "round" }, svg);
+    const p = svgEl("path", { d, fill: "none", stroke: col, "stroke-width": 10, "stroke-linecap": "round" }, svg);
+    const len = p.getTotalLength();
+    for (const q of [under, p]) {
+      q.style.strokeDasharray = `${len}`;
+      tl.fromTo(q, { strokeDashoffset: len }, { strokeDashoffset: 0, duration: 0.4, ease: "power2.inOut" }, 2.0 + i * 0.2);
+    }
+    sfx("draw", 2.0 + i * 0.2, i);
+    if (label) {
+      const mid = p.getPointAtLength(len * 0.42);
+      const t = svgEl("text", { x: mid.x, y: mid.y - 22, "text-anchor": "middle", "font-size": 26, fill: "#fff", stroke: C.ink, "stroke-width": 8, "paint-order": "stroke" }, svg);
+      t.textContent = label;
+      tl.from(t, { opacity: 0, duration: 0.25 }, 2.2 + i * 0.2);
+    }
+  }
+  // Dots travel the links: the flow is live.
+  links.forEach(([d, col], i) => {
+    const dot = svgEl("circle", { r: 9, fill: "#fff", stroke: C.ink, "stroke-width": 4 }, svg);
+    const p = svgEl("path", { d, fill: "none" }, svg);
+    const len = p.getTotalLength();
+    const o = { t: 0 };
+    tl.fromTo(o, { t: 0 }, { t: 1, duration: 1.0, ease: "sine.inOut", repeat: 4, yoyo: true,
+      onUpdate: () => { const q = p.getPointAtLength(o.t * len); dot.setAttribute("cx", q.x); dot.setAttribute("cy", q.y); } }, 3.4 + i * 0.08);
+    tl.fromTo(dot, { opacity: 0 }, { opacity: 1, duration: 0.2 }, 3.4 + i * 0.08);
+  });
+  return 7.4;
+};
+
+// Seeker-native, four chips.
+SCENES.seeker = (tl) => {
+  wall(tl);
+  const s = slab("SEEKER-NATIVE", C.lime, 120);
+  centre(s, W / 2, 330);
+  slamIn(tl, s, 0.1, { rot: -6, end: -2 });
+  const items = [["SEED VAULT ARMS EVERY RANKED RUN", C.sun], ["GENESIS TOKEN = THE RANKED PASS", C.lime], ["HAPTICS ON EVERY LAUNCH AND HIT", C.hot], ["TILT TO AIM", C.cyan]];
+  const cs = items.map(([t, col]) => css(el("div", "chip", null, `<span>${t}</span>`), { fontSize: "38px", color: col, padding: "16px 30px 12px" }));
+  row(cs.slice(0, 2), W / 2, 600, 50);
+  row(cs.slice(2), W / 2, 740, 50);
+  cs.forEach((c, i) => {
+    tl.fromTo(c, { y: 50, opacity: 0, scale: 0.8 }, { y: 0, opacity: 1, scale: 1, duration: 0.25, ease: "back.out(2.2)" }, 0.35 + i * 0.12);
+    sfx("pop", 0.35 + i * 0.12, i);
+  });
+  return 3.0;
+};
+
+// The end card.
+SCENES.end = (tl) => {
+  wall(tl);
+  title(tl, W / 2, 360, 210, 0.1);
+  const s = slab("PULL BACK. LET GO. YEET.", C.hot, 58);
+  centre(s, W / 2, 610);
+  slamIn(tl, s, 0.6, { rot: -5, end: -2 });
+  const x = el("div", "chip", null, `<span><b style="font-family:Arial;font-weight:900">𝕏</b>&nbsp; @THEREALGUNROAR</span>`);
+  css(x, { fontSize: "44px", color: "#fff", padding: "18px 34px 14px" });
+  tl.from(x, { y: 40, opacity: 0, duration: 0.3, ease: "back.out(2)" }, 0.95);
+  sfx("pop", 0.95);
+  const sk = el("div", "chip", null, `<span>BUILT FOR SOLANA SEEKER</span>`);
+  css(sk, { fontSize: "44px", color: C.lime, padding: "18px 34px 14px" });
+  row([x, sk], W / 2, 810, 50);
+  tl.from(sk, { y: 40, opacity: 0, duration: 0.3, ease: "back.out(2)" }, 1.1);
+  sfx("pop", 1.1, 1);
+  return 4.2;
+};
+
+// --- Boot ---------------------------------------------------------------------
+
+(async () => {
+  const name = params.get("scene") || "title";
+  await document.fonts.load('100px "Treat Front"');
+  await document.fonts.load('100px "SA"');
+  await Promise.all(["Treat Back", "Treat", "SA", "FOO", "OJ", "KA1", "Term"].map((f) => document.fonts.load(`40px "${f}"`)));
+  await document.fonts.ready;
+  const tl = gsap.timeline({ paused: true });
+  const dur = SCENES[name](tl);
+  tl.set({}, {}, dur);
+  window.DURATION = dur;
+  window.CUES = CUES;
+  window.seek = (t) => { tl.time(Math.min(t, dur), false); };
+  window.seek(0);
+  window.READY = true;
+  if (!RENDER) {
+    const t0 = performance.now();
+    const tick = () => { window.seek(((performance.now() - t0) / 1000) % dur); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }
+})();
+</script>
+</body>
+</html>

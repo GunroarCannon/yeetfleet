@@ -330,6 +330,8 @@ static var ai_sling_share := 0.35
 static var cam_pinch_zoom := true
 ## Swipe/slingshot: two fingers twist or drag together to swing the camera round the ship (right-drag on PC).
 static var cam_twist_rotate := true
+## Slingshot: swing the camera round to the ship's front and the resting ship turns to face where you look.
+static var cam_face_view := true
 ## Slingshot: the camera follows the flight smoothly instead of turning with the hull's spin.
 static var sling_steady_cam := true
 ## Slingshot: no look-ahead offset while aiming (it slid the ship across the
@@ -602,6 +604,7 @@ const BOOL_FIELDS := [
 	"ai_slingshot",
 	"cam_pinch_zoom",
 	"cam_twist_rotate",
+	"cam_face_view",
 	"sling_steady_cam",
 	"sling_aim_cam_hold",
 	"haptics",
@@ -671,6 +674,7 @@ static func get_effect(field: String) -> bool:
 		"ai_slingshot": return ai_slingshot
 		"cam_pinch_zoom": return cam_pinch_zoom
 		"cam_twist_rotate": return cam_twist_rotate
+		"cam_face_view": return cam_face_view
 		"sling_steady_cam": return sling_steady_cam
 		"sling_aim_cam_hold": return sling_aim_cam_hold
 		"haptics": return haptics
@@ -747,6 +751,7 @@ static func _set_bool(field: String, value: bool) -> void:
 		"ai_slingshot": ai_slingshot = value
 		"cam_pinch_zoom": cam_pinch_zoom = value
 		"cam_twist_rotate": cam_twist_rotate = value
+		"cam_face_view": cam_face_view = value
 		"sling_steady_cam": sling_steady_cam = value
 		"sling_aim_cam_hold": sling_aim_cam_hold = value
 		"haptics": haptics = value

@@ -438,6 +438,12 @@ func physics_tick(delta: float) -> void:
 		SlingRun.State.READY, SlingRun.State.RECALLING:
 			model.command.yaw = 0.0
 			model.command.pitch = 0.0
+			# At rest with the camera swung round to its front, it turns to
+			# face where the player looks.
+			if run.state == SlingRun.State.READY:
+				face_view()
+			else:
+				_facing_view = false
 	var firing := _fire_time > 0.0 and run.state in [SlingRun.State.FLYING, SlingRun.State.READY]
 	if _fire_time > 0.0:
 		_fire_time -= delta

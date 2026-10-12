@@ -1,0 +1,21 @@
+# id	start_s	window_s	line   (the voice-over, placed by vo_place.sh; times from out/seg/times.txt)
+01	1.50	0.80	Pull back.
+02	2.35	0.70	Let go.
+03	3.10	1.00	Yeet!
+04	5.70	2.40	Yeetfleet. The one-thumb space brawler.
+05	8.30	7.10	Pull back, let go. Your ship ricochets off everything it hits, and every sector ends on a boss.
+06	15.75	2.10	One tap connects your wallet.
+07	18.10	8.60	One Sign-In-With-Solana prompt. No password, no sign-up. Your Seeker Genesis Token is your ranked pass.
+08	27.00	1.70	The Daily Sortie.
+09	28.90	2.70	One level a day. Practise all you like.
+10	31.75	3.20	A ranked run is armed in the Seed Vault.
+11	35.05	3.50	You sign, and it's one shot. No retries.
+12	39.10	5.40	Every launch and every hit buzzes the phone. You feel every yeet.
+13	44.90	4.80	One shot, and the board updates straight away.
+14	50.00	6.80	S K R buys the extras. A Cloudflare Worker checks every payment on chain before anything is granted.
+15	57.10	3.80	Twenty-five S K R buys an extra ranked run.
+16	61.10	2.80	One prompt, paid and checked on chain.
+17	64.00	2.90	Granted. Liveries, trails, tips: wallet to wallet.
+18	67.10	7.10	Godot, our own wallet plugin, and a Worker that checks everything on Solana. We never hold your keys.
+19	74.45	2.90	Seed Vault. Genesis pass. Haptics. Tilt to aim.
+20	77.60	4.00	Yeetfleet. Pull back. Let go. Yeet!

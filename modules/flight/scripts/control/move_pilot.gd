@@ -148,6 +148,44 @@ func _on_wheel(steps: float) -> void:
 		root.tutorial_note("zoom", absf(steps) * 0.12)
 
 
+# --- Facing the view ---
+# Swing the camera round to the ship's front and the ship turns to face where
+# you are looking, so the guns point down the view instead of at the camera.
+
+## The view has to be swung at least this far round the ship (degrees) ...
+const FACE_VIEW_SWING_DEG := 90.0
+## ... and the nose point this far off the view's heading (the front half is
+## toward the camera) before the ship starts turning, and until it is within
+## [constant FACE_VIEW_DONE_DEG] of it. A latch, so a nose at the edge doesn't
+## twitch.
+const FACE_VIEW_FROM_DEG := 90.0
+const FACE_VIEW_DONE_DEG := 15.0
+var _facing_view := false
+
+
+## While the player has the camera looking at the ship's front, steer the
+## nose onto the way the view looks. True while it is doing so (the caller
+## leaves the nose alone that tick). Only for a ship at rest or under
+## the player's hand: never call it mid-flight.
+func face_view() -> bool:
+	var rig := root.camera_rig
+	var ship := root.active_ship_node()
+	if rig == null or ship == null or not JuiceSettings.cam_face_view or not rig.is_follow_mode():
+		_facing_view = false
+		return false
+	var heading := rig.view_heading()
+	var nose := -ship.global_transform.basis.z
+	var off := rad_to_deg(nose.angle_to(heading))
+	var swung := rig.swing_yaw_deg() >= FACE_VIEW_SWING_DEG
+	if _facing_view:
+		_facing_view = swung and off > FACE_VIEW_DONE_DEG
+	else:
+		_facing_view = swung and off >= FACE_VIEW_FROM_DEG
+	if _facing_view:
+		root.steer_nose_toward(heading)
+	return _facing_view
+
+
 # --- Arrows ---
 
 ## The [param i]th world arrow, made and parented to the flight scene on first use.

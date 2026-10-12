@@ -34,6 +34,12 @@ func _initialize() -> void:
 	_root.set_move_profile(FlightRoot.MoveProfile.SLINGSHOT)
 	await _launch_case("pulled straight down (thrown along the view)", Vector2(0.0, 1.0))
 	await _launch_case("pulled down a little left", Vector2(-0.25, 1.0))
+	# The player has swung the camera round already and throws along what they
+	# look at: the frame must hold, not turn onto the flight (it used to, and
+	# the view ended up looking from the ship's front).
+	await _launch_case("view swung 90°, thrown along the view", Vector2(0.0, 1.0), 90.0)
+	await _launch_case("view swung 180° (ship's front), thrown along the view", Vector2(0.0, 1.0), 180.0)
+	await _face_view_case()
 	print("")
 	if _failures.is_empty():
 		print("── PASS ──────────────────────────────────────────────────")
@@ -43,8 +49,9 @@ func _initialize() -> void:
 		quit(1)
 
 
-func _launch_case(label: String, pull_dir: Vector2) -> void:
+func _launch_case(label: String, pull_dir: Vector2, swing_deg := 0.0) -> void:
 	_root.model.halt()
+	_root.camera_rig.user_yaw = swing_deg
 	await _seconds(3.0)
 	var pilot := _root.pilot() as SlingshotPilot
 	var run := pilot.run
@@ -76,7 +83,7 @@ func _launch_case(label: String, pull_dir: Vector2) -> void:
 			var rig := _root.camera_rig
 			var ref_fwd := -Basis(rig._ref_quat).z
 			var ld := pilot._launch_dir
-			trace.append("%d:%.1f(ref %.1f, launch %.1f, la %.0f, mf %.0f, cal %.2f)" % [i, turn, rad_to_deg(ref_fwd.angle_to(start_fwd)),
+			trace.append("%d:%.1f(ref %.1f, vh %.1f, beh %.2f, launch %.1f, la %.0f, mf %.0f, cal %.2f)" % [i, turn, rad_to_deg(ref_fwd.angle_to(start_fwd)), rad_to_deg(rig.view_heading().angle_to(start_fwd)), rig._behind,
 				rad_to_deg(ld.angle_to(start_fwd)) if ld != Vector3.ZERO else -1.0, rig._look_ahead.length(), rig._motion_focus.length(), rig._calm()])
 	print("  %s: camera turned at most %.1f° (view roll %.1f°), launched %s" % [label, worst, worst_roll, launched])
 	print("    turn by frame: %s" % " ".join(trace))
@@ -84,6 +91,35 @@ func _launch_case(label: String, pull_dir: Vector2) -> void:
 	run.catch_ship()
 	JuiceSettings.magnet_strength = magnet
 	await _seconds(1.0)
+
+
+## Camera swung to the ship's front: the resting ship turns to face where the
+## camera looks, and does nothing of the sort with the dial off.
+func _face_view_case() -> void:
+	var rig := _root.camera_rig
+	var pilot := _root.pilot() as SlingshotPilot
+	_root.model.halt()
+	await _seconds(1.0)
+	rig.user_yaw = 0.0
+	await _seconds(2.0)
+	# Nose along the view, then the camera swung to its front.
+	_root.model.global_transform.basis = Basis.looking_at(rig.view_heading(), Vector3.UP)
+	await _seconds(0.5)
+	var nose := -_root.active_ship_node().global_transform.basis.z
+	JuiceSettings.cam_face_view = false
+	rig.user_yaw = 180.0
+	await _seconds(3.0)
+	var off_dial := rad_to_deg((-_root.active_ship_node().global_transform.basis.z).angle_to(rig.view_heading()))
+	_report("dial off: the nose stays put (%.0f° off the view)" % off_dial, off_dial > 120.0)
+	JuiceSettings.cam_face_view = true
+	await _seconds(6.0)
+	var on := rad_to_deg((-_root.active_ship_node().global_transform.basis.z).angle_to(rig.view_heading()))
+	_report("camera at the ship's front: the nose turns to the view (%.0f° off)" % on, on < 25.0)
+	JuiceSettings.cam_face_view = true
+	rig.user_yaw = 0.0
+	await _seconds(2.0)
+	if nose == Vector3.ZERO or pilot == null:
+		_report("setup", false)
 
 
 func _short() -> float:

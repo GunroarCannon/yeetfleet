@@ -42,6 +42,10 @@ func deactivate() -> void:
 ## Only the look is read here — the stick and buttons are HUD widgets and take
 ## their own touches before anything reaches the bare screen.
 func handle_input(event: InputEvent) -> bool:
+	# Godot sends a touch's emulated mouse press before the touch itself.
+	if event is InputEventMouse and event.device == InputEvent.DEVICE_ID_EMULATION:
+		_touch_device = true
+		return false
 	if event is InputEventScreenTouch:
 		_touch_device = true
 		var st := event as InputEventScreenTouch

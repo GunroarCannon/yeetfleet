@@ -2860,8 +2860,16 @@ func start_tutorial() -> void:
 ## FlightTutorial.note]); [param amount] is how much of it, for the gestures
 ## that have to add up (looking round, zooming).
 func tutorial_note(event: String, amount := 1.0) -> void:
+	if sandbox != null and is_instance_valid(sandbox):
+		sandbox.note(event, amount)
 	if tutorial != null and is_instance_valid(tutorial):
 		tutorial.note(event, amount)
+
+
+## Put [param c] on the HUD, under the comic shouts (the sandbox's goals).
+func add_hud_overlay(c: Control) -> void:
+	if _hud != null:
+		_hud.add_banner(c)
 
 
 ## Keep every AI ship unhurtable while the tutorial is still teaching (see
@@ -2928,6 +2936,8 @@ func _on_ai_ship_destroyed(ship: AiShip) -> void:
 		power_ups.maybe_drop(ship.global_position)
 	tutorial_note("kill")
 	var chain := combo.note_kill(ship.global_position)
+	if sandbox != null and is_instance_valid(sandbox):
+		sandbox.note("chain", float(chain))
 	score += 100 * maxi(chain, 1)
 	if chain >= 2 and JuiceSettings.combo_counter:
 		hit_word("x%d!" % chain, ship.global_position, Color("ffe23d"), 1.0 + minf(float(chain) * 0.12, 0.8))

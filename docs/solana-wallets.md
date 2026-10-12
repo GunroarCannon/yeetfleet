@@ -17,6 +17,9 @@ All created 2026-10-08. The game reads these from `Chain` (`modules/chain/script
   copy). It is the only copy; lose it and every SKR paid in is gone. Before
   mainnet, consider moving the treasury to a hardware wallet or a multisig
   (Squads) and updating `Chain.TREASURY`.
+- The treasury needs **no SOL**: the buyer's wallet pays the rent for its
+  SKR token account on the first purchase. The Worker holds only its public
+  address, never a key.
 - Check it: `solana balance 2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1 --url devnet`,
   `spl-token accounts --owner 2ZGn8kxkJae4Q4sjU2uZiXT5x5ZtzSQh2P1KASYTn4R1 --url devnet`.
 - Burning (the plan's burn share): the treasury burns it in batches, e.g.

@@ -149,6 +149,42 @@ func _initialize() -> void:
 		closest = minf(closest, _root.model.global_position.distance_to(target))
 	var through := _root.model.global_position.distance_to(start) > start.distance_to(target) * 1.5
 	_report("the ship can't fly through a megastructure", not through)
+
+	# --- Mini goals ---
+	var goal_panel: SandboxGoals = _root.sandbox.goals
+	_report("the goals panel is up with %d goals" % SandboxGoals.SLOTS,
+		goal_panel != null and goal_panel.state().size() == SandboxGoals.SLOTS)
+	var goal_ids: Array = []
+	for gl: Dictionary in goal_panel.state():
+		goal_ids.append(gl["id"])
+	_report("no goal twice", goal_ids.size() == (goal_ids.duplicate() as Array).filter(func(i: Variant) -> bool: return goal_ids.count(i) == 1).size())
+	# Finish whichever goal is up by feeding it what it counts.
+	var goal_feed := {"wreck": "kill", "orbs": "powerup", "yeet": "launch", "chain": "chain", "raid": "raid", "help": "rescue"}
+	var goal := {}
+	for gl: Dictionary in goal_panel.state():
+		if goal_feed.has(gl["id"]):
+			goal = gl
+			break
+	if goal.is_empty():
+		_report("a goal that counts events is up", false)
+	else:
+		var pts_before: int = _root.score
+		var goal_ev: String = goal_feed[goal["id"]]
+		var feeds := int(ceilf(float(goal["need"]))) if goal_ev != "chain" else 1
+		for i in feeds:
+			_root.sandbox.note(goal_ev, float(goal["need"]) if goal_ev == "chain" else 1.0)
+		var goal_done := false
+		for gl: Dictionary in goal_panel.state():
+			if gl["id"] == goal["id"] and gl["done"]:
+				goal_done = true
+		_report("feeding '%s' finishes the '%s' goal" % [goal_ev, goal["id"]], goal_done)
+		_report("a finished goal pays bonus points", _root.score > pts_before)
+		await _seconds(SandboxGoals.DONE_HOLD + 0.6)
+		var goal_replaced := true
+		for gl: Dictionary in goal_panel.state():
+			if gl["done"]:
+				goal_replaced = false
+		_report("a finished goal is replaced by a new one", goal_replaced and goal_panel.state().size() == SandboxGoals.SLOTS)
 	_finish()
 
 

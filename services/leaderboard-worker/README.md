@@ -64,14 +64,23 @@ change, run the `d1 execute` line again (every statement is idempotent).
 
 ## Mainnet (real SKR)
 
-Not deployed yet. The game's "Android dApp Store" export preset (feature tag
-`mainnet`) uses mainnet SKR and `Chain.WORKER_URL_MAINNET`, which stays ""
-(offline, unranked) until this is done:
+The game's "Android dApp Store" export preset (feature tag `mainnet`) uses
+mainnet SKR and `Chain.WORKER_URL_MAINNET`
+(`https://yeetfleet-mainnet.yeetfleet-leaderboard-worker.workers.dev`). The
+mainnet D1 database exists (its id is in `wrangler.toml`); the rest, in one
+go (the Helius key is only piped into `wrangler secret put`, never written to
+a file; it also gives the devnet Worker Helius RPCs):
+
+```sh
+bash scripts/deploy_mainnet.sh <helius-api-key>
+```
+
+Step by step, the same thing:
 
 ```sh
 npx wrangler@4 d1 create yeetfleet-mainnet          # id into [env.mainnet] in wrangler.toml
 npx wrangler@4 d1 execute yeetfleet-mainnet --remote --file schema.sql --env mainnet
-node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))" | npx wrangler@4 secret put SESSION_SECRET --env mainnet
+S=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'); printf '%s' "$S" | npx wrangler@4 secret put SESSION_SECRET --env mainnet
 npx wrangler@4 secret put MAINNET_RPC_URL --env mainnet   # a Helius mainnet URL: required, see below
 npx wrangler@4 deploy --env mainnet                 # prints https://yeetfleet-mainnet.<you>.workers.dev
 ```

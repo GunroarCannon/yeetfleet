@@ -54,6 +54,7 @@ func _initialize() -> void:
 	await _check_sling_bounce_seek(sp)
 	await _check_sling_catch()
 	await _check_sling_steady_aim()
+	await _check_sling_first_touch()
 	await _check_sling_tap_fire(sp)
 	_check_sling_orbit_ends_run()
 	await _check_ai_sling(sp)
@@ -359,6 +360,61 @@ func _check_sling_steady_aim() -> void:
 	run.catch_ship()
 	JuiceSettings.magnet_strength = magnet
 	await _seconds(1.0)
+
+
+## The very first touch on a phone: Godot sends the emulated mouse press
+## (device DEVICE_ID_EMULATION) BEFORE the touch it comes from, and the reader
+## had not yet seen a touch to know it was on a touchscreen. The pull began on
+## the mouse pointer, the real touch was refused and swung the camera, and the
+## band stayed grey and unmoving.
+func _check_sling_first_touch() -> void:
+	var pilot := _root.pilot() as SlingshotPilot
+	var run := pilot.run
+	_root.model.halt()
+	await _seconds(0.5)
+	# A fresh session: no touch has been read yet.
+	pilot.gestures._touch_device = false
+	pilot.gestures._touches.clear()
+	var s := pilot.ship_screen_pos()
+	var finger := s + Vector2(short() * 0.22, short() * 0.18)
+	_emulated_mouse(s, true)
+	_touch(s, true)
+	await _frames(2)
+	var aiming := run.state == SlingRun.State.AIMING
+	for i in 4:
+		_drag(s.lerp(finger, float(i + 1) / 4.0))
+		_emulated_motion(s.lerp(finger, float(i + 1) / 4.0))
+		await process_frame
+	await _frames(3)
+	var pulled := pilot.pull.length()
+	var looking := _root._look_pointer != -1
+	print("  first touch: aiming %s, pull %.0f px, camera look grabbed the finger %s" % [aiming, pulled, looking])
+	_report("sling: the first touch of a session starts the pull", aiming)
+	_report("sling: the pull follows the finger (not stuck at zero)", pulled > short() * 0.15)
+	_report("sling: the first touch does not drag the camera", not looking)
+	_emulated_mouse(finger, false)
+	_touch(finger, false)
+	await _frames(2)
+	_report("sling: the first touch lets go cleanly", not pilot.gestures.is_down())
+	run.set_aiming(false)
+	await _seconds(0.3)
+
+
+func _emulated_mouse(pos: Vector2, down: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.device = InputEvent.DEVICE_ID_EMULATION
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.position = pos
+	e.pressed = down
+	_root._unhandled_input(e)
+
+
+func _emulated_motion(pos: Vector2) -> void:
+	var e := InputEventMouseMotion.new()
+	e.device = InputEvent.DEVICE_ID_EMULATION
+	e.position = pos
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT
+	_root._unhandled_input(e)
 
 
 func _check_sling_tap_fire(sp: AiSpawner) -> void:

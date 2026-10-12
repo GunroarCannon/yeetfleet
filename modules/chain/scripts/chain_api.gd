@@ -6,7 +6,8 @@
 ## Worker's error code, or "offline" when it couldn't be reached at all.
 extends RefCounted
 
-## A request gives up after this long (a phone on a bad signal).
+## A request gives up after this long (a phone on a bad signal; a sign-in
+## waits on the Worker's database and a chain lookup).
 const TIMEOUT_SEC := 12.0
 
 
@@ -30,12 +31,15 @@ static func send(base: String, method: int, path: String, body: Variant, token :
 	if token != "":
 		headers.append("Authorization: Bearer " + token)
 	var data := JSON.stringify(body) if body != null else ""
-	if http.request(base.trim_suffix("/") + path, headers, method, data) != OK:
+	var started := http.request(base.trim_suffix("/") + path, headers, method, data)
+	if started != OK:
+		print("[api] %s: request did not start (%d)" % [path, started])
 		http.queue_free()
 		return {"ok": false, "code": "offline", "message": "Could not start the request", "status": 0}
 	var res: Array = await http.request_completed
 	http.queue_free()
 	if res[0] != HTTPRequest.RESULT_SUCCESS:
+		print("[api] %s: no answer, HTTPRequest result %d" % [path, res[0]])
 		return {"ok": false, "code": "offline", "message": "No answer from the server (%d)" % res[0], "status": 0}
 	var parsed: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
 	var out: Dictionary = parsed if parsed is Dictionary else {}

@@ -738,6 +738,19 @@ func _user_basis() -> Basis:
 	return Basis(Vector3.UP, deg_to_rad(_user_yaw)) * Basis(Vector3.RIGHT, deg_to_rad(-_user_pitch))
 
 
+## The way the follow views look, as a world direction: the followed frame's
+## forward turned by the player's swing (the camera sits on the opposite side,
+## so this is "where the ship would be flying if it were flying away from the
+## camera"). Swung half way round, it points at the ship's own nose.
+func view_heading() -> Vector3:
+	return -(Basis(_ref_quat) * _user_basis()).z
+
+
+## How far the player has swung the view round the ship, degrees (0..180).
+func swing_yaw_deg() -> float:
+	return absf(wrapf(user_yaw, -180.0, 180.0))
+
+
 ## 0..1: how far the view has been swung off its normal line (the aim then
 ## moves from "ahead of the ship" onto the ship itself, so it stays the pivot).
 func _user_swing() -> float:
@@ -773,12 +786,24 @@ func _follow_quat(ship_q: Quaternion) -> Quaternion:
 		return _ref_quat
 	var up := Basis(_ref_quat).y
 	var f := (fwd as Vector3).normalized()
-	if absf(f.dot(up)) > 0.98:
-		up = Basis(_ref_quat).z
-	var target := Basis.looking_at(f, up).get_rotation_quaternion()
+	# The view's line includes the player's own swing round the ship: a flight
+	# along what they already look down is "behind" however far they swung.
+	var heading := view_heading()
+	var target: Quaternion
+	if absf(user_yaw) > 1.0 or absf(_user_yaw) > 1.0 or absf(user_pitch) > 1.0 or absf(_user_pitch) > 1.0:
+		# Swung: the frame that would put the swung view onto the flight is the
+		# shortest turn from where it is (the frame's own forward is a long way
+		# off the line they look down). Turning the frame onto the flight itself
+		# carried the view past it: a launch along a view swung 90-180° turned
+		# the camera up to 180° and it ended up looking from the ship's front.
+		target = (Quaternion(heading, f) * _ref_quat).normalized()
+	else:
+		if absf(f.dot(up)) > 0.98:
+			up = Basis(_ref_quat).z
+		target = Basis.looking_at(f, up).get_rotation_quaternion()
 	# Already behind the ship (the flight runs along the view): hold the frame
 	# instead of turning onto the exact line, and let the aim shifts fade.
-	var off := rad_to_deg((-Basis(_ref_quat).z).angle_to(f))
+	var off := rad_to_deg(heading.angle_to(f))
 	var swing := smoothstep(BEHIND_NEAR_DEG, BEHIND_FAR_DEG, off)
 	_behind = move_toward(_behind, 1.0 - swing, _dt / 0.3)
 	return _ref_quat.slerp(target, swing)

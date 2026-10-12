@@ -219,7 +219,7 @@ func _show_step() -> void:
 		if ship != null:
 			var ahead := -ship.global_transform.basis.z
 			var r := _root.camera_rig.hull_radius if _root.camera_rig != null else 3.0
-			_root.power_ups.drop(PowerUps.Kind.SHIELD, ship.global_position + ahead * maxf(r * 10.0, 40.0))
+			_root.power_ups.drop(PowerUps.Kind.SHIELD, ship.global_position + ahead * maxf(r * 10.0, 40.0), true)
 	_layout()
 
 
@@ -346,7 +346,7 @@ func _draw() -> void:
 		"kill":
 			_point_at(_enemy_screen(), col, t, short)
 		"powerup":
-			_point_at(_orb_screen(), col, t, short)
+			_point_at_orb(col, t, short)
 
 
 ## The hand bobbing at [param at] (held at the screen edge when it is off
@@ -364,6 +364,49 @@ func _point_at(at: Vector2, col: Color, t: float, short: float) -> void:
 		draw_arc(at, short * (0.06 + 0.012 * sin(t * TAU * 2.0)), 0.0, TAU, 40, rc, 6.0, true)
 	var bob := sin(t * TAU * 2.0) * short * 0.015
 	_draw_hand(at + Vector2(short * 0.03 + bob, short * 0.03 + bob), col, 1.0, false)
+
+
+## The orb step's target. The orb is see-through and a long way off, so a hand
+## alone gets lost: on screen it gets a spinning reticle, a bobbing arrow and
+## the word ORB; off screen a big arrow sits on the edge pointing the way.
+func _point_at_orb(col: Color, t: float, short: float) -> void:
+	var at := _orb_screen()
+	if at == Vector2.INF:
+		return
+	var dark := Color(0, 0, 0, 0.65)
+	var fs := int(short * 0.055)
+	var tip_font := GraffitiStyle.tip_font()
+	var inner := Rect2(Vector2.ZERO, size).grow(-short * 0.12)
+	var wave := sin(t * TAU * 2.0)
+	if inner.has_point(at):
+		var r := short * (0.1 + 0.015 * wave)
+		for k in 4:
+			var a0 := PI * 0.5 * k + t * TAU * 0.5
+			draw_arc(at, r, a0, a0 + PI * 0.32, 12, dark, 13.0, true)
+			draw_arc(at, r, a0, a0 + PI * 0.32, 12, col, 7.0, true)
+		var drop := short * (0.02 + 0.012 * wave)
+		var base := at + Vector2(0.0, -r - short * 0.04 - drop)
+		var head := PackedVector2Array([base + Vector2(0, short * 0.05), base + Vector2(-short * 0.035, -short * 0.01), base + Vector2(short * 0.035, -short * 0.01)])
+		var outline := PackedVector2Array([head[0] + Vector2(0, 7), head[1] + Vector2(-7, -4), head[2] + Vector2(7, -4)])
+		draw_colored_polygon(outline, dark)
+		draw_colored_polygon(head, col)
+		GraffitiStyle.draw_text(self, "ORB", base + Vector2(0, -fs * 0.9), fs, col, 6, tip_font)
+		_draw_hand(at + Vector2(short * 0.03, short * 0.05 + drop), col, 1.0, false)
+		return
+	# Off screen: the arrow rides the edge of the safe area toward it.
+	var c := size * 0.5
+	var d := at - c
+	var n := d.normalized() if d.length() > 1.0 else Vector2.UP
+	var kk := minf(inner.size.x * 0.5 / maxf(absf(n.x), 0.001), inner.size.y * 0.5 / maxf(absf(n.y), 0.001))
+	var tip := c + n * kk + n * short * 0.02 * wave
+	var side := Vector2(-n.y, n.x)
+	var arrow_len := short * 0.12
+	var wid := short * 0.075
+	var poly := PackedVector2Array([tip, tip - n * arrow_len + side * wid, tip - n * arrow_len * 0.65, tip - n * arrow_len - side * wid])
+	var grown := PackedVector2Array([tip + n * 9.0, tip - n * arrow_len + side * (wid + 9.0), tip - n * arrow_len * 0.65 - n * 6.0, tip - n * arrow_len - side * (wid + 9.0)])
+	draw_colored_polygon(grown, dark)
+	draw_colored_polygon(poly, col)
+	GraffitiStyle.draw_text(self, "ORB", tip - n * (arrow_len + fs * 0.9), fs, col, 6, tip_font)
 
 
 ## The pull line between the press and the fingertip: a neon rubber band.
@@ -456,7 +499,7 @@ class _Card:
 			GraffitiStyle.draw_text(self, words, Vector2(size.x * 0.5, font_size * 1.1), font_size, GraffitiStyle.SUN, 6, kf)
 			var lf := GraffitiStyle.head_font()
 			var ls := int(font_size * 0.72)
-			draw_multiline_string(lf, Vector2(24, font_size * 2.3), line, HORIZONTAL_ALIGNMENT_CENTER,
+			draw_multiline_string(lf, Vector2(24, font_size * 2.3+10), line, HORIZONTAL_ALIGNMENT_CENTER,
 				size.x - 48.0, ls, 3, Color.WHITE)
 			return
 		GraffitiStyle.draw_text(self, words, size * 0.5 + Vector2(0, 2), font_size, GraffitiStyle.INK if done else GraffitiStyle.SUN, 0 if done else 6, kf)

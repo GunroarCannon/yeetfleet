@@ -28,6 +28,7 @@ var _cards: Array[_SkrCard] = []
 var _balance := -1.0
 ## What's happening ("" when idle): shown on the note line, and the slabs wait.
 var _doing := ""
+const _WAITING := "WAITING FOR WALLET…"
 ## Card size and spacing, from [method place].
 var _unit := 1.0
 
@@ -56,6 +57,15 @@ func _ready() -> void:
 		_cards.append(c)
 	Chain.notifier.session_changed.connect(refresh)
 	DailySortie.notifier.changed.connect(refresh)
+
+
+func _process(_delta: float) -> void:
+	# The wallet opens a moment after the tap: follow it so the slab can offer
+	# CANCEL, and drop back when it closes.
+	if _doing != _WAITING or not visible or not _sign_in.visible:
+		return
+	if (_sign_in.text == "CANCEL") != Chain.busy():
+		refresh()
 
 
 ## The tab came up: fetch the balance, what's owned, any payment still
@@ -113,9 +123,15 @@ func refresh() -> void:
 		return
 	var signed := Chain.has_session()
 	_sign_in.visible = not signed and Chain.api_url != ""
-	_sign_in.disabled = Chain.busy() or _doing != ""
+	# While the wallet is open the same slab backs out of it: the wallet app can
+	# be left without answering, and nothing else would end that request.
+	var waiting := _doing == _WAITING and Chain.busy()
+	_sign_in.text = "CANCEL" if waiting else "SIGN IN"
+	_sign_in.disabled = (Chain.busy() or _doing != "") and not waiting
 	if Chain.api_url == "":
 		_head.text = "SKR SHOP OFFLINE"
+	elif not signed and Chain.is_connected_wallet():
+		_head.text = "WALLET CONNECTED, NOT SIGNED IN"
 	elif not signed:
 		_head.text = "SIGN IN TO SHOP WITH SKR"
 	else:
@@ -126,6 +142,10 @@ func refresh() -> void:
 	elif _note.text == "" and Chain.pending_count() > 0:
 		_note.text = "A payment is waiting for the leaderboard. It's added once seen."
 		_note.add_theme_color_override("font_color", GraffitiStyle.SUN)
+	elif _note.text == "" and not signed and Chain.api_url != "":
+		# What to do here: one tap, one approval in the wallet, back in the shop.
+		_note.text = "Tap SIGN IN, approve in your wallet, then come back here."
+		_note.add_theme_color_override("font_color", GraffitiStyle.DIM)
 	for c in _cards:
 		c.refresh(signed, _doing != "" or Chain.busy())
 
@@ -139,7 +159,11 @@ func _fetch_balance() -> void:
 
 
 func _on_sign_in() -> void:
-	_doing = "WAITING FOR WALLET…"
+	if _doing != "":
+		# The slab reads CANCEL while the wallet is open.
+		Chain.cancel()
+		return
+	_doing = _WAITING
 	refresh()
 	var r := await Chain.sign_in(Campaign.pilot_name())
 	_doing = ""
@@ -159,7 +183,7 @@ func _on_act(item: String) -> void:
 		refresh()
 		return
 	_note.text = ""
-	_doing = "WAITING FOR WALLET…"
+	_doing = _WAITING
 	refresh()
 	var r := await _buy(item)
 	_doing = ""
@@ -189,7 +213,7 @@ func _buy(item: String) -> Dictionary:
 		var opened := false
 		while _doing != "" and is_inside_tree():
 			opened = opened or Chain.busy()
-			if opened and not Chain.busy() and _doing == "WAITING FOR WALLET…":
+			if opened and not Chain.busy() and _doing == _WAITING:
 				_doing = "CHECKING THE PAYMENT ON CHAIN…"
 				refresh()
 			await get_tree().process_frame
@@ -199,7 +223,15 @@ func _buy(item: String) -> Dictionary:
 
 func _say(r: Dictionary) -> void:
 	if r.ok:
-		_note.text = ""
+		# The wallet signed, but the leaderboard didn't open a session: without
+		# a word here the shop just asked to sign in again, as if nothing happened.
+		var server := String(r.get("server", ""))
+		if server != "":
+			_note.text = Chain.say("server_offline" if server == "offline" else "server_refused")
+			_note.add_theme_color_override("font_color", GraffitiStyle.ORANGE)
+			GameAudio.ui(&"locked")
+		else:
+			_note.text = ""
 		return
 	var words := Chain.say(String(r.code))
 	_note.text = words
